@@ -23,20 +23,15 @@ jobs:
     name: Deploy Landing to Cloudflare Workers
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
         with:
-          node-version-file: '.nvmrc'
+          ref: ${{ github.event.workflow_run.head_sha }}
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
+      - name: Setup runtimes
+        uses: jdx/mise-action@v4
 
       - name: Cache bun downloads
         uses: actions/cache@v4
@@ -62,7 +57,7 @@ jobs:
           echo "## Landing Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Environment:** production" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.event.workflow_run.head_sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Deployed by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Worker:** codemaxxing-landing" >> $GITHUB_STEP_SUMMARY

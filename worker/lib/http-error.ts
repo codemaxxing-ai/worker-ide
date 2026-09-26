@@ -23,7 +23,12 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
  * throw httpError(HttpErrorCode.INTERNAL_ERROR, 'Unexpected failure', 503);
  * ```
  */
-export function httpError(code: HttpErrorCode, message: string, status?: ContentfulStatusCode): HTTPException {
+export function httpError(
+	code: HttpErrorCode,
+	message: string,
+	status?: ContentfulStatusCode,
+	options: { includeCode?: boolean } = {},
+): HTTPException {
 	// eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- DEFAULT_STATUS_CODES values are valid HTTP status codes but typed as `number`
 	const httpStatus = status ?? (DEFAULT_STATUS_CODES[code] as ContentfulStatusCode);
 	return new HTTPException(httpStatus, {
@@ -33,12 +38,9 @@ export function httpError(code: HttpErrorCode, message: string, status?: Content
 		// consumers that read it directly (e.g. the deploy workflow), instead of
 		// silently surfacing as an empty string.
 		message,
-		res: Response.json(
-			{ error: message, code },
-			{
-				status: httpStatus,
-				headers: { 'Content-Type': 'application/json' },
-			},
-		),
+		res: Response.json(options.includeCode === false ? { error: message } : { error: message, code }, {
+			status: httpStatus,
+			headers: { 'Content-Type': 'application/json' },
+		}),
 	});
 }

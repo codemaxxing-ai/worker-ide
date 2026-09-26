@@ -1,49 +1,18 @@
 import type {
-	ContextUtilizationEvent,
-	DoomLoopDetectedEvent,
 	FileChangedEvent,
-	MaxIterationsReachedEvent,
 	PlanCreatedEvent,
-	ReasoningDeltaEvent,
-	RunErrorEvent,
 	SnapshotCreatedEvent,
 	SnapshotDeletedEvent,
 	StatusEvent,
 	StreamEvent,
 	SubAgentActivity,
 	SubAgentActivityEvent,
-	TextDeltaEvent,
-	ToolCallArgumentsDeltaEvent,
-	ToolCallEndEvent,
-	ToolCallStartEvent,
 	ToolResultEvent,
-	TurnCompleteEvent,
-	UsageEvent,
 	UserQuestionEvent,
 } from '@shared/agent-state';
 
-export function statusEvent(message: string): StatusEvent {
+function statusEvent(message: string): StatusEvent {
 	return { type: 'status', message };
-}
-
-export function textDeltaEvent(delta: string): TextDeltaEvent {
-	return { type: 'text-delta', delta };
-}
-
-export function reasoningDeltaEvent(delta: string): ReasoningDeltaEvent {
-	return { type: 'reasoning-delta', delta };
-}
-
-export function toolCallStartEvent(toolCallId: string, toolName: string): ToolCallStartEvent {
-	return { type: 'tool-call-start', toolCallId, toolName };
-}
-
-export function toolCallArgumentsDeltaEvent(toolCallId: string, delta: string): ToolCallArgumentsDeltaEvent {
-	return { type: 'tool-call-args-delta', toolCallId, delta };
-}
-
-export function toolCallEndEvent(toolCallId: string, toolName: string, result: string, isError?: boolean): ToolCallEndEvent {
-	return { type: 'tool-call-end', toolCallId, toolName, result, isError };
 }
 
 function toolResultEvent(toolCallId: string, toolName: string, title: string, metadata: Record<string, unknown>): ToolResultEvent {
@@ -64,7 +33,7 @@ function snapshotCreatedEvent(id: string): SnapshotCreatedEvent {
 	return { type: 'snapshot-created', id };
 }
 
-export function snapshotDeletedEvent(id: string): SnapshotDeletedEvent {
+function snapshotDeletedEvent(id: string): SnapshotDeletedEvent {
 	return { type: 'snapshot-deleted', id };
 }
 
@@ -72,39 +41,8 @@ function userQuestionEvent(question: string, options: string): UserQuestionEvent
 	return { type: 'user-question', question, options };
 }
 
-export function contextUtilizationEvent(estimatedTokens: number, contextWindow: number, utilization: number): ContextUtilizationEvent {
-	return { type: 'context-utilization', estimatedTokens, contextWindow, utilization };
-}
-
-export function usageEvent(
-	input: number,
-	output: number,
-	cacheRead: number,
-	cacheWrite: number,
-	turns: number,
-	lastTurnInputTokens: number,
-): UsageEvent {
-	return { type: 'usage', input, output, cacheRead, cacheWrite, turns, lastTurnInputTokens };
-}
-
-export function turnCompleteEvent(): TurnCompleteEvent {
-	return { type: 'turn-complete' };
-}
-
-export function maxIterationsReachedEvent(iterations: number): MaxIterationsReachedEvent {
-	return { type: 'max-iterations-reached', iterations };
-}
-
-export function doomLoopDetectedEvent(reason: string, toolName: string | undefined, message: string): DoomLoopDetectedEvent {
-	return { type: 'doom-loop-detected', reason, toolName, message };
-}
-
-export function planCreatedEvent(path: string): PlanCreatedEvent {
+function planCreatedEvent(path: string): PlanCreatedEvent {
 	return { type: 'plan-created', path };
-}
-
-export function runErrorEvent(message: string, code?: string): RunErrorEvent {
-	return { type: 'run-error', message, code };
 }
 
 function subAgentActivityEvent(parentToolCallId: string, activity: SubAgentActivity): SubAgentActivityEvent {

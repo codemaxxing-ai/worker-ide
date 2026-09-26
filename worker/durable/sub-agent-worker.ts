@@ -22,7 +22,7 @@ import type { UIMessage } from 'ai';
 const SUB_AGENT_SYSTEM_PROMPT =
 	'You are a focused sub-agent. Complete the delegated task efficiently and end with a concise, self-contained result for the parent agent.';
 
-export interface SubAgentInput {
+interface SubAgentInput {
 	prompt: string;
 	projectId: string;
 	organizationId?: string;

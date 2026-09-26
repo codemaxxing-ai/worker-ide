@@ -10,15 +10,12 @@ import { drizzle } from 'drizzle-orm/d1';
 import { messagePartsHaveUserContent, messagePartsToPromptText } from '@shared/chat-message-parts';
 import {
 	AGENT_SYSTEM_PROMPT,
-	COLLAB_COLORS,
 	DEFAULT_AI_MODEL,
 	MAX_AI_SESSIONS_PER_PROJECT,
-	MAX_IMAGE_ATTACHMENTS,
 	MCP_SERVERS,
 	SUMMARIZATION_AI_MODEL,
 	getModelConfig,
 } from '@shared/constants';
-import { sanitizePreviewElementReference } from '@shared/preview-element';
 import { buildProjectDeepLinkPath } from '@shared/project-deep-link';
 import {
 	pendingChangesFileSchema,
@@ -31,12 +28,18 @@ import { runWithProjectStub } from '@worker/lib/project-fs';
 
 import {
 	buildLoadedExtensionsSummary,
-	getActiveThinkMessages,
-	mergeThinkHistory,
 	reattachForkedMessageState,
 	restoreExtensionManager,
 	runSessionSearch,
 } from './agent-runner-helpers';
+import { getUserMessagePromptText, sanitizeSubmittedUserMessageParts } from './agent-runner-input';
+import {
+	getParticipantColor,
+	getParticipantProfile,
+	isConnectionIdentityAttachment,
+	type ConnectionIdentityAttachment,
+} from './agent-runner-presence';
+import { AgentTurnCoordinator } from './agent-turn-coordinator';
 import {
 	deleteSessionMetadata,
 	getDatabase,
@@ -83,99 +86,6 @@ const PROJECT_ROOT = '/project';
 const MAX_SESSIONS = MAX_AI_SESSIONS_PER_PROJECT;
 
 type AgentConnection = import('agents').Connection<unknown>;
-
-interface ConnectionIdentityAttachment extends SessionParticipantProfile {
-	userId: string;
-}
-
-function isConnectionIdentityAttachment(value: unknown): value is ConnectionIdentityAttachment {
-	if (!value || typeof value !== 'object' || Array.isArray(value)) {
-		return false;
-	}
-
-	return (
-		'userId' in value &&
-		typeof value.userId === 'string' &&
-		'name' in value &&
-		typeof value.name === 'string' &&
-		'color' in value &&
-		typeof value.color === 'string' &&
-		(!('image' in value) || typeof value.image === 'string' || value.image === undefined)
-	);
-}
-
-function hashString(value: string): number {
-	let hash = 0;
-	for (const character of value) {
-		hash = (hash << 5) - hash + (character.codePointAt(0) ?? 0);
-		hash = Math.trunc(hash);
-	}
-	return Math.abs(hash);
-}
-
-function getParticipantColor(userId: string): string {
-	return COLLAB_COLORS[hashString(userId) % COLLAB_COLORS.length] ?? COLLAB_COLORS[0];
-}
-
-function getParticipantProfile(identity: ConnectionIdentityAttachment): SessionParticipantProfile {
-	return {
-		name: identity.name,
-		image: identity.image,
-		color: identity.color,
-	};
-}
-
-function sanitizeSubmittedUserMessageParts(parts: unknown): UserMessagePart[] {
-	if (!Array.isArray(parts)) {
-		return [];
-	}
-
-	const sanitizedParts: UserMessagePart[] = [];
-	let imageCount = 0;
-	for (const part of parts) {
-		if (!part || typeof part !== 'object' || Array.isArray(part) || !('type' in part) || typeof part.type !== 'string') {
-			continue;
-		}
-
-		if (part.type === 'text' && 'content' in part && typeof part.content === 'string') {
-			const previousPart = sanitizedParts.at(-1);
-			if (previousPart?.type === 'text') {
-				previousPart.content += part.content;
-			} else {
-				sanitizedParts.push({ type: 'text', content: part.content });
-			}
-			continue;
-		}
-
-		if (part.type === 'preview-element') {
-			const sanitizedReference = sanitizePreviewElementReference(part);
-			if (sanitizedReference) {
-				sanitizedParts.push({ type: 'preview-element', ...sanitizedReference });
-			}
-			continue;
-		}
-
-		if (
-			part.type === 'image' &&
-			imageCount < MAX_IMAGE_ATTACHMENTS &&
-			'url' in part &&
-			typeof part.url === 'string' &&
-			part.url.startsWith('data:') &&
-			'mediaType' in part &&
-			typeof part.mediaType === 'string'
-		) {
-			const name = 'name' in part && typeof part.name === 'string' ? part.name : undefined;
-			sanitizedParts.push({ type: 'image', url: part.url, mediaType: part.mediaType, name });
-			imageCount++;
-		}
-	}
-
-	return sanitizedParts;
-}
-
-function getUserMessagePromptText(parts: readonly UserMessagePart[]): string {
-	return messagePartsToPromptText(parts).trim();
-}
 
 export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerClient {
 	// The instance name (agent:<projectId>) is not sensitive — explicitly opt in
@@ -283,7 +193,30 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 	});
 	private sessionInitiatorUserIds = new Map<string, string>();
 	private requestOriginContext?: RequestOriginContext;
-	private sessionMutationTails = new Map<string, Promise<void>>();
+	private turnCoordinator = new AgentTurnCoordinator({
+		getCurrentSession: () => this.state.currentSession,
+		updateSessionState: (sessionId, patch) => this.updateSessionState(sessionId, patch),
+		getConfiguredTurnAgent: (sessionId, model) => this.getSessionTurnAgent(sessionId, model),
+		getTurnAgent: (sessionId) => this.subAgent(SessionTurnAgent, sessionId),
+		getSessionStore: () => this.agentSessionStore,
+		getReviewQueue: () => this.reviewQueue,
+		refreshReviewState: () => this.refreshReviewState(),
+		refreshSessionsList: () => this.refreshSessionsList(),
+		hasCompletion: (sessionId, submissionId) =>
+			this.sql<{ submissionId: string }>`
+				SELECT submission_id as submissionId
+				FROM think_turn_completions
+				WHERE session_id = ${sessionId} AND submission_id = ${submissionId}
+				LIMIT 1
+			`[0] !== undefined,
+		markCompletion: (sessionId, submissionId) => {
+			this.sql`
+				INSERT OR IGNORE INTO think_turn_completions (session_id, submission_id, completed_at)
+				VALUES (${sessionId}, ${submissionId}, ${Date.now()})
+			`;
+		},
+		pruneOldSessions: () => this.pruneOldSessions(this.getProjectId()),
+	});
 	private sessionAnalytics = new Map<
 		string,
 		{ inputTokens: number; outputTokens: number; durationMs: number; toolCallCount: number; turnNumber: number }
@@ -319,27 +252,6 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 			!nextState.sessionParticipants
 		) {
 			throw new TypeError('AgentState.sessionParticipants must be an object');
-		}
-	}
-
-	private async withSessionMutationLock<T>(sessionId: string, callback: () => Promise<T>): Promise<T> {
-		const previousTail = this.sessionMutationTails.get(sessionId) ?? Promise.resolve();
-		let resolveCurrentTail: (() => void) | undefined;
-		const currentTail = new Promise<void>((resolve) => {
-			resolveCurrentTail = resolve;
-		});
-		const nextTail = previousTail.catch(() => {}).then(() => currentTail);
-		this.sessionMutationTails.set(sessionId, nextTail);
-
-		await previousTail.catch(() => {});
-
-		try {
-			return await callback();
-		} finally {
-			resolveCurrentTail?.();
-			if (this.sessionMutationTails.get(sessionId) === nextTail) {
-				this.sessionMutationTails.delete(sessionId);
-			}
 		}
 	}
 
@@ -717,7 +629,7 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 
 		const resolvedSessionId = request.sessionId ?? crypto.randomUUID().replaceAll('-', '').slice(0, 16);
 
-		return this.withSessionMutationLock(resolvedSessionId, async () => {
+		return this.turnCoordinator.withSessionMutationLock(resolvedSessionId, async () => {
 			const callerIdentity = this.getCurrentCallerIdentity();
 			const authenticatedUserId = callerIdentity?.userId;
 			if (callerIdentity) {
@@ -749,25 +661,18 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 				if (!success) throw new Error('Rate limit exceeded. Please wait before making more AI requests.');
 			}
 
-			const sessionAgent = await this.getSessionTurnAgent(resolvedSessionId, model);
-			const submission = await sessionAgent.submitTurn(userMessage, {
-				mode,
+			return this.turnCoordinator.submitMessage(
+				resolvedSessionId,
+				userMessage,
 				model,
-				initiatorUserId: authenticatedUserId,
-				requestOriginContext: this.requestOriginContext,
-			});
-			const liveMessages = current?.sessionId === resolvedSessionId ? current.messages : [];
-			if (!liveMessages.some((message) => message.id === userMessage.id)) {
-				this.updateSessionState(resolvedSessionId, {
-					status: 'running',
-					statusText: shouldQueue ? current?.statusText : 'Thinking...',
-					messages: [...liveMessages, userMessage],
-					stopRequested: false,
-					error: undefined,
-				});
-			}
-			await this.refreshSessionsList();
-			return { sessionId: resolvedSessionId, queued: shouldQueue, started: submission.accepted && !shouldQueue };
+				{
+					mode,
+					model,
+					initiatorUserId: authenticatedUserId,
+					requestOriginContext: this.requestOriginContext,
+				},
+				current,
+			);
 		});
 	}
 
@@ -775,29 +680,9 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 	async removeQueuedMessage(sessionId: string, messageId: string): Promise<{ removed: boolean }> {
 		const callerIdentity = this.getCurrentCallerIdentity();
 
-		return this.withSessionMutationLock(sessionId, async () => {
-			const messages = this.state.currentSession?.sessionId === sessionId ? this.state.currentSession.messages : [];
-			const targetMessage = messages.find(
-				(message) => message.id === messageId && message.role === 'user' && message.metadata?.request?.state === 'queued',
-			);
-			if (!targetMessage) {
-				return { removed: false };
-			}
-
-			if (targetMessage.authorUserId && targetMessage.authorUserId !== callerIdentity?.userId) {
-				throw new Error('Not authorized to remove this queued message.');
-			}
-
-			const sessionAgent = await this.subAgent(SessionTurnAgent, sessionId);
-			await sessionAgent.cancelSubmissionById(messageId);
-			if (this.state.currentSession?.sessionId === sessionId) {
-				this.updateSessionState(sessionId, {
-					messages: this.state.currentSession.messages.filter((message) => message.id !== messageId),
-				});
-			}
-
-			return { removed: true };
-		});
+		return this.turnCoordinator.withSessionMutationLock(sessionId, () =>
+			this.turnCoordinator.removeQueuedMessage(sessionId, messageId, callerIdentity?.userId),
+		);
 	}
 
 	@callable()
@@ -806,7 +691,7 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 		const model = request.model ?? DEFAULT_AI_MODEL;
 		const resolvedSessionId = request.sessionId ?? crypto.randomUUID().replaceAll('-', '').slice(0, 16);
 
-		return this.withSessionMutationLock(resolvedSessionId, async () => {
+		return this.turnCoordinator.withSessionMutationLock(resolvedSessionId, async () => {
 			const callerIdentity = this.getCurrentCallerIdentity();
 			const authenticatedUserId = callerIdentity?.userId;
 			const normalizedMessages = request.messages.map((message) => {
@@ -847,22 +732,12 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 				const { success } = await env.AI_RATE_LIMITER.limit({ key: this.getProjectId() });
 				if (!success) throw new Error('Rate limit exceeded. Please wait before making more AI requests.');
 			}
-			const sessionAgent = await this.getSessionTurnAgent(resolvedSessionId, model);
-			await sessionAgent.replaceHistory(normalizedMessages.slice(0, latestUserIndex));
-			await sessionAgent.submitTurn(latestUserMessage, {
+			return this.turnCoordinator.startRun(resolvedSessionId, normalizedMessages.slice(0, latestUserIndex), latestUserMessage, model, {
 				mode,
 				model,
 				initiatorUserId: authenticatedUserId,
 				requestOriginContext: this.requestOriginContext,
 			});
-			this.updateSessionState(resolvedSessionId, {
-				status: 'running',
-				statusText: 'Thinking...',
-				messages: [latestUserMessage],
-				stopRequested: false,
-				error: undefined,
-			});
-			return { sessionId: resolvedSessionId };
 		});
 	}
 
@@ -870,9 +745,7 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 	async abortRun(sessionId?: string): Promise<void> {
 		const resolvedSessionId = sessionId ?? this.state.currentSession?.sessionId;
 		if (!resolvedSessionId) return;
-		this.updateSessionState(resolvedSessionId, { stopRequested: true, statusText: 'Stopping...' });
-		const sessionAgent = await this.subAgent(SessionTurnAgent, resolvedSessionId);
-		await sessionAgent.cancelActiveSubmissions();
+		await this.turnCoordinator.abortRun(resolvedSessionId);
 	}
 
 	/**
@@ -1194,19 +1067,7 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 	}
 
 	async beginThinkTurn(sessionId: string, submissionId: string): Promise<void> {
-		const current = this.state.currentSession;
-		if (current?.sessionId !== sessionId) return;
-		this.updateSessionState(sessionId, {
-			status: 'running',
-			statusText: 'Thinking...',
-			messages: current.messages.map((message) => {
-				if (message.id !== submissionId || message.role !== 'user' || !message.metadata?.request) return message;
-				return {
-					...message,
-					metadata: { ...message.metadata, request: { ...message.metadata.request, state: 'committed' } },
-				};
-			}),
-		});
+		this.turnCoordinator.beginThinkTurn(sessionId, submissionId);
 	}
 
 	async completeThinkTurn(
@@ -1217,50 +1078,7 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 		error?: string,
 		activeSubmissions: Array<{ submissionId: string; status: 'pending' | 'running' }> = [],
 	): Promise<void> {
-		const existingCompletion = this.sql<{ submissionId: string }>`
-			SELECT submission_id as submissionId
-			FROM think_turn_completions
-			WHERE session_id = ${sessionId} AND submission_id = ${submissionId}
-			LIMIT 1
-		`[0];
-		if (existingCompletion) return;
-
-		const persistedSession = await this.agentSessionStore.read(sessionId);
-		const persistedHistory = persistedSession?.history ?? [];
-		const liveHistory = this.state.currentSession?.sessionId === sessionId ? this.state.currentSession.messages : [];
-		const mergedHistory = mergeThinkHistory(history, [...persistedHistory, ...liveHistory]);
-		const hasActiveSubmission = activeSubmissions.length > 0;
-		await this.agentSessionStore.persistHistory(sessionId, mergedHistory, false);
-		this.agentSessionStore.writeMetadata(sessionId, {
-			status: hasActiveSubmission ? 'running' : status === 'completed' ? 'completed' : status,
-			errorMessage: hasActiveSubmission ? undefined : error,
-			stopRequested: false,
-		});
-		const current = this.state.currentSession;
-		if (current?.sessionId === sessionId) {
-			const activeMessages = getActiveThinkMessages(current.messages, activeSubmissions);
-			this.reviewQueue.syncSessionPendingChanges(sessionId, current.pendingChanges);
-			this.refreshReviewState();
-			this.updateSessionState(sessionId, {
-				status: hasActiveSubmission ? 'running' : status === 'completed' ? 'completed' : status,
-				statusText: hasActiveSubmission ? 'Thinking...' : undefined,
-				error: hasActiveSubmission ? undefined : error ? { message: error } : undefined,
-				messages: activeMessages,
-				historyVersion: current.historyVersion + 1,
-				stopRequested: false,
-				toolMetadata: {},
-				toolErrors: {},
-				subAgentActivities: {},
-			});
-		}
-		await this.refreshSessionsList();
-		this.sql`
-			INSERT OR IGNORE INTO think_turn_completions (session_id, submission_id, completed_at)
-			VALUES (${sessionId}, ${submissionId}, ${Date.now()})
-		`;
-		await this.pruneOldSessions(this.getProjectId()).catch((pruneError) => {
-			console.error('[AgentRunner] Session pruning failed:', pruneError);
-		});
+		await this.turnCoordinator.completeThinkTurn(sessionId, submissionId, history, status, error, activeSubmissions);
 	}
 
 	// =========================================================================

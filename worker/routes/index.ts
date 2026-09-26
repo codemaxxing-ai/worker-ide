@@ -47,3 +47,4 @@ export type { UserRoutes } from './user-routes';
 export type { OrgRoutes } from './org-routes';
 export type { TransferRoutes } from './transfer-routes';
 export type { CloudflareOAuthRoutes } from './cloudflare-oauth-routes';
+export type { RootApiRoutes } from './root-routes';

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useCallback } from 'react';
 
 import { Tooltip, TooltipProvider } from '@/components/ui/tooltip';
+import { createRootApiClient } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 const TRUNCATED_LENGTH = 7;
 const GIT_SHA = __APP_VERSION__;
@@ -16,7 +17,7 @@ function useCloudflareVersion(): CloudflareVersionMetadata | undefined {
 	const query = useQuery({
 		queryKey: ['cf-version'],
 		queryFn: async () => {
-			const response = await fetch('/api/version');
+			const response = await createRootApiClient().version.$get({});
 			if (!response.ok) return;
 			const data: CloudflareVersionMetadata = await response.json();
 			return data.id ? data : undefined;

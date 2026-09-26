@@ -1,17 +1,12 @@
-import {
-	prepareFileTreeInput,
-	type ContextMenuItem,
-	type ContextMenuOpenContext,
-	type GitStatus,
-	type GitStatusEntry,
-} from '@pierre/trees';
+import { prepareFileTreeInput, type ContextMenuItem, type ContextMenuOpenContext } from '@pierre/trees';
 import { FileTree as TreesFileTree, useFileTree as useTreesModel } from '@pierre/trees/react';
-import { FilePlus, FolderPlus, Pencil, Trash2 } from 'lucide-react';
+import { FilePlus, FolderPlus } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useSyncExternalStore } from 'react';
-import { createPortal } from 'react-dom';
 
 import { cn } from '@/lib/utils';
-import { PROTECTED_FILES } from '@shared/constants';
+
+import { FileTreeContextMenu } from './file-tree-context-menu';
+import { buildGitStatus, buildPresence, isProtectedTreePath, toStorePath, toTreePath, type PresenceIcon } from './file-tree-model';
 
 import type { FileInfo, GitFileStatus, Participant } from '@shared/types';
 
@@ -29,110 +24,6 @@ export interface FileTreeProperties {
 	participants?: Participant[];
 	gitStatusMap?: Map<string, GitFileStatus>;
 	className?: string;
-}
-
-// @pierre/trees uses canonical, leading-slash-free paths and marks directories
-// with a trailing slash. The rest of the IDE uses leading-slash paths
-// (e.g. "/src/main.ts") and the git status map uses no leading slash.
-
-function toTreePath(storePath: string, isDirectory: boolean): string {
-	const stripped = storePath.replace(/^\/+/, '');
-	return isDirectory ? `${stripped}/` : stripped;
-}
-
-function toStorePath(treePath: string): string {
-	const withoutTrailing = treePath.endsWith('/') ? treePath.slice(0, -1) : treePath;
-	return `/${withoutTrailing}`;
-}
-
-function isProtectedTreePath(treePath: string): boolean {
-	return PROTECTED_FILES.has(toStorePath(treePath));
-}
-
-function mapGitStatus(status: GitFileStatus | undefined): GitStatus | undefined {
-	if (!status || status === 'unmodified') return undefined;
-
-	switch (status) {
-		case 'modified':
-		case 'modified-staged':
-		case 'modified-partially-staged': {
-			return 'modified';
-		}
-		case 'untracked':
-		case 'untracked-staged':
-		case 'untracked-partially-staged': {
-			return 'untracked';
-		}
-		case 'deleted':
-		case 'deleted-staged': {
-			return 'deleted';
-		}
-		default: {
-			return undefined;
-		}
-	}
-}
-
-// Collaborator presence is shown as small, per-user-colored dots in the row's
-// decoration lane. The lane only accepts a single icon, so we synthesize one
-// sprite symbol per distinct color-combination currently present and reference
-// it per file. Stacking is capped so a busy file renders predictably.
-const PRESENCE_DOT_RADIUS = 3.5;
-const PRESENCE_DOT_STEP = 4.5; // horizontal offset between overlapping dots
-const PRESENCE_MAX_DOTS = 3;
-const PRESENCE_DISPLAY_HEIGHT = 9; // rendered px height of the indicator
-
-interface PresenceIcon {
-	name: string;
-	width: number;
-	height: number;
-	viewBox: string;
-	count: number;
-}
-
-function buildPresence(participants: Participant[]): { spriteSheet: string; byFile: Map<string, PresenceIcon> } {
-	const colorsByFile = new Map<string, string[]>();
-	for (const participant of participants) {
-		if (!participant.file) continue;
-		const list = colorsByFile.get(participant.file) ?? [];
-		list.push(participant.color);
-		colorsByFile.set(participant.file, list);
-	}
-
-	const symbolMarkupById = new Map<string, string>();
-	const idByCombo = new Map<string, string>();
-	const byFile = new Map<string, PresenceIcon>();
-
-	for (const [file, colors] of colorsByFile) {
-		const capped = colors.slice(0, PRESENCE_MAX_DOTS);
-		const comboKey = capped.join('|');
-		let id = idByCombo.get(comboKey);
-		const intrinsicWidth = PRESENCE_DOT_RADIUS * 2 + (capped.length - 1) * PRESENCE_DOT_STEP;
-		const intrinsicHeight = PRESENCE_DOT_RADIUS * 2;
-		const viewBox = `0 0 ${intrinsicWidth} ${intrinsicHeight}`;
-		if (!id) {
-			id = `presence-${idByCombo.size}`;
-			idByCombo.set(comboKey, id);
-			const circles = capped
-				.map(
-					(color, index) =>
-						`<circle cx="${PRESENCE_DOT_RADIUS + index * PRESENCE_DOT_STEP}" cy="${PRESENCE_DOT_RADIUS}" r="${PRESENCE_DOT_RADIUS}" fill="${color}" stroke="var(--color-bg-secondary)" stroke-width="0.75" />`,
-				)
-				.join('');
-			symbolMarkupById.set(id, `<symbol id="${id}" viewBox="${viewBox}">${circles}</symbol>`);
-		}
-		byFile.set(file, {
-			name: id,
-			viewBox,
-			height: PRESENCE_DISPLAY_HEIGHT,
-			width: (intrinsicWidth / intrinsicHeight) * PRESENCE_DISPLAY_HEIGHT,
-			count: colors.length,
-		});
-	}
-
-	const spriteSheet =
-		symbolMarkupById.size > 0 ? `<svg xmlns="http://www.w3.org/2000/svg">${[...symbolMarkupById.values()].join('')}</svg>` : '';
-	return { spriteSheet, byFile };
 }
 
 // Host styling owns layout (width/height); everything inside the tree is driven
@@ -555,20 +446,6 @@ function FileTreeContent({
 	);
 }
 
-function buildGitStatus(files: FileInfo[], gitStatusMap: Map<string, GitFileStatus> | undefined): GitStatusEntry[] {
-	if (!gitStatusMap) return [];
-	const entries: GitStatusEntry[] = [];
-	for (const file of files) {
-		if (file.isDirectory) continue;
-		const key = file.path.startsWith('/') ? file.path.slice(1) : file.path;
-		const status = mapGitStatus(gitStatusMap.get(key));
-		if (status) {
-			entries.push({ path: key, status });
-		}
-	}
-	return entries;
-}
-
 function HeaderButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
 	return (
 		<button
@@ -588,142 +465,6 @@ function HeaderButton({ label, onClick, children }: { label: string; onClick: ()
 			)}
 		>
 			{children}
-		</button>
-	);
-}
-
-interface FileTreeContextMenuProperties {
-	item: ContextMenuItem;
-	context: ContextMenuOpenContext;
-	model: ReturnType<typeof useTreesModel>['model'];
-	onCreateFile?: (path: string) => void;
-	onCreateFolder?: (path: string) => void;
-	onDeleteFile?: (path: string) => void;
-	allowRename: boolean;
-}
-
-function FileTreeContextMenu({
-	item,
-	context,
-	model,
-	onCreateFile,
-	onCreateFolder,
-	onDeleteFile,
-	allowRename,
-}: FileTreeContextMenuProperties) {
-	const storePath = toStorePath(item.path);
-	const isProtected = PROTECTED_FILES.has(storePath);
-	const directory = item.kind === 'directory' ? item.path.replace(/\/$/, '') : item.path.split('/').slice(0, -1).join('/');
-	const menuReference = useRef<HTMLDivElement>(null);
-
-	// The library's outside-click dismissal does not catch panel resize-handle
-	// drags (their pointer capture swallows the event) or scrolling, which would
-	// leave the fixed-position menu stranded. Close it on any outside pointer
-	// press, scroll, or window resize.
-	useEffect(() => {
-		const closeOnOutsidePointer = (event: Event) => {
-			const target = event.target instanceof Node ? event.target : undefined;
-			if (target && menuReference.current?.contains(target)) return;
-			context.close();
-		};
-		const close = () => context.close();
-		document.addEventListener('mousedown', closeOnOutsidePointer, true);
-		document.addEventListener('pointerdown', closeOnOutsidePointer, true);
-		globalThis.addEventListener('resize', close);
-		globalThis.addEventListener('scroll', close, true);
-		return () => {
-			document.removeEventListener('mousedown', closeOnOutsidePointer, true);
-			document.removeEventListener('pointerdown', closeOnOutsidePointer, true);
-			globalThis.removeEventListener('resize', close);
-			globalThis.removeEventListener('scroll', close, true);
-		};
-	}, [context]);
-
-	const promptCreate = (kind: 'file' | 'folder') => {
-		context.close({ restoreFocus: false });
-		const name = globalThis.prompt(`New ${kind} name`, '');
-		if (!name?.trim()) return;
-		const treePath = directory ? `${directory}/${name.trim()}` : name.trim();
-		const target = toStorePath(treePath);
-		if (kind === 'file') onCreateFile?.(target);
-		else onCreateFolder?.(target);
-	};
-
-	// Render into a body-level portal so the menu escapes the file-tree panel's
-	// `overflow-hidden` clipping and stacks above the resizable-panel drag
-	// handles. `data-file-tree-context-menu-root` keeps internal clicks from
-	// being treated as outside clicks by the library's dismiss logic.
-	return createPortal(
-		<div
-			ref={menuReference}
-			role="menu"
-			data-file-tree-context-menu-root="true"
-			style={{
-				position: 'fixed',
-				top: context.anchorRect.bottom,
-				left: Math.min(context.anchorRect.left, globalThis.innerWidth - 176),
-				zIndex: 9999,
-			}}
-			className={cn(`
-				min-w-40 rounded-md border border-border bg-bg-secondary p-1 text-sm
-				shadow-lg
-			`)}
-		>
-			{allowRename && item.kind === 'file' && !isProtected && (
-				<MenuItem
-					label="Rename"
-					icon={<Pencil className="size-3.5" />}
-					onClick={() => {
-						context.close({ restoreFocus: false });
-						model.startRenaming(item.path);
-					}}
-				/>
-			)}
-			{onCreateFile && <MenuItem label="New file" icon={<FilePlus className="size-3.5" />} onClick={() => promptCreate('file')} />}
-			{onCreateFolder && <MenuItem label="New folder" icon={<FolderPlus className="size-3.5" />} onClick={() => promptCreate('folder')} />}
-			{onDeleteFile && !isProtected && (
-				<MenuItem
-					label="Delete"
-					destructive
-					icon={<Trash2 className="size-3.5" />}
-					onClick={() => {
-						context.close();
-						onDeleteFile(storePath);
-					}}
-				/>
-			)}
-		</div>,
-		document.body,
-	);
-}
-
-function MenuItem({
-	label,
-	icon,
-	onClick,
-	destructive,
-}: {
-	label: string;
-	icon: React.ReactNode;
-	onClick: () => void;
-	destructive?: boolean;
-}) {
-	return (
-		<button
-			type="button"
-			role="menuitem"
-			onClick={onClick}
-			className={cn(
-				`
-					flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5
-					text-left
-				`,
-				'hover:bg-bg-tertiary',
-				destructive ? 'text-error' : 'text-text-primary',
-			)}
-		>
-			{icon}
-			<span>{label}</span>
 		</button>
 	);
 }

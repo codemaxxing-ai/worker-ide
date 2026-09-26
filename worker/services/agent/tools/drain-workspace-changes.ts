@@ -41,14 +41,14 @@ export async function drainWorkspaceChanges(
 ): Promise<void> {
 	// Per-session drain: only the changes this session made, each enriched with
 	// before/after content (true no-ops already dropped by the DO).
-	const changes = await context.fsStub.drainWorkspaceChanges(context.sessionId);
+	using changes = await context.fsStub.drainWorkspaceChanges(context.sessionId);
 	const seen = new Set<string>();
 	const hmrPaths: string[] = [];
 
 	for (const change of changes) {
 		const path = change.path;
 		if (seen.has(path)) continue;
-		if (path.startsWith('/.git') || isHiddenPath(path)) continue;
+		if (isHiddenPath(path)) continue;
 		seen.add(path);
 
 		const action = change.type === 'create' ? 'create' : change.type === 'delete' ? 'delete' : 'edit';

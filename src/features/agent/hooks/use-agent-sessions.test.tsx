@@ -1,6 +1,7 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getActiveSessionId, setActiveSessionId } from '@/lib/project-storage';
 import { useStore } from '@/lib/store';
 
 import { useAgentSessions } from './use-agent-sessions';
@@ -84,6 +85,47 @@ beforeEach(() => {
 });
 
 describe('useAgentSessions', () => {
+	it('preserves the active selection when deleting another session', async () => {
+		const state: AgentState = {
+			currentSession: createCurrentSession('active-session'),
+			sessions: [],
+			sessionParticipants: {},
+			reviewEntries: {},
+			reviewSummary: { unresolvedCount: 0, reviewVersion: 0, sessionCounts: {} },
+		};
+		const agent = createAgent(state);
+		agent.stub.deleteSession = vi.fn(async () => {});
+		const { result } = renderHook(() => useAgentSessions({ projectId: 'project-delete', agent, agentConnectionState: 'connected' }));
+		setActiveSessionId('project-delete', 'active-session');
+
+		await act(async () => {
+			await result.current.handleDeleteSession('other-session');
+		});
+
+		expect(getActiveSessionId('project-delete')).toBe('active-session');
+	});
+
+	it('ignores a manual session load that completes after a newer selection', async () => {
+		const agent = createAgent();
+		const first = Promise.withResolvers<AiSession | undefined>();
+		const second = Promise.withResolvers<AiSession | undefined>();
+		agent.stub.loadSession = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+		const { result } = renderHook(() => useAgentSessions({ projectId: 'project-load', agent, agentConnectionState: 'connected' }));
+		act(() => {
+			result.current.handleLoadSession('first');
+			result.current.handleLoadSession('second');
+		});
+
+		await act(async () => {
+			second.resolve({ id: 'second', title: 'Second', createdAt: 2, history: [] });
+		});
+		await act(async () => {
+			first.resolve({ id: 'first', title: 'First', createdAt: 1, history: [] });
+		});
+
+		expect(getActiveSessionId('project-load')).toBe('second');
+	});
+
 	it('syncs project review queue changes when agent state mutates in place', async () => {
 		const state: AgentState = {
 			currentSession: createCurrentSession('session-1'),

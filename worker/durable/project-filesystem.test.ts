@@ -132,6 +132,22 @@ describe('ProjectFilesystem project snapshot', () => {
 });
 
 describe('ProjectFilesystem change drain', () => {
+	it('tracks Git configuration and GitHub files without exposing repository internals', async () => {
+		const stub = getFilesystemStub('test-fs-drain-git-adjacent');
+		const paths = ['/.gitignore', '/.gitattributes', '/.github/workflows/ci.yml'];
+		for (const path of paths) {
+			await stub.wsWriteFile(path, 'before');
+			await stub.wsWriteFile(path, 'after', 'session-git-adjacent');
+		}
+		await stub.wsWriteFile('/.git/config', '[core]', 'session-git-adjacent');
+
+		const changes = await stub.drainWorkspaceChanges('session-git-adjacent');
+		expect(changes.map((change) => change.path).toSorted()).toEqual(paths.toSorted());
+		for (const change of changes) {
+			expect(change).toMatchObject({ type: 'update', beforeContent: 'before', afterContent: 'after' });
+		}
+	});
+
 	it('drains the writes for a session and clears them', async () => {
 		const stub = getFilesystemStub('test-fs-drain');
 

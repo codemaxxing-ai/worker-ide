@@ -37,7 +37,7 @@ export interface TurnExecutionConfiguration {
 	requestOriginContext?: RequestOriginContext;
 }
 
-export interface ActiveTurnConfiguration extends TurnExecutionConfiguration {
+interface ActiveTurnConfiguration extends TurnExecutionConfiguration {
 	submissionId: string;
 }
 

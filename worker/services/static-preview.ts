@@ -6,25 +6,19 @@
  * `vite-host/runtimes/react-spa.ts`); the runtime registry selects it for any
  * project a build-host runtime (e.g. vinext) does not claim.
  */
-import { originalPositionFor, TraceMap } from '@jridgewell/trace-mapping';
 import { source as chobitsuSource, hash as chobitsuHash } from 'chobitsu?raw-minified';
 import { env, exports } from 'cloudflare:workers';
 
 import { HIDDEN_ENTRIES, STORAGE_BINDING_NAME, WORKERS_COMPATIBILITY_DATE } from '@shared/constants';
 import { parseJsonc } from '@shared/jsonc';
-import {
-	isAllowedPreviewExternalModuleUrl,
-	parsePreviewExternalModuleRequest,
-	parsePreviewRequest,
-	PREVIEW_EXTERNAL_MODULE_PATH,
-} from '@shared/preview-path';
+import { parsePreviewExternalModuleRequest, parsePreviewRequest, PREVIEW_EXTERNAL_MODULE_PATH } from '@shared/preview-path';
 import { resolveAssetSettings } from '@shared/types';
 import { fs } from '@worker/lib/project-fs';
 
 import { bundleFiles } from './bundle-service';
 import { BundleDependencyError } from './bundler-client';
 import { parseDependencyErrorsFromMessage } from './dependency-error-parser';
-import { processHTML, rewriteExternalModuleImports, toEsbuildTsconfigRaw, transformModule, type FileSystem } from './transform-service';
+import { processHTML, toEsbuildTsconfigRaw, transformModule, type FileSystem } from './transform-service';
 import { coordinatorNamespace } from '../lib/durable-object-namespaces';
 import { stripPreviewRequestCredentials } from '../lib/preview-request-headers';
 import {
@@ -46,6 +40,8 @@ import {
 import { readBindingsConfig } from '../lib/protected-files';
 import { resolveStorageQuotaForProject } from '../lib/storage-quota';
 import { withSpan } from '../lib/tracing';
+import { serveExternalModule } from './static-preview/external-modules';
+import { cleanBuildErrorMessage, resolveOriginalLocationFromStack } from './static-preview/preview-errors';
 
 import type { ResolvedAssetSettings, ServerError } from '@shared/types';
 import type { ServerMessage } from '@shared/ws-messages';
@@ -53,11 +49,6 @@ const PREVIEW_API_WORKER_VERSION = 'preview-api-v2';
 const PREVIEW_API_WRAPPER_MODULE = 'worker.js';
 const PREVIEW_API_USER_MODULE = 'user-worker.js';
 const PREVIEW_RUNTIME_ERROR_HEADER = 'X-Worker-Ide-Preview-Runtime-Error';
-interface ExternalModuleCacheEntry {
-	bodyText: string;
-	contentType: string;
-	finalUrl: string;
-}
 
 /**
  * Build the CSP header for preview HTML responses.
@@ -121,18 +112,6 @@ const INTERNAL_SCRIPTS: Record<string, string> = {
 	'/__preview-runtime.js': previewRuntimeSource,
 	'/__react-refresh-preamble.js': reactRefreshPreambleSource,
 };
-
-/**
- * Strip internal esbuild noise from error messages shown to users.
- * Removes prefixes like "ERROR: [plugin: virtual-fs]" while keeping
- * the human-readable message intact.
- */
-function cleanBuildErrorMessage(message: string): string {
-	return message
-		.replaceAll(/\[plugin: [^\]]+\]\s*/g, '')
-		.replaceAll(/\bERROR:\s*/g, '')
-		.trim();
-}
 
 export class StaticReactPreview {
 	constructor(
@@ -238,7 +217,7 @@ export class StaticReactPreview {
 
 		const externalModuleRequest = parsePreviewExternalModuleRequest(url.pathname + url.search);
 		if (externalModuleRequest !== undefined) {
-			return this.serveExternalModule(externalModuleRequest.externalUrl, externalModuleRequest.timestamp, ideOrigin);
+			return serveExternalModule(externalModuleRequest.externalUrl, externalModuleRequest.timestamp);
 		}
 		if (filePath === PREVIEW_EXTERNAL_MODULE_PATH) {
 			return new Response('Invalid external module request', {
@@ -322,6 +301,7 @@ export class StaticReactPreview {
 			const transformed = await transformModule(filePath, textContent, {
 				fs: viteFs,
 				projectRoot: this.projectRoot,
+				projectId: this.projectId,
 				knownDependencies,
 				requestTimestamp: previewRequest.timestamp,
 			});
@@ -503,72 +483,6 @@ export class StaticReactPreview {
 		};
 		return contentTypes[extension] || 'text/plain';
 	}
-	private async loadExternalModule(externalUrl: string): Promise<ExternalModuleCacheEntry> {
-		return this.fetchExternalModule(externalUrl);
-	}
-
-	private async fetchExternalModule(externalUrl: string): Promise<ExternalModuleCacheEntry> {
-		const upstreamResponse = await fetch(externalUrl, { redirect: 'follow' });
-		if (!upstreamResponse.ok) {
-			throw new Error(`Failed to load external module ${externalUrl} (${upstreamResponse.status} ${upstreamResponse.statusText})`);
-		}
-
-		const finalUrl = new URL(upstreamResponse.url);
-		if (!isAllowedPreviewExternalModuleUrl(finalUrl)) {
-			throw new Error(`External module redirect target is not allowed: ${finalUrl.href}`);
-		}
-
-		const contentTypeHeader = upstreamResponse.headers.get('content-type') || 'application/javascript';
-		const contentType = contentTypeHeader.split(';')[0]?.trim() || 'application/javascript';
-		const bodyText = await upstreamResponse.text();
-
-		return {
-			bodyText,
-			contentType,
-			finalUrl: upstreamResponse.url,
-		};
-	}
-
-	private async serveExternalModule(externalUrl: string, requestTimestamp: string | undefined, _ideOrigin: string): Promise<Response> {
-		try {
-			const requestUrl = new URL(externalUrl);
-			if (!isAllowedPreviewExternalModuleUrl(requestUrl)) {
-				throw new Error(`Unsupported external module URL: ${requestUrl.href}`);
-			}
-
-			const externalModule = await this.loadExternalModule(externalUrl);
-
-			if (
-				externalModule.contentType.includes('javascript') ||
-				externalModule.contentType.includes('ecmascript') ||
-				externalModule.contentType === 'text/plain'
-			) {
-				return new Response(rewriteExternalModuleImports(externalModule.bodyText, externalModule.finalUrl, requestTimestamp), {
-					headers: {
-						'Content-Type': 'application/javascript',
-						'Cache-Control': 'public, max-age=1800',
-					},
-				});
-			}
-
-			return new Response(externalModule.bodyText, {
-				headers: {
-					'Content-Type': externalModule.contentType,
-					'Cache-Control': 'public, max-age=1800',
-				},
-			});
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			const errorModule = `throw new Error(${JSON.stringify(cleanBuildErrorMessage(errorMessage))});`;
-			return new Response(errorModule, {
-				headers: {
-					'Content-Type': 'application/javascript',
-					'Cache-Control': 'no-cache',
-				},
-			});
-		}
-	}
-
 	private async serveHtmlFile(textContent: string, filePath: string, url: URL, ideOrigin: string, viteFs: FileSystem): Promise<Response> {
 		const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
 		const wsUrl = `${protocol}//${url.host}/__ws`;
@@ -780,7 +694,7 @@ export class StaticReactPreview {
 			// Keep fallback message when the internal wrapper response is malformed.
 		}
 
-		const mappedLocation = this.resolveOriginalLocationFromStack(stack, bundledCode);
+		const mappedLocation = resolveOriginalLocationFromStack(stack, bundledCode);
 		const serverError: ServerError = {
 			id: crypto.randomUUID(),
 			timestamp: Date.now(),
@@ -791,60 +705,6 @@ export class StaticReactPreview {
 
 		await this.broadcastError(serverError).catch(() => {});
 		return Response.json({ error: errorMessage, serverError }, { status: 500 });
-	}
-
-	private resolveOriginalLocationFromStack(
-		stack: string | undefined,
-		bundledCode: string | undefined,
-	): { file: string; line?: number; column?: number } | undefined {
-		if (!stack || !bundledCode) {
-			return undefined;
-		}
-
-		const sourceMap = this.extractInlineSourceMap(bundledCode);
-		if (!sourceMap) {
-			return undefined;
-		}
-
-		const traceMap = new TraceMap(sourceMap);
-		for (const stackLine of stack.split('\n')) {
-			const generatedLocation = this.parseGeneratedWorkerLocation(stackLine);
-			if (!generatedLocation) {
-				continue;
-			}
-
-			const originalLocation = originalPositionFor(traceMap, {
-				line: generatedLocation.line,
-				column: generatedLocation.column - 1,
-			});
-			if (originalLocation.source && originalLocation.line) {
-				return {
-					file: originalLocation.source,
-					line: originalLocation.line,
-					column: originalLocation.column === null ? undefined : originalLocation.column + 1,
-				};
-			}
-		}
-
-		return undefined;
-	}
-
-	private parseGeneratedWorkerLocation(stackLine: string): { line: number; column: number } | undefined {
-		const match = stackLine.match(/\b(?:worker|user-worker|bundle)\.js:(\d+):(\d+)\b/);
-		if (!match) {
-			return undefined;
-		}
-
-		return { line: Number(match[1]), column: Number(match[2]) };
-	}
-
-	private extractInlineSourceMap(code: string): string | undefined {
-		const match = code.match(/sourceMappingURL=data:application\/json(?:;charset=utf-8)?;base64,([^\s]+)/);
-		if (!match) {
-			return undefined;
-		}
-
-		return atob(match[1]);
 	}
 
 	private async broadcastError(error: ServerError): Promise<void> {

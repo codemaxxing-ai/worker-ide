@@ -22,6 +22,7 @@ export interface FileSystem {
 export interface TransformOptions {
 	fs: FileSystem;
 	projectRoot: string;
+	projectId: string;
 	knownDependencies?: Map<string, string>;
 	requestTimestamp?: string;
 }
@@ -361,17 +362,22 @@ export function rewriteExternalModuleImports(code: string, externalModuleUrl: st
 const tsConfigCache = new Map<string, { config: TsConfig | undefined; expiry: number }>();
 const TSCONFIG_TTL_MS = 5000;
 const MAX_TSCONFIG_CACHE = 100;
-export function invalidateTsConfigCache(projectRoot: string): void {
-	tsConfigCache.delete(projectRoot);
+function tsConfigCacheKey(projectId: string, projectRoot: string): string {
+	return JSON.stringify([projectId, projectRoot]);
 }
 
-async function getTsConfig(fs: FileSystem, projectRoot: string): Promise<TsConfig | undefined> {
-	const cached = tsConfigCache.get(projectRoot);
+export function invalidateTsConfigCache(projectId: string, projectRoot: string): void {
+	tsConfigCache.delete(tsConfigCacheKey(projectId, projectRoot));
+}
+
+async function getTsConfig(fs: FileSystem, projectRoot: string, projectId: string): Promise<TsConfig | undefined> {
+	const key = tsConfigCacheKey(projectId, projectRoot);
+	const cached = tsConfigCache.get(key);
 	if (cached && Date.now() < cached.expiry) {
 		return cached.config;
 	}
 	const config = await loadTsConfig(fs, projectRoot);
-	tsConfigCache.set(projectRoot, { config, expiry: Date.now() + TSCONFIG_TTL_MS });
+	tsConfigCache.set(key, { config, expiry: Date.now() + TSCONFIG_TTL_MS });
 	while (tsConfigCache.size > MAX_TSCONFIG_CACHE) {
 		const first = tsConfigCache.keys().next().value;
 		if (first === undefined) {
@@ -534,11 +540,11 @@ export async function transformModule(
 	content: string,
 	options: TransformOptions,
 ): Promise<{ code: string; contentType: string }> {
-	const { fs, projectRoot, knownDependencies, requestTimestamp } = options;
+	const { fs, projectRoot, projectId, knownDependencies, requestTimestamp } = options;
 	const extension = filePath.match(/\.[^.]+$/)?.[0]?.toLowerCase() ?? '';
 	const normalizedPath = normalizePreviewPath(filePath);
 	const moduleId = toPreviewModuleId(normalizedPath);
-	const tsConfig = await getTsConfig(fs, projectRoot);
+	const tsConfig = await getTsConfig(fs, projectRoot, projectId);
 
 	if (['.ts', '.tsx', '.jsx', '.mts'].includes(extension)) {
 		const tsconfigRaw = toEsbuildTsconfigRaw(tsConfig);

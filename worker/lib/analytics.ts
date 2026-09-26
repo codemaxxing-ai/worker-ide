@@ -33,7 +33,7 @@ function getVersionTag(): string {
 	return env.CF_VERSION_METADATA?.tag ?? '';
 }
 
-export interface ApiRequestEvent {
+interface ApiRequestEvent {
 	userId: string;
 	route: string;
 	method: string;
@@ -73,9 +73,9 @@ export function trackApiRequest(event: ApiRequestEvent): void {
 	});
 }
 
-export type ProjectEventType = 'create' | 'clone' | 'delete' | 'restore' | 'deploy' | 'download';
+type ProjectEventType = 'create' | 'clone' | 'delete' | 'restore' | 'deploy' | 'download';
 
-export interface ProjectEvent {
+interface ProjectEvent {
 	organizationId: string;
 	eventType: ProjectEventType;
 	projectId: string;
@@ -113,53 +113,7 @@ export function trackProjectEvent(event: ProjectEvent): void {
 	});
 }
 
-export type AiEventType = 'session_start' | 'session_end' | 'turn_complete';
-
-export interface AiUsageEvent {
-	userId: string;
-	eventType: AiEventType;
-	projectId: string;
-	organizationId?: string;
-	modelId: string;
-	sessionId: string;
-	agentMode?: string;
-	error?: string;
-	plan?: string;
-	inputTokens: number;
-	outputTokens: number;
-	durationMs: number;
-	toolCallCount: number;
-	turnNumber: number;
-}
-
-/**
- * Track AI agent usage (session start, turn completion, session end).
- *
- * Schema:
- * - index1: userId (sampling key)
- * - blob1: eventType, blob2: projectId, blob3: orgId, blob4: modelId,
- *   blob5: sessionId, blob6: agentMode, blob7: error, blob8: plan
- * - double1: inputTokens, double2: outputTokens, double3: durationMs,
- *   double4: toolCallCount, double5: turnNumber
- */
-export function trackAiUsage(event: AiUsageEvent): void {
-	safeWrite(env.ANALYTICS_AI, {
-		indexes: [event.userId],
-		blobs: [
-			event.eventType,
-			event.projectId,
-			event.organizationId ?? '',
-			event.modelId,
-			event.sessionId,
-			event.agentMode ?? '',
-			event.error ?? '',
-			event.plan ?? '',
-		],
-		doubles: [event.inputTokens, event.outputTokens, event.durationMs, event.toolCallCount, event.turnNumber],
-	});
-}
-
-export interface PreviewRequestEvent {
+interface PreviewRequestEvent {
 	projectId: string;
 	pathname: string;
 	contentType?: string;
@@ -195,9 +149,9 @@ export function trackPreviewRequest(event: PreviewRequestEvent): void {
 	});
 }
 
-export type AuthEventType = 'signup' | 'login' | 'org_create' | 'org_invite' | 'org_join' | 'project_transfer' | 'account_delete';
+type AuthEventType = 'signup' | 'login' | 'org_create' | 'org_invite' | 'org_join' | 'project_transfer' | 'account_delete';
 
-export interface AuthEvent {
+interface AuthEvent {
 	userId: string;
 	eventType: AuthEventType;
 	organizationId?: string;
@@ -230,10 +184,10 @@ export function trackAuthEvent(event: AuthEvent): void {
 	});
 }
 
-export type WebSocketEventType = 'connect' | 'disconnect';
-export type WebSocketConnectionType = 'coordinator' | 'agent';
+type WebSocketEventType = 'connect' | 'disconnect';
+type WebSocketConnectionType = 'coordinator' | 'agent';
 
-export interface WebSocketEvent {
+interface WebSocketEvent {
 	projectId: string;
 	eventType: WebSocketEventType;
 	connectionType: WebSocketConnectionType;
@@ -258,9 +212,9 @@ export function trackWebSocketEvent(event: WebSocketEvent): void {
 	});
 }
 
-export type SttEventType = 'session_start' | 'session_end';
+type SttEventType = 'session_start' | 'session_end';
 
-export interface SttEvent {
+interface SttEvent {
 	userId: string;
 	projectId: string;
 	eventType: SttEventType;

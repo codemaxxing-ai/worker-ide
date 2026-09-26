@@ -3,7 +3,6 @@ export type { AgentDatabase } from './client';
 
 export {
 	deletePendingChanges,
-	deleteSessionMessageMetadata,
 	deleteSessionMetadata,
 	readPendingChangesData,
 	readSessionMessageMetadata,

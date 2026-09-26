@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -5,6 +6,10 @@ import { defineWorkersProject } from '@cloudflare/vitest-pool-workers/config';
 import { defineConfig } from 'vitest/config';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Wrangler validates the asset directory even though these tests exercise
+// Worker APIs. A clean checkout should not need a production build first.
+mkdirSync(path.resolve(__dirname, 'dist/client'), { recursive: true });
 
 const sharedAlias = {
 	'@': path.resolve(__dirname, './src'),

@@ -20,7 +20,27 @@ function createFileSystem(existingPaths: string[]) {
 	};
 }
 
+function createProjectOptions(projectId: string, directory: string) {
+	const fileSystem = createFileSystem([`/project/${directory}/value.js`]);
+	return {
+		projectId,
+		projectRoot: '/project',
+		fs: {
+			...fileSystem,
+			readFile: async () => JSON.stringify({ compilerOptions: { baseUrl: '/', paths: { '@app/*': [`${directory}/*`] } } }),
+		},
+	};
+}
+
 describe('transformModule', () => {
+	it('does not reuse another project configuration at the same filesystem root', async () => {
+		const source = 'import value from "@app/value";';
+		const first = await transformModule('/main.js', source, createProjectOptions('project-one', 'one'));
+		const second = await transformModule('/main.js', source, createProjectOptions('project-two', 'two'));
+		expect(first.code).toContain('from "/one/value.js"');
+		expect(second.code).toContain('from "/two/value.js"');
+	});
+
 	it('rewrites local imports to explicit preview module ids', async () => {
 		const fileSystem = createFileSystem(['/project/src/style.css', '/project/src/data.json', '/project/src/logo.png']);
 
@@ -35,7 +55,7 @@ describe('transformModule', () => {
 				'	return jsx("div", { children: logo + data.name });',
 				'}',
 			].join('\n'),
-			{ fs: fileSystem, projectRoot: '/project' },
+			{ fs: fileSystem, projectRoot: '/project', projectId: 'transform-tests' },
 		);
 
 		expect(result.contentType).toBe('application/javascript');
@@ -53,6 +73,7 @@ describe('transformModule', () => {
 		const result = await transformModule('/src/main.tsx', 'import { createRoot } from "react-dom/client";', {
 			fs: fileSystem,
 			projectRoot: '/project',
+			projectId: 'transform-tests',
 			knownDependencies: new Map([
 				['react', '^19.2.4'],
 				['react-dom', '^19.2.4'],
@@ -69,6 +90,7 @@ describe('transformModule', () => {
 			transformModule('/src/main.tsx', 'import { createRoot } from "react-dom/client";', {
 				fs: fileSystem,
 				projectRoot: '/project',
+				projectId: 'transform-tests',
 				knownDependencies: new Map([['react', '^19.2.4']]),
 			}),
 		).rejects.toThrow('Unregistered dependency "react-dom". Add it to project dependencies using the Dependencies panel.');
@@ -78,6 +100,7 @@ describe('transformModule', () => {
 		const result = await transformModule('/src/style.css', 'body { color: red; }', {
 			fs: createFileSystem([]),
 			projectRoot: '/project',
+			projectId: 'transform-tests',
 		});
 
 		expect(result.contentType).toBe('application/javascript');
@@ -90,6 +113,7 @@ describe('transformModule', () => {
 		const result = await transformModule('/src/button.tsx', ['export function Button() {', '	return null;', '}'].join('\n'), {
 			fs: createFileSystem([]),
 			projectRoot: '/project',
+			projectId: 'transform-tests',
 		});
 
 		expect(result.code).toContain('__preview_hot__.accept()');
@@ -102,6 +126,7 @@ describe('transformModule', () => {
 			{
 				fs: createFileSystem([]),
 				projectRoot: '/project',
+				projectId: 'transform-tests',
 			},
 		);
 
@@ -115,6 +140,7 @@ describe('transformModule', () => {
 			{
 				fs: createFileSystem([]),
 				projectRoot: '/project',
+				projectId: 'transform-tests',
 			},
 		);
 
@@ -125,6 +151,7 @@ describe('transformModule', () => {
 		const result = await transformModule('/src/logo.png', 'binary', {
 			fs: createFileSystem([]),
 			projectRoot: '/project',
+			projectId: 'transform-tests',
 			requestTimestamp: '42',
 		});
 

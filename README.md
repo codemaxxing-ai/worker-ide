@@ -2,6 +2,8 @@
 
 A browser-based full-stack development environment built on Cloudflare Workers. User projects are stored in Durable Object-backed filesystems with Git history backed by Cloudflare Artifacts, transformed on-the-fly with esbuild-wasm, and previewed with HMR. Includes an AI coding assistant powered by the Cloudflare Agents SDK and Workers AI.
 
+See [architecture and ownership](docs/architecture.md) for the request path, state owners, and extension points.
+
 ## Architecture
 
 ### Frontend (`src/`)
@@ -25,19 +27,20 @@ Types, constants, validation, and WebSocket message definitions shared between f
 
 ## Prerequisites
 
-- [Bun](https://bun.sh) v1.3.9+
+- [mise](https://mise.jdx.dev/) for the Node 24 and Bun 1.3.14 versions in `mise.toml`
 - A Cloudflare account for permanent deployments. The IDE can also deploy a Worker to a new temporary Cloudflare account; claim it within 60 minutes to keep the deployment.
 
 ## Getting Started
 
 ```bash
-bun install
+mise install
+mise exec -- bun install --frozen-lockfile
 ```
 
 Before starting the dev server, configure the required secrets (see below), then:
 
 ```bash
-bun run dev        # Vite dev server + worker at localhost:3000
+mise exec -- bun run dev        # Vite dev server + worker at localhost:3000
 ```
 
 ## Secrets & Environment Variables
@@ -53,21 +56,24 @@ The auxiliary email worker does not need a local `.dev.vars` example. It uses Cl
 
 ## Scripts
 
-| Script        | Description                                                      |
-| ------------- | ---------------------------------------------------------------- |
-| `dev`         | Vite dev server with Cloudflare Worker (port 3000)               |
-| `build`       | Production build via Turborepo                                   |
-| `deploy`      | Build and deploy to Cloudflare                                   |
-| `typecheck`   | Run all TypeScript type checks (app, node, worker)               |
-| `lint`        | Check formatting (Prettier) and lint (ESLint)                    |
-| `format`      | Auto-fix formatting and lint issues                              |
-| `test:unit`   | Unit tests (Node env)                                            |
-| `test:worker` | Worker tests (workerd env via `@cloudflare/vitest-pool-workers`) |
-| `test:react`  | React component tests (jsdom env)                                |
-| `test:e2e`    | End-to-end tests (Playwright, Chromium)                          |
-| `knip`        | Check for unused dependencies, exports, and files                |
-| `storybook`   | Storybook dev server (port 6006)                                 |
-| `cf-typegen`  | Generate worker type bindings (`worker-configuration.d.ts`)      |
+| Script             | Description                                                            |
+| ------------------ | ---------------------------------------------------------------------- |
+| `dev`              | Vite dev server with Cloudflare Worker (port 3000)                     |
+| `build`            | Production build via Turborepo                                         |
+| `deploy`           | Build and deploy to Cloudflare                                         |
+| `typecheck`        | Run all TypeScript type checks (app, node, worker)                     |
+| `lint`             | Check formatting (Prettier) and lint (ESLint)                          |
+| `format`           | Auto-fix formatting and lint issues                                    |
+| `test:unit`        | Unit tests (Node env)                                                  |
+| `test:worker`      | Worker tests (workerd env via `@cloudflare/vitest-pool-workers`)       |
+| `test:react`       | React component tests (jsdom env)                                      |
+| `test:e2e`         | End-to-end tests (Playwright, Chromium)                                |
+| `test:integration` | Integration tests against a live server (`TEST_BASE_URL`)              |
+| `test:storybook`   | Storybook component tests                                              |
+| `knip`             | Check for unused dependencies and files                                |
+| `knip:audit`       | Report unused exports and types (non-gating; see `docs/knip-audit.md`) |
+| `storybook`        | Storybook dev server (port 6006)                                       |
+| `cf-typegen`       | Generate worker type bindings (`worker-configuration.d.ts`)            |
 
 ## Path Aliases
 

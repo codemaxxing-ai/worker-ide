@@ -627,5 +627,3 @@ function wrapBrowserExecuteCode(code: string, primaryPreviewOrigin: string, allo
   return await __userFunction();
 }`;
 }
-
-export { createSendEventFunction as createSendEvent } from '../event-helpers';

@@ -53,7 +53,8 @@ export class WorkspaceClient implements WorkspaceLike {
 		return this.stub.wsReadFile(this.strip(path));
 	}
 	async readFileBytes(path: string): Promise<Uint8Array | null> {
-		return this.stub.wsReadFileBytes(this.strip(path));
+		using data = await this.stub.wsReadFileBytes(this.strip(path));
+		return data ? new Uint8Array(data) : data;
 	}
 	async writeFile(path: string, content: string): Promise<void> {
 		await this.stub.wsWriteFile(this.strip(path), content, this.writerId);
@@ -68,18 +69,18 @@ export class WorkspaceClient implements WorkspaceLike {
 		return this.stub.wsExists(this.strip(path));
 	}
 	async stat(path: string): Promise<FileStat | null> {
-		const info = await this.stub.wsStat(this.strip(path));
+		using info = await this.stub.wsStat(this.strip(path));
 		return info ? this.mapInfo(info) : info;
 	}
 	async lstat(path: string): Promise<FileStat | null> {
-		const info = await this.stub.wsLstat(this.strip(path));
+		using info = await this.stub.wsLstat(this.strip(path));
 		return info ? this.mapInfo(info) : info;
 	}
 	async mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
 		await this.stub.wsMkdir(this.strip(path), options?.recursive ?? false);
 	}
 	async readDir(path: string): Promise<FileInfo[]> {
-		const entries = await this.stub.wsReadDir(this.strip(path));
+		using entries = await this.stub.wsReadDir(this.strip(path));
 		return entries.map((entry) => this.mapInfo(entry));
 	}
 	async rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void> {
@@ -98,7 +99,7 @@ export class WorkspaceClient implements WorkspaceLike {
 		return this.stub.wsReadlink(this.strip(path));
 	}
 	async glob(pattern: string): Promise<FileInfo[]> {
-		const entries = await this.stub.wsGlob(this.strip(pattern));
+		using entries = await this.stub.wsGlob(this.strip(pattern));
 		return entries.map((entry) => this.mapInfo(entry));
 	}
 }

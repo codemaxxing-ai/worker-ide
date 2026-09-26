@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useImperativeHandle, type ComponentProps, type ReactNode, type Ref } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -152,9 +152,12 @@ vi.mock('@base-ui/react/scroll-area', async () => {
 });
 
 vi.mock('@/components/ui/button', () => ({
-	Button: ({ children, focusStyle: _focusStyle, ...properties }: ComponentProps<'button'> & { focusStyle?: string }) => (
-		<button {...properties}>{children}</button>
-	),
+	Button: ({
+		children,
+		focusStyle: _focusStyle,
+		isLoading: _isLoading,
+		...properties
+	}: ComponentProps<'button'> & { focusStyle?: string; isLoading?: boolean }) => <button {...properties}>{children}</button>,
 }));
 
 vi.mock('@/components/ui/collapsible', () => ({
@@ -168,9 +171,22 @@ vi.mock('@/components/ui/confirm-button', () => ({
 
 vi.mock('@/components/ui/dropdown-menu', () => ({
 	DropdownMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-	DropdownMenuContent: () => {},
+	DropdownMenuContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 	DropdownMenuItem: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 	DropdownMenuTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
+
+vi.mock('@/components/ui/inline-confirm-group', () => ({
+	InlineConfirmGroup: ({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) => (
+		<>
+			<button type="button" onClick={onConfirm}>
+				Confirm delete
+			</button>
+			<button type="button" onClick={onCancel}>
+				Cancel delete
+			</button>
+		</>
+	),
 }));
 
 vi.mock('@/components/ui/pending-approval-indicator', () => ({
@@ -430,5 +446,27 @@ describe('AgentPanel footer controls', () => {
 
 		fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }));
 		expect(mocks.speechStop).toHaveBeenCalledTimes(1);
+	});
+
+	it('renames the current session through the header', async () => {
+		render(<AgentPanel projectId="project-1" />);
+
+		fireEvent.click(screen.getAllByRole('button', { name: 'Rename session' })[0]);
+		const titleInput = screen.getByRole('textbox', { name: 'Rename session' });
+		fireEvent.change(titleInput, { target: { value: 'Updated session' } });
+		fireEvent.keyDown(titleInput, { key: 'Enter' });
+
+		await waitFor(() => expect(mocks.handleRenameSession).toHaveBeenCalledWith('session-1', 'Updated session'));
+	});
+
+	it('requires confirmation before deleting a session', async () => {
+		render(<AgentPanel projectId="project-1" />);
+
+		fireEvent.click(screen.getByRole('button', { name: 'Delete Current session' }));
+		expect(mocks.handleDeleteSession).not.toHaveBeenCalled();
+		fireEvent.click(screen.getByRole('button', { name: 'Confirm delete' }));
+
+		await waitFor(() => expect(mocks.handleDeleteSession).toHaveBeenCalledWith('session-1'));
+		expect(mocks.clearCurrentSession).toHaveBeenCalledWith('session-1');
 	});
 });

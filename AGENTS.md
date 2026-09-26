@@ -36,10 +36,10 @@ All frontend-to-backend API calls **must** use the Hono RPC client (`createApiCl
 
 **Rules:**
 
-- **NEVER use raw `fetch()`** to call backend API routes. Always use the typed RPC client (e.g., `api.git.status.$get({})`). The only exceptions are root-level routes defined inline in `worker/index.ts` (e.g., `/api/new-project`, `/api/templates`) that have no typed route module.
+- **NEVER use raw `fetch()`** to call backend API routes. Always use the typed RPC client (e.g., `api.git.status.$get({})`). Root application routes use `createRootApiClient()`. External requests and SDK-owned authentication transports are separate from application API calls.
 - **API route paths must use spinal-case** (e.g., `/user/push-vapid-key`, `/user/recent-projects`), not camelCase. Hono RPC resolves hyphenated path segments via bracket notation (e.g., `api.user['recent-projects'].$get({})`). File names remain kebab-case per the file naming convention.
 - **NEVER use `response.text()` + `JSON.parse()`** to parse responses. The RPC client's `response.json()` returns the correctly typed result.
-- **In the `!response.ok` branch**, throw a plain `Error` with a fallback message — do NOT try to parse the error body. The error body is not part of the typed schema.
+- **In the `!response.ok` branch**, use `throwApiError(response, fallback)` from `@/lib/api-error` when status, error codes, or server messages matter. Only that adapter may parse an untyped error body, validating it as `unknown`. A plain fallback `Error` is sufficient otherwise. Error payloads remain outside the Hono success schema.
 - **In the success branch**, call `response.json()` directly — the return type is clean (no union with error types).
 
 **Example (correct):**
@@ -57,23 +57,24 @@ const data = await response.json(); // ← fully typed, no assertion needed
 
 ## Error Handling in Route Handlers
 
-All route handler errors **must** use `throw httpError(status, message)` from `worker/lib/http-error.ts` instead of `return c.json({ error: '...' }, status)`.
+All route handler errors **must** use `throw httpError(code, message, optionalStatus)` from `worker/lib/http-error.ts` instead of `return c.json({ error: '...' }, status)`. The status defaults to the shared `HttpErrorCode` mapping.
 
 **Rules:**
 
 - **NEVER use `return c.json({ error: '...' }, statusCode)`** in route handlers under `worker/routes/`. This pollutes Hono's typed response schema with error union types.
-- **Always use `throw httpError(statusCode, message)`** — this throws an `HTTPException` that Hono handles outside the typed route schema, keeping return types clean for the RPC client.
-- **Exception:** Root-level routes in `worker/index.ts` (project creation, template loading) are NOT consumed via the RPC client, so they may use `c.json({ error }, status)` directly.
+- **Always use `throw httpError(code, message, optionalStatus)`** — this throws an `HTTPException` that Hono handles outside the typed route schema, keeping return types clean for the RPC client.
+- SDK-owned auth, development-only HTTP adapters, and routing middleware preserve their existing response contracts outside the typed API route schema.
 
 **Example (correct):**
 
 ```ts
 import { httpError } from '../lib/http-error';
+import { HttpErrorCode } from '@shared/http-errors';
 
 const route = new Hono<AppEnvironment>().post('/example', async (c) => {
   const data = await someOperation();
   if (!data) {
-    throw httpError(404, 'Resource not found');
+    throw httpError(HttpErrorCode.NOT_FOUND, 'Resource not found');
   }
   return c.json({ result: data });
 });
@@ -139,6 +140,7 @@ Prefer regular Workers or Durable Objects for fast request/response operations, 
 
 ### Build and Tooling
 
+- Runtime versions: use `mise install` and `mise exec -- bun ...`; `mise.toml` selects Node and Bun for local development and CI.
 - Package manager: bun (use bun commands, not npm/yarn/pnpm).
 - Build tool: Vite with @cloudflare/vite-plugin.
 - Dev server: `bun run dev`.

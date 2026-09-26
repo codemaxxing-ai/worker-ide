@@ -1,12 +1,6 @@
 import { fs } from '@worker/lib/project-fs';
 
 /**
- * Maximum number of timestamped plan-mode plans to keep.
- * These are global (not session-scoped) and accumulate one per plan-mode run.
- */
-const MAX_TIMESTAMP_PLANS = 10;
-
-/**
  * Remove filesystem artifacts for a set of pruned session IDs.
  *
  * @param projectRoot - The project root path (e.g. `/project`)
@@ -37,33 +31,6 @@ export async function cleanupSessionArtifacts(
 	}
 }
 
-/**
- * Prune old timestamped plan-mode plan files, keeping only the most recent.
- * These files are named `{timestamp}-plan.md` and are not session-scoped.
- *
- * @param projectRoot - The project root path (e.g. `/project`)
- */
-export async function cleanupTimestampPlans(projectRoot: string): Promise<void> {
-	const plansDirectory = `${projectRoot}/.agent/plans`;
-
-	try {
-		const entries = await fs.readdir(plansDirectory);
-		const timestampPlans = entries.filter((entry) => entry.endsWith('-plan.md')).toSorted();
-
-		if (timestampPlans.length <= MAX_TIMESTAMP_PLANS) return;
-
-		const toRemove = timestampPlans.slice(0, timestampPlans.length - MAX_TIMESTAMP_PLANS);
-		for (const file of toRemove) {
-			try {
-				await fs.unlink(`${plansDirectory}/${file}`);
-			} catch {
-				// Non-fatal
-			}
-		}
-	} catch {
-		// Directory may not exist
-	}
-}
 async function cleanupSessionDirectories(projectRoot: string, sessionIds: Set<string>): Promise<void> {
 	const sessionsDirectory = `${projectRoot}/.agent/sessions`;
 

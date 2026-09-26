@@ -70,7 +70,8 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	.post('/git/init', async (c) => {
 		try {
 			const author = await getCommitAuthor(c.env, c.get('session').userId);
-			return c.json(await c.get('fsStub').gitInit(author));
+			using result = await c.get('fsStub').gitInit(author);
+			return c.json(result);
 		} catch (error) {
 			console.error('Git init error:', error);
 			throw httpError(HttpErrorCode.GIT_OPERATION_FAILED, messageOf(error, 'Failed to initialize git repository'));
@@ -78,7 +79,8 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	})
 	.get('/git/status', async (c) => {
 		try {
-			return c.json(await c.get('fsStub').gitStatus());
+			using result = await c.get('fsStub').gitStatus();
+			return c.json(result);
 		} catch (error) {
 			console.error('Git status error:', error);
 			throw httpError(HttpErrorCode.GIT_OPERATION_FAILED, 'Failed to get git status');
@@ -87,7 +89,8 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	.post('/git/stage', zValidator('json', gitStageSchema), async (c) => {
 		try {
 			const { paths } = c.req.valid('json');
-			return c.json(await c.get('fsStub').gitStage(paths));
+			using result = await c.get('fsStub').gitStage(paths);
+			return c.json(result);
 		} catch (error) {
 			console.error('Git stage error:', error);
 			throw httpError(HttpErrorCode.GIT_OPERATION_FAILED, 'Failed to stage files');
@@ -96,7 +99,8 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	.post('/git/unstage', zValidator('json', gitStageSchema), async (c) => {
 		try {
 			const { paths } = c.req.valid('json');
-			return c.json(await c.get('fsStub').gitUnstage(paths));
+			using result = await c.get('fsStub').gitUnstage(paths);
+			return c.json(result);
 		} catch (error) {
 			console.error('Git unstage error:', error);
 			throw httpError(HttpErrorCode.GIT_OPERATION_FAILED, 'Failed to unstage files');
@@ -104,7 +108,8 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	})
 	.post('/git/stage-all', async (c) => {
 		try {
-			return c.json(await c.get('fsStub').gitStageAll());
+			using result = await c.get('fsStub').gitStageAll();
+			return c.json(result);
 		} catch (error) {
 			console.error('Git stage-all error:', error);
 			throw httpError(HttpErrorCode.GIT_OPERATION_FAILED, 'Failed to stage all files');
@@ -112,7 +117,8 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	})
 	.post('/git/unstage-all', async (c) => {
 		try {
-			return c.json(await c.get('fsStub').gitUnstageAll());
+			using result = await c.get('fsStub').gitUnstageAll();
+			return c.json(result);
 		} catch (error) {
 			console.error('Git unstage-all error:', error);
 			throw httpError(HttpErrorCode.GIT_OPERATION_FAILED, 'Failed to unstage all files');
@@ -121,7 +127,7 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	.post('/git/discard', zValidator('json', gitDiscardSchema), async (c) => {
 		try {
 			const { path } = c.req.valid('json');
-			const result = await c.get('fsStub').gitDiscard(path);
+			using result = await c.get('fsStub').gitDiscard(path);
 			broadcastGitStatusChanged(c.get('projectId'), c.executionCtx);
 			return c.json(result);
 		} catch (error) {
@@ -131,7 +137,7 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	})
 	.post('/git/discard-all', async (c) => {
 		try {
-			const result = await c.get('fsStub').gitDiscardAll();
+			using result = await c.get('fsStub').gitDiscardAll();
 			broadcastGitStatusChanged(c.get('projectId'), c.executionCtx);
 			return c.json(result);
 		} catch (error) {
@@ -143,7 +149,7 @@ export const gitRoutes = new Hono<AppEnvironment>()
 		try {
 			const { message } = c.req.valid('json');
 			const author = await getCommitAuthor(c.env, c.get('session').userId);
-			const result = await c.get('fsStub').gitCommit(message, author);
+			using result = await c.get('fsStub').gitCommit(message, author);
 			broadcastGitStatusChanged(c.get('projectId'), c.executionCtx);
 			return c.json(result);
 		} catch (error) {
@@ -154,7 +160,8 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	.get('/git/log', zValidator('query', gitLogQuerySchema), async (c) => {
 		try {
 			const { reference, depth } = c.req.valid('query');
-			return c.json(await c.get('fsStub').gitLog(reference ?? 'HEAD', depth ?? 50));
+			using result = await c.get('fsStub').gitLog(reference ?? 'HEAD', depth ?? 50);
+			return c.json(result);
 		} catch (error) {
 			console.error('Git log error:', error);
 			throw httpError(HttpErrorCode.GIT_OPERATION_FAILED, 'Failed to get git log');
@@ -163,7 +170,8 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	.get('/git/log/graph', zValidator('query', gitGraphQuerySchema), async (c) => {
 		try {
 			const { maxCount } = c.req.valid('query');
-			return c.json(await c.get('fsStub').gitLog('HEAD', maxCount ?? 100));
+			using result = await c.get('fsStub').gitLog('HEAD', maxCount ?? 100);
+			return c.json(result);
 		} catch (error) {
 			console.error('Git graph error:', error);
 			throw httpError(HttpErrorCode.GIT_OPERATION_FAILED, 'Failed to get git graph');
@@ -171,7 +179,8 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	})
 	.get('/git/branches', async (c) => {
 		try {
-			return c.json(await c.get('fsStub').gitBranches());
+			using result = await c.get('fsStub').gitBranches();
+			return c.json(result);
 		} catch (error) {
 			console.error('Git branches error:', error);
 			throw httpError(HttpErrorCode.GIT_OPERATION_FAILED, 'Failed to list branches');
@@ -180,7 +189,8 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	.post('/git/branch', zValidator('json', gitBranchSchema), async (c) => {
 		try {
 			const { name, checkout } = c.req.valid('json');
-			return c.json(await c.get('fsStub').gitCreateBranch(name, checkout ?? false));
+			using result = await c.get('fsStub').gitCreateBranch(name, checkout ?? false);
+			return c.json(result);
 		} catch (error) {
 			console.error('Git create branch error:', error);
 			throw httpError(HttpErrorCode.GIT_OPERATION_FAILED, messageOf(error, 'Failed to create branch'));
@@ -189,7 +199,8 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	.delete('/git/branch', zValidator('query', gitBranchNameQuerySchema), async (c) => {
 		try {
 			const { name } = c.req.valid('query');
-			return c.json(await c.get('fsStub').gitDeleteBranch(name));
+			using result = await c.get('fsStub').gitDeleteBranch(name);
+			return c.json(result);
 		} catch (error) {
 			console.error('Git delete branch error:', error);
 			throw httpError(HttpErrorCode.GIT_OPERATION_FAILED, messageOf(error, 'Failed to delete branch'));
@@ -198,7 +209,8 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	.post('/git/branch/rename', zValidator('json', gitBranchRenameSchema), async (c) => {
 		try {
 			const { oldName, newName } = c.req.valid('json');
-			return c.json(await c.get('fsStub').gitRenameBranch(oldName, newName));
+			using result = await c.get('fsStub').gitRenameBranch(oldName, newName);
+			return c.json(result);
 		} catch (error) {
 			console.error('Git rename branch error:', error);
 			throw httpError(HttpErrorCode.GIT_OPERATION_FAILED, messageOf(error, 'Failed to rename branch'));
@@ -207,7 +219,7 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	.post('/git/checkout', zValidator('json', gitCheckoutSchema), async (c) => {
 		try {
 			const { reference } = c.req.valid('json');
-			const result = await c.get('fsStub').gitCheckout(reference);
+			using result = await c.get('fsStub').gitCheckout(reference);
 			broadcastGitStatusChanged(c.get('projectId'), c.executionCtx);
 			return c.json(result);
 		} catch (error) {
@@ -218,7 +230,7 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	.post('/git/merge', zValidator('json', gitMergeSchema), async (c) => {
 		try {
 			const { branch } = c.req.valid('json');
-			const result = await c.get('fsStub').gitMerge(branch);
+			using result = await c.get('fsStub').gitMerge(branch);
 			broadcastGitStatusChanged(c.get('projectId'), c.executionCtx);
 			return c.json(result);
 		} catch (error) {
@@ -228,7 +240,8 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	})
 	.get('/git/tags', async (c) => {
 		try {
-			return c.json(await c.get('fsStub').gitTags());
+			using result = await c.get('fsStub').gitTags();
+			return c.json(result);
 		} catch (error) {
 			console.error('Git tags error:', error);
 			throw httpError(HttpErrorCode.GIT_OPERATION_FAILED, 'Failed to list tags');
@@ -237,7 +250,8 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	.post('/git/tag', zValidator('json', gitTagSchema), async (c) => {
 		try {
 			const { name, reference } = c.req.valid('json');
-			return c.json(await c.get('fsStub').gitCreateTag(name, reference));
+			using result = await c.get('fsStub').gitCreateTag(name, reference);
+			return c.json(result);
 		} catch (error) {
 			console.error('Git create tag error:', error);
 			throw httpError(HttpErrorCode.GIT_OPERATION_FAILED, messageOf(error, 'Failed to create tag'));
@@ -246,7 +260,8 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	.delete('/git/tag', zValidator('query', gitTagNameQuerySchema), async (c) => {
 		try {
 			const { name } = c.req.valid('query');
-			return c.json(await c.get('fsStub').gitDeleteTag(name));
+			using result = await c.get('fsStub').gitDeleteTag(name);
+			return c.json(result);
 		} catch (error) {
 			console.error('Git delete tag error:', error);
 			throw httpError(HttpErrorCode.GIT_OPERATION_FAILED, messageOf(error, 'Failed to delete tag'));
@@ -255,7 +270,8 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	.get('/git/diff', zValidator('query', gitDiffQuerySchema), async (c) => {
 		try {
 			const { path } = c.req.valid('query');
-			return c.json(await c.get('fsStub').gitDiff(path));
+			using result = await c.get('fsStub').gitDiff(path);
+			return c.json(result);
 		} catch (error) {
 			console.error('Git diff error:', error);
 			throw httpError(HttpErrorCode.GIT_OPERATION_FAILED, 'Failed to get file diff');
@@ -264,7 +280,8 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	.get('/git/diff/commit', zValidator('query', gitCommitDiffQuerySchema), async (c) => {
 		try {
 			const { objectId } = c.req.valid('query');
-			return c.json(await c.get('fsStub').gitDiffCommit(objectId));
+			using result = await c.get('fsStub').gitDiffCommit(objectId);
+			return c.json(result);
 		} catch (error) {
 			console.error('Git commit diff error:', error);
 			throw httpError(HttpErrorCode.GIT_OPERATION_FAILED, 'Failed to get commit diff');
@@ -273,7 +290,8 @@ export const gitRoutes = new Hono<AppEnvironment>()
 	.get('/git/diff/file', zValidator('query', gitFileDiffAtCommitQuerySchema), async (c) => {
 		try {
 			const { objectId, path } = c.req.valid('query');
-			return c.json(await c.get('fsStub').gitDiffFile(objectId, path));
+			using result = await c.get('fsStub').gitDiffFile(objectId, path);
+			return c.json(result);
 		} catch (error) {
 			console.error('Git file diff at commit error:', error);
 			throw httpError(HttpErrorCode.GIT_OPERATION_FAILED, 'Failed to get file diff at commit');

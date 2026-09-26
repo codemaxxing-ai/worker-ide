@@ -3,17 +3,17 @@
 	"tasks": {
 		"cf-typegen": {
 			"outputs": ["worker-configuration.d.ts", "auxiliary/*/worker-configuration.d.ts"],
-			"inputs": ["wrangler.jsonc", "auxiliary/*/wrangler.jsonc", "scripts/generate-types.ts"]
+			"inputs": ["wrangler.jsonc", "auxiliary/*/wrangler.jsonc", "scripts/generate-types.ts", "shared/jsonc.ts"]
 		},
 		"build:worker-types": {
 			"dependsOn": ["cf-typegen"],
 			"outputs": ["dist/worker/**"],
-			"inputs": ["worker/**/*.ts", "auxiliary/**/*.ts", "shared/**/*.ts", "tsconfig.worker.json", "tsconfig.json"]
+			"inputs": ["$TURBO_DEFAULT$"]
 		},
 		"build:vite": {
 			"dependsOn": ["build:worker-types"],
 			"outputs": ["dist/**"],
-			"inputs": ["src/**", "worker/**", "auxiliary/**", "shared/**", "public/**", "index.html", "vite.config.ts", "tsconfig.*.json"],
+			"inputs": ["$TURBO_DEFAULT$"],
 			"env": ["NODE_ENV"]
 		},
 		"typecheck:app": {
@@ -22,7 +22,7 @@
 			"cache": true
 		},
 		"typecheck:node": {
-			"inputs": ["vite.config.ts", "tsconfig.node.json", "tsconfig.json"],
+			"inputs": ["$TURBO_DEFAULT$"],
 			"cache": true
 		},
 		"typecheck:worker": {
@@ -31,7 +31,7 @@
 			"cache": true
 		},
 		"typecheck:scripts": {
-			"inputs": ["scripts/**/*.ts", "tsconfig.scripts.json", "tsconfig.json"],
+			"inputs": ["scripts/**/*.ts", "shared/**/*.ts", "tsconfig.scripts.json", "tsconfig.json"],
 			"cache": true
 		},
 		"lint": {
@@ -51,5 +51,6 @@
 			"env": ["CI"],
 			"cache": false
 		}
-	}
+	},
+	"globalDependencies": ["mise.toml", ".nvmrc", "raw-minified.d.ts", "tsconfig*.json", "wrangler.jsonc", "auxiliary/*/wrangler.jsonc"]
 }
