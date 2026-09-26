@@ -1,0 +1,355 @@
+src/features/agent/components/agent-panel/use-agent-message-timeline.test.tsx
+  s_228fa0cf17b1ab::t_c1a46397d2c62a 1-48
+src/features/agent/api/attachments.ts
+  s_228fa0cf17b1ab::t_f7ddf2cff26c5a 1-16
+src/features/agent/components/agent-panel/use-agent-message-timeline.ts
+  s_228fa0cf17b1ab::t_fde2471dff62c6 1-103
+worker/services/agent/tools/drain-workspace-changes.test.ts
+  s_23a40df6696d09::t_03f55508fa8f71 31-46
+worker/lib/workspace-client.ts
+  s_228fa0cf17b1ab::t_d7b52a8ea678d4 56-57,72,76,83,102
+worker/services/projects/project-setup.ts
+  s_228fa0cf17b1ab::t_7a11a373963bb0 1-36
+src/features/output/lib/log-buffer.ts
+  s_23a40df6696d09::t_b33cd1b668476d 237
+src/features/agent/hooks/use-agent-sessions.ts
+  s_228fa0cf17b1ab::t_95c5606e1b095b 13,63-69,83-84,93,109,115,117,157-159,272,293-304
+src/features/ide/use-editor-session-persistence.ts
+  s_228fa0cf17b1ab::t_27e8d0a4aeffb7 22,28,32,34-35,54,58-59,70-73,79,83-84
+src/features/file-tree/components/file-tree-model.ts
+  s_228fa0cf17b1ab::t_21a014485ea52c 1-124
+worker/http/auth.ts
+  s_23a40df6696d09::t_a80e95497f6329 1-80
+src/features/agent/components/agent-panel/messages/tool-result-format.ts
+  s_23a40df6696d09::t_85fbe847c91713 1-543
+mise.toml
+  s_23a40df6696d09::t_0b269ded3da792 1-3
+AGENTS.md
+  s_23a40df6696d09::t_8b32ddfca4de2a 39,42,60,65-66,72,77,143
+src/features/snapshots/state/snapshot-slice.ts
+  s_23a40df6696d09::t_450722231fb07d 1-28
+src/features/dashboard/api/projects.ts
+  s_228fa0cf17b1ab::t_0c655f2bfd1ae6 1-77
+knip-audit.json
+  s_228fa0cf17b1ab::t_b4dac0c55cdf38 1-27
+src/features/ide/use-editor-state.ts
+  s_228fa0cf17b1ab::t_397258f1b97f8b 5-11,13
+worker/durable/session-turn-agent.ts
+  s_228fa0cf17b1ab::t_e172b97ba0d789 40
+src/features/ide/ide-shell.tsx
+  s_23a40df6696d09::t_666aa41d10e8b8 7-12
+src/features/collaboration/state/collaboration-slice.ts
+  s_23a40df6696d09::t_28ae54192bf980 1-55
+worker/services/agent/review-queue-model.test.ts
+  s_228fa0cf17b1ab::t_6a2a305e066412 1-61
+turbo.json
+  s_228fa0cf17b1ab::t_ded144759e4ac0 6,11,16,25,34,54-55
+worker/routes/file-routes.ts
+  s_23a40df6696d09::t_e2da4da9462f13 90-91
+worker/services/agent/think-messages.ts
+  s_228fa0cf17b1ab::t_fcff7d88ea98df 3
+worker/services/projects/seed-files.ts
+  s_23a40df6696d09::t_00320676a8525b 1-17
+shared/validation/file-system.ts
+  s_23a40df6696d09::t_b2bd68d09c615f 1-61
+src/features/agent/components/agent-panel/image-attachment-strip.tsx
+  s_228fa0cf17b1ab::t_43d45a969101df 1-65
+worker/services/transform-service.test.ts
+  s_228fa0cf17b1ab::t_05d12ac434f9d5 23-34,36-43,58,76,93,103,116,129,143,154
+src/features/ide/use-editor-state.test.tsx
+  s_23a40df6696d09::t_9db52267f5f458 4,18
+playwright.config.ts
+  s_228fa0cf17b1ab::t_8ef31fe48bb9d2 3-5,15,28-30
+src/lib/api-client.ts
+  s_228fa0cf17b1ab::t_44f7328af922e4 1-69
+src/features/agent/components/agent-panel/messages/tool-views.tsx
+  s_23a40df6696d09::t_4b7c329ae23776 1-272
+src/lib/api-client.test.ts
+  s_228fa0cf17b1ab::t_234b6ddbc7a5a8 29-36,70,114
+.storybook/vitest.setup.ts
+  s_228fa0cf17b1ab::t_d6ed5d16d8b46c 1
+README.md
+  s_228fa0cf17b1ab::t_1524933f2d6862 5-6,30,36-37,43,59-76
+worker/services/agent/event-helpers.ts
+  s_228fa0cf17b1ab::t_441598825b95d5 14,36,44
+shared/validation/session-review.ts
+  s_23a40df6696d09::t_ad179ee7a6d7d3 1-100
+worker/durable/agent-runner-input.ts
+  s_228fa0cf17b1ab::t_ce3c6fe301cc25 1-59
+src/features/agent/components/agent-panel/messages/user-message.tsx
+  s_23a40df6696d09::t_8e83438c4f6fb4 1-146
+worker/durable/agent-runner-presence.ts
+  s_228fa0cf17b1ab::t_e33a531177fe6a 1-46
+.github/workflows/deploy.yml
+  s_23a40df6696d09::t_befbe610939c8e 25,30,32-33,47,54-55,65
+eslint.config.js
+  s_228fa0cf17b1ab::t_57b4441d098818 90-118
+src/features/org/org-membership.tsx
+  s_228fa0cf17b1ab::t_50337be5864a94 1-292
+worker/http/project-context.ts
+  s_23a40df6696d09::t_4cb7c6ff397ce5 1-13
+src/features/agent/state/pending-ai-changes-slice.ts
+  s_23a40df6696d09::t_02babb3438f036 1-230
+src/features/agent/components/agent-panel/messages/sub-agent-activity.tsx
+  s_23a40df6696d09::t_c389b4e0f9b8ba 1-124
+src/features/org/org-management-page.tsx
+  s_228fa0cf17b1ab::t_9b966d2ca34460 2,12
+worker/durable/agent-turn-coordinator.ts
+  s_228fa0cf17b1ab::t_116aedf3186775 1-196
+src/hooks/index.ts
+  s_23a40df6696d09::t_a6a73639fc4804 2
+src/features/settings/api/account.ts
+  s_228fa0cf17b1ab::t_28fad700a38d07 1-54
+worker/http/app.ts
+  s_23a40df6696d09::t_aa85247ef2db44 1-110
+worker/http/development.ts
+  s_23a40df6696d09::t_8a4fa01f91a00d 1-216
+worker/services/agent/review-queue-model.ts
+  s_228fa0cf17b1ab::t_89ad2c7e371c71 1-258
+worker/lib/analytics.ts
+  s_228fa0cf17b1ab::t_024004fc3f859c 36,76,78,116,152,154,187-188,190,215,217
+bun.lock
+  s_228fa0cf17b1ab::t_ac7b1a4e76a008 55,1131,1135,1145,3011-3013,3419-3420
+.github/workflows/deploy-landing.yml
+  s_23a40df6696d09::t_14eebb32088730 26,31,33-34,60
+src/features/file-tree/hooks/use-file-tree.ts
+  s_23a40df6696d09::t_5648d5a1e24a59 66,69
+worker/http/security.ts
+  s_23a40df6696d09::t_c056b0cc2a0178 1-96
+src/features/agent/components/agent-panel/messages/message-author.ts
+  s_23a40df6696d09::t_4c280898277469 1-28
+src/features/ide/mobile-layout.stories.tsx
+  s_23a40df6696d09::t_0681f4fe053cd1 12-13
+shared/types/review.ts
+  s_23a40df6696d09::t_20c755fb828654 1-88
+src/features/file-tree/components/file-tree.tsx
+  s_228fa0cf17b1ab::t_196c675f48075a 1,3,7-9
+src/features/agent/components/agent-panel/messages/prompts.tsx
+  s_23a40df6696d09::t_497048c7074f49 1-258
+worker/http/session.ts
+  s_23a40df6696d09::t_b57807f7b58e96 1-30
+src/features/dashboard/dashboard-page.tsx
+  s_228fa0cf17b1ab::t_97c58eb8dd8450 2,4,13-21,23,29
+worker/services/projects/project-tree-transfer.ts
+  s_228fa0cf17b1ab::t_83fc9d5c8c1785 1-18
+src/features/ide/mobile-file-drawer.stories.tsx
+  s_23a40df6696d09::t_a93c387cd3d14f 7
+shared/validation/tools.ts
+  s_23a40df6696d09::t_11655bb36909f2 1-176
+worker/services/static-preview.ts
+  s_228fa0cf17b1ab::t_a851c5976669e0 14,21,43-44,220,304,697
+package.json
+  s_228fa0cf17b1ab::t_624728dda87e11 53,155,161
+src/features/org/org-membership.test.tsx
+  s_228fa0cf17b1ab::t_2b10bc796798fd 1-82
+src/features/agent/hooks/use-agent-sessions.test.tsx
+  s_228fa0cf17b1ab::t_1bfe6ba4d04d4f 1,4,88-128
+src/features/agent/state/agent-slice.ts
+  s_23a40df6696d09::t_d9e84616fc99fe 1-113
+worker/routes/index.ts
+  s_23a40df6696d09::t_18be6b84dbeacf 50
+src/features/ide/use-editor-session-persistence.test.tsx
+  s_228fa0cf17b1ab::t_88baad82a1c192 1,25,45,60-136
+src/features/agent/components/agent-panel/composer-controls.tsx
+  s_228fa0cf17b1ab::t_86761ac85c5672 1-219
+worker/index.ts
+  s_23a40df6696d09::t_dda15ecb9e1059 9,11
+shared/validation/limits.ts
+  s_23a40df6696d09::t_71f4912b1977cf 1-7
+shared/types/collaboration.ts
+  s_23a40df6696d09::t_5bd4285426c074 1-65
+src/features/user-menu/state/identity-slice.ts
+  s_23a40df6696d09::t_786992947de94b 1-30
+src/lib/api/create-client.ts
+  s_228fa0cf17b1ab::t_2d92000cd362fd 1-26
+worker/routes/root-routes.ts
+  s_228fa0cf17b1ab::t_683c17c11f502e 1-93
+worker/services/transform-service.ts
+  s_23a40df6696d09::t_61d53fcb76be10 25,365-366,369-375,380,543,547
+worker/services/projects/clone-project.ts
+  s_228fa0cf17b1ab::t_35765183f123ff 1-104
+src/features/agent/components/agent-panel/panel.test.tsx
+  s_228fa0cf17b1ab::t_23df9b3ab41bbf 1,155-160,174,179-191,450-471
+src/features/ide/desktop-layout.stories.tsx
+  s_23a40df6696d09::t_69829ca11982af 13-14
+src/features/collaboration/lib/project-socket.ts
+  s_228fa0cf17b1ab::t_06840938e9a2fe 1-73
+src/features/agent/components/agent-panel/messages/tool-icon.tsx
+  s_23a40df6696d09::t_1d29447d44a093 1-74
+worker/http/entrypoint.ts
+  s_23a40df6696d09::t_bfb8100636d355 1-238
+src/features/agent/components/agent-panel/messages/tool-call.tsx
+  s_23a40df6696d09::t_e689c2638f7aa5 1-359
+src/features/agent/api/debug-log.ts
+  s_228fa0cf17b1ab::t_d7cad86452e0b1 1-19
+src/features/dashboard/components/dashboard-loading-overlay.tsx
+  s_228fa0cf17b1ab::t_279e9ca70165fa 1-23
+worker/durable/agent-runner-input.test.ts
+  s_228fa0cf17b1ab::t_39d63eb6cc3117 1-32
+shared/validation/git.ts
+  s_23a40df6696d09::t_d4818e15516bad 1-94
+shared/validation/preferences.ts
+  s_23a40df6696d09::t_143fe9552a8b4b 1-42
+src/features/dashboard/components/dashboard-project-options.tsx
+  s_228fa0cf17b1ab::t_618b9ad00118f7 1-246
+worker/lib/workspace-client.test.ts
+  s_228fa0cf17b1ab::t_2554fee3a3f862 1-23
+worker/services/projects/project-access.ts
+  s_228fa0cf17b1ab::t_203cc92592cf5b 1-73
+src/features/project-settings/api/project.ts
+  s_228fa0cf17b1ab::t_21af2f14afccea 1-103
+shared/types/project.ts
+  s_23a40df6696d09::t_8a5c606a5aede6 1-63
+src/features/agent/components/agent-panel/session-header.tsx
+  s_228fa0cf17b1ab::t_59423b00ee22d3 1-346
+.github/workflows/ci.yml
+  s_23a40df6696d09::t_aac0537d219055 7-11,23,29-33,45,70-71,95-96,127-128,152-153,169,174-175,183-184,186-187,189-212,225,236-237,282-283,359-360
+worker/durable/agent-runner-helpers.ts
+  s_228fa0cf17b1ab::t_58cc9394f99415 15
+worker/http/preview-access.ts
+  s_23a40df6696d09::t_b8870cd7065cd1 1-148
+worker/durable/project-filesystem.test.ts
+  s_23a40df6696d09::t_8340a885bb04e3 135-150
+src/features/ide/mobile-layout.tsx
+  s_228fa0cf17b1ab::t_3dac7921c9c37d 13-17,24,26-29
+src/features/agent/components/agent-panel/panel.tsx
+  s_228fa0cf17b1ab::t_1e4c377b860d90 2,18,20-21,32-33,56,156-171,926-943,1154,1182-1197
+worker/lib/http-error.ts
+  s_228fa0cf17b1ab::t_96be3a81eae10a 26-31,41-44
+src/features/ide/use-ide-effects.ts
+  s_23a40df6696d09::t_ebf3b87d2010ad 4
+.github/workflows/ci-landing.yml
+  s_23a40df6696d09::t_8d678be81ef3f4 8,15,41-42,69-70,94-95
+vitest.config.ts
+  s_23a40df6696d09::t_0fc68dd1a3a0d0 1,10-13
+src/features/org/api/organizations.ts
+  s_228fa0cf17b1ab::t_05a1e0597f8f9f 1-44
+src/features/agent/components/agent-panel/messages/queued-steering-strip.tsx
+  s_23a40df6696d09::t_1050ff4f7e2321 1-177
+src/features/ide/desktop-layout.tsx
+  s_228fa0cf17b1ab::t_7b05248059cb35 12-15,24,28-31
+src/features/agent/components/agent-panel/messages.tsx
+  s_23a40df6696d09::t_8083d4d2cd344e 1-2,5,78-79,81
+worker/services/agent/review-queue.ts
+  s_228fa0cf17b1ab::t_1865876017fa4e 3,16-27
+shared/types/file-system.ts
+  s_23a40df6696d09::t_b3620b3fde8fe9 1-26
+src/features/file-tree/api/dependencies.ts
+  s_228fa0cf17b1ab::t_8580c577778cac 1-20
+worker/services/projects/create-project.ts
+  s_228fa0cf17b1ab::t_33392a025e4ddc 1-81
+worker/services/static-preview/external-modules.ts
+  s_228fa0cf17b1ab::t_f71f176889b2b4 1-59
+src/features/file-tree/components/file-tree-context-menu.tsx
+  s_228fa0cf17b1ab::t_e50a4a844b610c 1-149
+src/lib/store.ts
+  s_23a40df6696d09::t_7775f9b4e067e2 4-24,45-54,68
+worker/services/static-preview/preview-errors.ts
+  s_228fa0cf17b1ab::t_3dcea6b513621e 1-62
+shared/types/git.ts
+  s_23a40df6696d09::t_e373fdef4f5413 1-84
+worker/durable/session-store.ts
+  s_228fa0cf17b1ab::t_75b943e6b2844a 16,26
+shared/types/test-run.ts
+  s_23a40df6696d09::t_8a7d8c65a4ed58 1-148
+worker/http/project-app.ts
+  s_23a40df6696d09::t_85963bffe1af11 1-178
+src/features/file-tree/state/file-tree-slice.ts
+  s_23a40df6696d09::t_c04108717168a5 1-56
+src/features/ide/state/ui-slice.ts
+  s_228fa0cf17b1ab::t_c006941fdd6dfa 1-135
+src/features/ide/ide-header.tsx
+  s_23a40df6696d09::t_3cdf844b2c9e31 11-12
+shared/types.ts
+  s_23a40df6696d09::t_b16d085b0d7bb5 1-83
+src/app.tsx
+  s_228fa0cf17b1ab::t_fecdba6c2f8c5b 21
+worker/durable/sub-agent-worker.ts
+  s_228fa0cf17b1ab::t_686d099eb9c6cf 25
+worker/durable/agent-turn-coordinator.test.ts
+  s_228fa0cf17b1ab::t_7ad4ee70a68c85 1-170
+worker/services/projects/retention.ts
+  s_23a40df6696d09::t_4794d909847676 1-94
+src/components/version-badge.tsx
+  s_23a40df6696d09::t_5cfc02cfce7ec7 5,20
+src/features/ide/ide-shell.test.tsx
+  s_23a40df6696d09::t_03be76ac32bbc3 31,35,39,54,58
+src/features/git/state/git-slice.ts
+  s_23a40df6696d09::t_a6850d7d892ceb 1-58
+shared/validation/project.ts
+  s_23a40df6696d09::t_c216c9b3498fb6 1-69
+src/features/dashboard/components/dashboard-project-row.tsx
+  s_228fa0cf17b1ab::t_dec5dc592d40fc 1-29
+worker/durable/db/dal.ts
+  s_228fa0cf17b1ab::t_413a45ec3b3c69 1
+src/features/deploy/api/deployment.ts
+  s_228fa0cf17b1ab::t_02d7b9d7c32f60 1-54
+src/features/dashboard/dashboard-project-id.ts
+  s_228fa0cf17b1ab::t_4519c81e4cf22d 1-15
+src/features/ide/use-log-counts.ts
+  s_23a40df6696d09::t_2f3ee5257854d2 6
+worker/durable/agent-runner-lifecycle.test.ts
+  s_228fa0cf17b1ab::t_20dfbf9b1cae1d 1-128
+scripts/deploy.ts
+  s_23a40df6696d09::t_75da83732a77d4 1-12
+shared/types/agent.ts
+  s_23a40df6696d09::t_9652f7296afa31 1-151
+shared/validation.ts
+  s_23a40df6696d09::t_f4f72db5fc93d3 2-143
+src/features/org/api/transfers.ts
+  s_228fa0cf17b1ab::t_15131e0a5c5563 1-57
+src/features/ide/editor-area.tsx
+  s_228fa0cf17b1ab::t_a21673db7797a9 11
+worker/durable/project-filesystem.ts
+  s_228fa0cf17b1ab::t_9829d1bdd16c6b 27,91,122
+shared/validation/deploy.ts
+  s_23a40df6696d09::t_7fb791dd6c76ff 1-50
+src/features/editor/state/editor-slice.ts
+  s_228fa0cf17b1ab::t_c1bb866d735c37 1-139
+worker/durable/agent-runner.ts
+  s_228fa0cf17b1ab::t_4d26d4f50c9708 35-42,196-219,632,664-666,668-675,683-685,694,735,748,1070,1081
+src/features/agent/components/agent-panel/messages/assistant-message.tsx
+  s_23a40df6696d09::t_09c2447524bd5c 1-311
+.plans/REFACTOR_PROGRESS.md
+  s_228fa0cf17b1ab::t_e4610ba6926438 1-36
+auxiliary/email/worker-configuration.d.ts
+  s_228fa0cf17b1ab::t_37bfed50e435c3 2
+docs/architecture.md
+  s_228fa0cf17b1ab::t_38da55c3b3aebc 1-27
+docs/knip-audit.md
+  s_228fa0cf17b1ab::t_8134be60728e43 1-21
+worker/http/preview.ts
+  s_228fa0cf17b1ab::t_baa4895d1beef9 1-270
+worker/routes/git-routes.ts
+  s_228fa0cf17b1ab::t_89bbae43059eee 73-74,82-83,92-93,102-103,111-112,120-121,130,140,152,163-164,173-174,182-183,192-193,202-203,212-213,222,233,243-244,253-254,263-264,273-274,283-284,293-294
+worker/services/agent/tools/drain-workspace-changes.ts
+  s_228fa0cf17b1ab::t_5ed360cc6a4ebd 44,51
+worker/services/agent/tools/fs-binding.test.ts
+  s_228fa0cf17b1ab::t_98c9281e62e8f6 17,42
+worker/services/vite-host/build-artifact.ts
+  s_228fa0cf17b1ab::t_777a8826286251 80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d7759fddf65528b5e2ee52b2fc9e2d3c39a8815a",
+  "prompts": {},
+  "sessions": {
+    "s_228fa0cf17b1ab": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0de3c-3e96-7c12-a107-e0591c2f7e27",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    },
+    "s_23a40df6696d09": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0db5c-b8f5-7230-b10c-026aa9562314",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
