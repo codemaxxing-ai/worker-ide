@@ -197,7 +197,10 @@ jobs:
         run: mkdir -p dist
 
       - name: Run Worker tests
-        run: bun run test:worker --run
+        run: |
+          for shard in 1 2 3 4; do
+            bun run test:worker --run --shard="${shard}/4"
+          done
 
   test-react:
     name: React Tests

@@ -2,6 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { execute } from './sub-agent';
 import { createMockContext, createMockSendEvent } from './test-helpers';
+import { SubAgentWorker } from '../../../durable/sub-agent-worker';
+
+// These tests verify the delegation contract; loading the real Think agent
+// during a tool test makes the dynamic import depend on CI runner speed.
+vi.mock('../../../durable/sub-agent-worker', () => ({
+	SubAgentWorker: class SubAgentWorker {},
+}));
 
 describe('sub_agent', () => {
 	it('delegates through the retained agent-tool API', async () => {
@@ -30,7 +37,7 @@ describe('sub_agent', () => {
 		const result = await execute({ prompt: 'Inspect the failing integration', context: 'Focus on src/example.ts' }, sendEvent, context, []);
 
 		expect(runAgentTool).toHaveBeenCalledWith(
-			expect.anything(),
+			SubAgentWorker,
 			expect.objectContaining({
 				runId: 'agent-tool:call-abc',
 				parentToolCallId: 'call-abc',
