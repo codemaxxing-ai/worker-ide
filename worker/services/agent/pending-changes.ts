@@ -53,19 +53,3 @@ export function accumulatePendingChange(
 	}
 	pendingChanges.set(change.path, { ...change, beforeContent, snapshotId, status: 'pending', hunkStatuses: [] });
 }
-
-/**
- * Convert a pending changes Map to a JSON-safe Record, filtering to only
- * entries with 'pending' status.
- */
-export function pendingChangesMapToRecord(pendingChanges: Map<string, PendingFileChange>): Record<string, PendingFileChange> | undefined {
-	const record: Record<string, PendingFileChange> = {};
-	let hasEntries = false;
-	for (const [key, value] of pendingChanges) {
-		if (value.status === 'pending') {
-			record[key] = value;
-			hasEntries = true;
-		}
-	}
-	return hasEntries ? record : undefined;
-}

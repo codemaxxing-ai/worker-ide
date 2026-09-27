@@ -87,8 +87,8 @@ export const fileRoutes = new Hono<AppEnvironment>()
 		}
 
 		// Invalidate tsconfig cache when tsconfig.json is modified
-		if (path === '/tsconfig.json') {
-			invalidateTsConfigCache(projectRoot);
+		if (path === '/tsconfig.json' || path === '/tsconfig.app.json') {
+			invalidateTsConfigCache(projectId, projectRoot);
 		}
 
 		// Trigger HMR update (CSS/JS get hot updates, other files trigger full reload)

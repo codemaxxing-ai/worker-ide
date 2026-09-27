@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 
 import { pendingChanges, sessionMessageMetadata, sessionMetadata } from './schema';
 
@@ -61,19 +61,6 @@ export function replaceSessionMessageMetadata(database: AgentDatabase, sessionId
 		return;
 	}
 	database.insert(sessionMessageMetadata).values(rows).run();
-}
-
-export function deleteSessionMessageMetadata(database: AgentDatabase, sessionId: string, messageIds?: string[]): void {
-	if (!messageIds || messageIds.length === 0) {
-		database.delete(sessionMessageMetadata).where(eq(sessionMessageMetadata.sessionId, sessionId)).run();
-		return;
-	}
-	for (const messageId of messageIds) {
-		database
-			.delete(sessionMessageMetadata)
-			.where(and(eq(sessionMessageMetadata.sessionId, sessionId), eq(sessionMessageMetadata.messageId, messageId)))
-			.run();
-	}
 }
 
 export function readPendingChangesData(database: AgentDatabase): string {

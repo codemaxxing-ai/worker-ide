@@ -28,6 +28,22 @@ function buildContext(fsStub: DurableObjectStub<ProjectFilesystem>, sessionId: s
 }
 
 describe('drainWorkspaceChanges', () => {
+	it('includes Git-adjacent files in review changes and HMR notifications', async () => {
+		const stub = getFilesystemStub('test-drain-git-adjacent-review');
+		const context = buildContext(stub, 'session-git-adjacent');
+		const queryChanges: FileChange[] = [];
+		const sendEvent = vi.fn();
+		const triggerHmr = vi.fn(async () => {});
+		await stub.wsWriteFile('/.gitignore', 'dist\n', context.sessionId);
+		await stub.wsWriteFile('/.github/workflows/ci.yml', 'name: CI\n', context.sessionId);
+
+		await drainWorkspaceChanges(context, sendEvent, queryChanges, new Set(), triggerHmr);
+
+		expect(queryChanges.map((change) => change.path).toSorted()).toEqual(['/.github/workflows/ci.yml', '/.gitignore']);
+		expect(sendEvent).toHaveBeenCalledTimes(2);
+		expect(triggerHmr).toHaveBeenCalledWith('test-project', expect.arrayContaining(['/.gitignore', '/.github/workflows/ci.yml']));
+	});
+
 	it('records a change in queryChanges even when the path was already emitted by a tools.* call', async () => {
 		const stub = getFilesystemStub('test-drain-already-emitted');
 		const sessionId = 'session-emitted';

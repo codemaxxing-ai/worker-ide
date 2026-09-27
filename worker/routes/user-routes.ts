@@ -1,7 +1,8 @@
 import { zValidator } from '@hono/zod-validator';
-import { and, count, desc, eq, inArray, isNull, or } from 'drizzle-orm';
+import { and, count, desc, eq, gt, inArray, isNull, ne, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+import { z } from 'zod';
 
 import { resolveUserPreferences } from '@shared/constants';
 import { HttpErrorCode } from '@shared/http-errors';
@@ -24,11 +25,30 @@ import { getCurrentFreeOrganizationCount } from '../lib/organization-limits';
 import type { AuthedEnvironment } from '../types';
 
 const MAX_RECENT_PROJECTS = 20;
+const SESSION_FRESHNESS_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const sessionIdParameterSchema = z.object({ id: z.uuid() });
 
 interface UserDeletionImpact {
 	blockers: Array<{ id: string; name: string; memberCount: number }>;
 	singleMemberOrganizations: Array<{ id: string; name: string; projectCount: number }>;
 	membershipOrganizations: Array<{ id: string; name: string }>;
+}
+
+async function requireFreshSession(database: ReturnType<typeof drizzle>, currentSession: { id: string; userId: string }) {
+	const currentSessionRows = await database
+		.select({ createdAt: schema.session.createdAt })
+		.from(schema.session)
+		.where(and(eq(schema.session.id, currentSession.id), eq(schema.session.userId, currentSession.userId)))
+		.limit(1);
+	const currentSessionRow = currentSessionRows[0];
+
+	if (!currentSessionRow) {
+		throw httpError(HttpErrorCode.UNAUTHORIZED, 'Session is no longer valid');
+	}
+
+	if (Date.now() - currentSessionRow.createdAt.getTime() >= SESSION_FRESHNESS_MAX_AGE_MS) {
+		throw httpError(HttpErrorCode.SESSION_NOT_FRESH, 'Sign in again to manage sessions');
+	}
 }
 
 async function getUserDeletionImpact(database: ReturnType<typeof drizzle>, userId: string): Promise<UserDeletionImpact> {
@@ -105,6 +125,63 @@ async function getUserDeletionImpact(database: ReturnType<typeof drizzle>, userI
 }
 
 export const userRoutes = new Hono<AuthedEnvironment>()
+	// GET /api/user/sessions — Active sessions without exposing bearer tokens
+	.get('/user/sessions', async (c) => {
+		const currentSession = c.get('session');
+		const database = drizzle(c.env.DB, { schema });
+		const now = new Date();
+		const sessions = await database
+			.select({
+				id: schema.session.id,
+				userAgent: schema.session.userAgent,
+				ipAddress: schema.session.ipAddress,
+				createdAt: schema.session.createdAt,
+			})
+			.from(schema.session)
+			.where(and(eq(schema.session.userId, currentSession.userId), gt(schema.session.expiresAt, now)))
+			.orderBy(desc(schema.session.createdAt));
+
+		return c.json({
+			sessions: sessions.map((session) => ({
+				id: session.id,
+				userAgent: session.userAgent ?? undefined,
+				ipAddress: session.ipAddress ?? undefined,
+				createdAt: session.createdAt,
+				current: session.id === currentSession.id,
+			})),
+		});
+	})
+
+	// DELETE /api/user/sessions/:id — Revoke an owned non-current session by opaque ID
+	.delete('/user/sessions/:id', zValidator('param', sessionIdParameterSchema), async (c) => {
+		const currentSession = c.get('session');
+		const { id } = c.req.valid('param');
+		const database = drizzle(c.env.DB, { schema });
+		await requireFreshSession(database, currentSession);
+		const deletedSessions = await database
+			.delete(schema.session)
+			.where(and(eq(schema.session.id, id), eq(schema.session.userId, currentSession.userId), ne(schema.session.id, currentSession.id)))
+			.returning({ id: schema.session.id });
+
+		if (deletedSessions.length === 0) {
+			throw httpError(HttpErrorCode.NOT_FOUND, 'Session not found');
+		}
+
+		return c.json({ revoked: true });
+	})
+
+	// DELETE /api/user/sessions — Revoke every other session without ending the current session
+	.delete('/user/sessions', async (c) => {
+		const currentSession = c.get('session');
+		const database = drizzle(c.env.DB, { schema });
+		await requireFreshSession(database, currentSession);
+		await database
+			.delete(schema.session)
+			.where(and(eq(schema.session.userId, currentSession.userId), ne(schema.session.id, currentSession.id)));
+
+		return c.json({ revoked: true });
+	})
+
 	// GET /api/user/limits — Resolved limits + current usage for the authenticated user
 	.get('/user/limits', async (c) => {
 		const { userId } = c.get('session');

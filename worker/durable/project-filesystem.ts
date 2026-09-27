@@ -24,7 +24,7 @@ interface SeedFile {
  * create/delete (respectively) or when content could not be read (binary,
  * directory, …).
  */
-export interface DrainedWorkspaceChange {
+interface DrainedWorkspaceChange {
 	type: WorkspaceChangeEvent['type'];
 	path: string;
 	entryType: WorkspaceChangeEvent['entryType'];
@@ -88,7 +88,7 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 	 * baseline. Reads that fail (new file, directory, binary) store NULL.
 	 */
 	private async captureBaseline(writerId: string, path: string): Promise<void> {
-		if (path.startsWith('/.git')) return;
+		if (path === '/.git' || path.startsWith('/.git/')) return;
 		this.ensureWriterTable();
 		const existing = this.ctx.storage.sql
 			.exec(`SELECT 1 FROM ${WRITER_CHANGE_TABLE} WHERE writer_id = ? AND path = ? LIMIT 1`, writerId, path)
@@ -119,7 +119,7 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 	 * never clobbers a baseline already captured before the write.
 	 */
 	private markTouched(writerId: string, path: string): void {
-		if (path.startsWith('/.git')) return;
+		if (path === '/.git' || path.startsWith('/.git/')) return;
 		this.ensureWriterTable();
 		this.ctx.storage.sql.exec(
 			`INSERT OR IGNORE INTO ${WRITER_CHANGE_TABLE} (writer_id, path, baseline) VALUES (?, ?, NULL)`,

@@ -14,7 +14,7 @@
  * This test uses the REAL `@worker/lib/project-fs` (no mock) so the re-binding
  * is actually exercised.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_AI_MODEL } from '@shared/constants';
 import { runWithProjectStub } from '@worker/lib/project-fs';
@@ -39,7 +39,7 @@ function createFakeFsStub(files: Record<string, string>): ToolExecutorContext['f
 		// eslint-disable-next-line unicorn/no-null -- the ProjectFilesystem RPC contract returns `null` for a missing file
 		wsReadFile: async (path: string): Promise<string | null> => (path in files ? files[path] : null),
 		// The no-loader fallback drains after each tool; this fake has no writes.
-		drainWorkspaceChanges: async () => [],
+		drainWorkspaceChanges: async () => Object.assign([], { [Symbol.dispose]: vi.fn() }),
 	};
 	return stub as unknown as ToolExecutorContext['fsStub'];
 }

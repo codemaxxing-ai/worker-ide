@@ -1,5 +1,8 @@
 import { defineConfig, devices } from 'playwright/test';
 
+const testBaseUrl = process.env.TEST_BASE_URL || 'http://localhost:3000';
+const testPort = new URL(testBaseUrl).port || '3000';
+
 export default defineConfig({
 	testDir: './test/e2e',
 	globalSetup: './test/e2e/global-setup.ts',
@@ -9,7 +12,7 @@ export default defineConfig({
 	workers: process.env.CI ? 1 : 4,
 	reporter: [['html', { open: 'never' }]],
 	use: {
-		baseURL: process.env.TEST_BASE_URL || 'http://localhost:3000',
+		baseURL: testBaseUrl,
 		trace: 'on-first-retry',
 		screenshot: 'only-on-failure',
 	},
@@ -22,9 +25,9 @@ export default defineConfig({
 	webServer: process.env.CI
 		? undefined
 		: {
-				command: 'bun run dev',
-				url: 'http://localhost:3000',
-				reuseExistingServer: true,
+				command: `bun run db:migrate:local && bun run build:worker-types && bunx vite --port ${testPort} --strictPort`,
+				url: testBaseUrl,
+				reuseExistingServer: false,
 				timeout: 120_000,
 			},
 });

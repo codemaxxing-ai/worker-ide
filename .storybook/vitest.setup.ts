@@ -1,7 +1,4 @@
-import { setProjectAnnotations } from '@storybook/react-vite';
-import { beforeAll, vi } from 'vitest';
-
-import * as previewAnnotations from './preview';
+import { vi } from 'vitest';
 
 vi.mock('virtual:pwa-register/react', () => ({
 	useRegisterSW: () => ({
@@ -10,8 +7,3 @@ vi.mock('virtual:pwa-register/react', () => ({
 		updateServiceWorker: () => {},
 	}),
 }));
-
-const annotations = setProjectAnnotations([previewAnnotations]);
-
-// Run Storybook's beforeAll hook
-beforeAll(annotations.beforeAll);

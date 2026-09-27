@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -5,6 +6,10 @@ import { defineWorkersProject } from '@cloudflare/vitest-pool-workers/config';
 import { defineConfig } from 'vitest/config';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Wrangler validates the asset directory even though these tests exercise
+// Worker APIs. A clean checkout should not need a production build first.
+mkdirSync(path.resolve(__dirname, 'dist/client'), { recursive: true });
 
 const sharedAlias = {
 	'@': path.resolve(__dirname, './src'),
@@ -36,6 +41,8 @@ export default defineConfig({
 					name: 'worker',
 					include: ['worker/**/*.test.ts'],
 					exclude: ['worker/fixtures/**'],
+					// Durable Object startup and vinext setup can exceed Vitest’s 5s default.
+					testTimeout: 15_000,
 					// Pre-bundle CJS-only dependencies so workerd's ESM runtime can resolve
 					// their named exports. See: https://developers.cloudflare.com/workers/testing/vitest-integration/known-issues/#module-resolution
 					deps: {

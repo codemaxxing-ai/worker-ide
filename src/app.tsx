@@ -6,7 +6,6 @@ import { Navigate, Outlet, Route, Routes, useLocation, useParams, useSearchParam
 
 import { AppDocumentMetadata } from '@/components/app-document-metadata';
 import { ErrorBoundary } from '@/components/error-boundary';
-import { IDEShell } from '@/components/ide-shell';
 import { NotFoundPage } from '@/components/not-found-page';
 import { OfflineBanner } from '@/components/offline-banner';
 import { ProjectAccessRestricted } from '@/components/project-access-restricted';
@@ -19,6 +18,7 @@ import { toast } from '@/components/ui/toast-store';
 import { AppearanceModal } from '@/features/appearance';
 import { LoginPage } from '@/features/auth';
 import { DashboardPage } from '@/features/dashboard';
+import { IDEShell } from '@/features/ide';
 import { OrgManagementPage } from '@/features/org';
 import { AccountPage, ProfilePage, SettingsLayout } from '@/features/settings';
 import { useEditorFont } from '@/hooks/use-editor-font';

@@ -63,10 +63,10 @@ export function useFileTree({ projectId, enabled = true }: UseFileTreeOptions) {
 	// Sync query data with store
 	useEffect(() => {
 		if (query.data) {
-			setFiles(query.data);
+			setFiles(query.data, projectId);
 		}
 		setLoading(query.isLoading);
-	}, [query.data, query.isLoading, setFiles, setLoading]);
+	}, [projectId, query.data, query.isLoading, setFiles, setLoading]);
 
 	// Mutation for creating files
 	const createFileMutation = useMutation({

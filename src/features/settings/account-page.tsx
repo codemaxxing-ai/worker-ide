@@ -9,31 +9,18 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Modal, ModalBody, ModalFooter } from '@/components/ui/modal';
 import { ListSkeleton } from '@/components/ui/skeleton';
 import { toast } from '@/components/ui/toast-store';
-import { deleteAccount, fetchAccountDeletePreview } from '@/lib/api-client';
+import {
+	deleteAccount,
+	fetchAccountDeletePreview,
+	fetchActiveSessions,
+	revokeActiveSession,
+	revokeOtherActiveSessions,
+} from '@/lib/api-client';
+import { ApiError } from '@/lib/api-error';
 import { authClient } from '@/lib/auth-client';
 import { formatRelativeTime } from '@/lib/utils';
 
 import type { AccountDeletePreview } from '@/lib/api-client';
-
-interface SessionListEntry {
-	token: string;
-	userAgent?: string;
-	ipAddress?: string;
-	createdAt: string | Date;
-	current?: boolean;
-}
-
-function isSessionListEntry(value: unknown): value is SessionListEntry {
-	return (
-		value !== null &&
-		typeof value === 'object' &&
-		typeof Reflect.get(value, 'token') === 'string' &&
-		(typeof Reflect.get(value, 'userAgent') === 'string' || Reflect.get(value, 'userAgent') === undefined) &&
-		(typeof Reflect.get(value, 'ipAddress') === 'string' || Reflect.get(value, 'ipAddress') === undefined) &&
-		(Reflect.get(value, 'createdAt') instanceof Date || typeof Reflect.get(value, 'createdAt') === 'string') &&
-		(typeof Reflect.get(value, 'current') === 'boolean' || Reflect.get(value, 'current') === undefined)
-	);
-}
 
 export default function AccountPage() {
 	const navigate = useNavigate();
@@ -41,46 +28,57 @@ export default function AccountPage() {
 
 	const sessionsQuery = useQuery({
 		queryKey: ['sessions'],
-		queryFn: async () => {
-			const { data, error } = await authClient.listSessions();
-			if (error) throw new Error(error.message ?? 'Failed to load sessions');
-			return data ?? [];
-		},
+		queryFn: fetchActiveSessions,
 		staleTime: 1000 * 30,
 	});
 
 	const queryClient = useQueryClient();
+	const [showReauthenticationModal, setShowReauthenticationModal] = useState(false);
+
+	const handleRevocationError = useCallback((error: unknown) => {
+		if (error instanceof ApiError && error.code === 'SESSION_NOT_FRESH') {
+			setShowReauthenticationModal(true);
+			return;
+		}
+
+		toast.error('Could not revoke sessions. Please check your connection and try again.');
+	}, []);
 
 	const handleRevokeSession = useCallback(
-		async (sessionToken: string) => {
+		async (sessionId: string) => {
 			try {
-				const { error } = await authClient.revokeSession({ token: sessionToken });
-				if (error) {
-					toast.error(error.message ?? 'Could not revoke this session. Please try again.');
-					return;
-				}
+				await revokeActiveSession(sessionId);
 				toast.success('Session revoked');
 				void queryClient.invalidateQueries({ queryKey: ['sessions'] });
-			} catch {
-				toast.error('Could not revoke the session. Please check your connection and try again.');
+			} catch (error) {
+				handleRevocationError(error);
 			}
 		},
-		[queryClient],
+		[handleRevocationError, queryClient],
 	);
 
 	const handleRevokeAllOtherSessions = useCallback(async () => {
 		try {
-			const { error } = await authClient.revokeSessions();
-			if (error) {
-				toast.error(error.message ?? 'Could not revoke other sessions. Please try again.');
-				return;
-			}
+			await revokeOtherActiveSessions();
 			toast.success('All other sessions revoked');
 			void queryClient.invalidateQueries({ queryKey: ['sessions'] });
-		} catch {
-			toast.error('Could not revoke sessions. Please check your connection and try again.');
+		} catch (error) {
+			handleRevocationError(error);
 		}
-	}, [queryClient]);
+	}, [handleRevocationError, queryClient]);
+
+	const handleSignInAgain = useCallback(async () => {
+		try {
+			const { error } = await authClient.signOut();
+			if (error) {
+				toast.error(error.message ?? 'Could not sign out. Please try again.');
+				return;
+			}
+			globalThis.location.href = '/?next=%2Fsettings%2Faccount';
+		} catch {
+			toast.error('Could not sign out. Please check your connection and try again.');
+		}
+	}, []);
 
 	const [deletePreview, setDeletePreview] = useState<AccountDeletePreview | undefined>();
 	const [isLoadingPreview, setIsLoadingPreview] = useState(false);
@@ -119,7 +117,7 @@ export default function AccountPage() {
 		}
 	}, [navigate]);
 
-	const sessions = Array.isArray(sessionsQuery.data) ? sessionsQuery.data.filter((session_) => isSessionListEntry(session_)) : [];
+	const sessions = sessionsQuery.data ?? [];
 
 	return (
 		<div className="flex flex-col gap-8">
@@ -172,9 +170,9 @@ export default function AccountPage() {
 						sessions.map((session) => {
 							const isMobile = session.userAgent?.includes('Mobile') ?? false;
 							const Icon = isMobile ? Smartphone : Monitor;
-							const createdAt = typeof session.createdAt === 'string' ? new Date(session.createdAt).getTime() : session.createdAt.getTime();
+							const createdAt = new Date(session.createdAt).getTime();
 							return (
-								<div key={session.token} className="flex items-center justify-between gap-3 px-4 py-3">
+								<div key={session.id} className="flex items-center justify-between gap-3 px-4 py-3">
 									<div className="flex min-w-0 items-center gap-3">
 										<Icon className="size-4 shrink-0 text-text-secondary" />
 										<div className="min-w-0">
@@ -191,7 +189,7 @@ export default function AccountPage() {
 										<ConfirmButton
 											title="Revoke this session?"
 											confirmLabel="Revoke"
-											onConfirm={() => handleRevokeSession(session.token)}
+											onConfirm={() => handleRevokeSession(session.id)}
 											variant="ghost"
 											size="sm"
 											className="
@@ -262,6 +260,22 @@ export default function AccountPage() {
 				isConfirming={isDeleting}
 				onConfirm={() => void handleConfirmDelete()}
 			/>
+
+			<Modal open={showReauthenticationModal} onOpenChange={setShowReauthenticationModal} title="Sign in again">
+				<ModalBody>
+					<p className="text-sm text-text-secondary">
+						For your security, you need to have signed in within the last 24 hours before revoking sessions.
+					</p>
+				</ModalBody>
+				<ModalFooter>
+					<Button variant="secondary" size="sm" onClick={() => setShowReauthenticationModal(false)}>
+						Cancel
+					</Button>
+					<Button size="sm" onClick={() => void handleSignInAgain()}>
+						Sign in again
+					</Button>
+				</ModalFooter>
+			</Modal>
 
 			{deletePreview && !deletePreview.canDelete && (
 				<Modal open={showBlockersModal} onOpenChange={setShowBlockersModal} title="Delete account">

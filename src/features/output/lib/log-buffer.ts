@@ -234,7 +234,7 @@ function scheduleSyncToCoordinator() {
 		syncTimeout = undefined;
 		// Dynamic import to avoid circular dependency — projectSocketSendReference
 		// is a simple { current } ref object, not a React hook.
-		void import('@/hooks/use-project-socket').then(({ projectSocketSendReference }) => {
+		void import('@/features/collaboration/hooks/use-project-socket').then(({ projectSocketSendReference }) => {
 			const send = projectSocketSendReference.current;
 			if (!send) return;
 			const snapshot = getLogSnapshot();

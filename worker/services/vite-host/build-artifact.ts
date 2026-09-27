@@ -77,7 +77,7 @@ export class BuildArtifact extends WorkerEntrypoint<Env, BuildArtifactProperties
 			'buildArtifact.build',
 			async (span) => {
 				const filesystemStub = filesystemNamespace.get(toDurableObjectId(filesystemNamespace, this.ctx.props.projectId));
-				const snapshot = await filesystemStub.collectProjectSnapshot(SNAPSHOT_EXCLUDED_DIRECTORIES);
+				using snapshot = await filesystemStub.collectProjectSnapshot(SNAPSHOT_EXCLUDED_DIRECTORIES);
 				const snapshotHash = await hashSnapshot(snapshot);
 				if (snapshotHash !== requestedHash) {
 					// An edit landed after preview bootstrap. Never cache a build under the

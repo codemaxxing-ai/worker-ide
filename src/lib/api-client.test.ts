@@ -26,11 +26,14 @@ describe('createProject', () => {
 		const result = await createProject('org1', 'request-inspector');
 
 		expect(fetchMock).toHaveBeenCalledOnce();
-		expect(fetchMock).toHaveBeenCalledWith('/api/new-project', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ template: 'request-inspector', organizationId: 'org1' }),
-		});
+		expect(fetchMock).toHaveBeenCalledWith(
+			'/api/new-project',
+			expect.objectContaining({
+				method: 'POST',
+				body: JSON.stringify({ template: 'request-inspector', organizationId: 'org1' }),
+			}),
+		);
+		expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('Content-Type')).toBe('application/json');
 		expect(result).toEqual(responseData);
 	});
 
@@ -62,9 +65,9 @@ describe('cloneProject', () => {
 			expect.objectContaining({
 				method: 'POST',
 				body: JSON.stringify({ sourceProjectId: sourceId, organizationId: 'org1' }),
-				headers: { 'Content-Type': 'application/json' },
 			}),
 		);
+		expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('Content-Type')).toBe('application/json');
 		expect(result).toEqual(responseData);
 	});
 
@@ -108,7 +111,7 @@ describe('fetchTemplates', () => {
 		const result = await fetchTemplates();
 
 		expect(fetchMock).toHaveBeenCalledOnce();
-		expect(fetchMock).toHaveBeenCalledWith('/api/templates');
+		expect(fetchMock).toHaveBeenCalledWith('/api/templates', expect.objectContaining({ method: 'GET' }));
 		expect(result).toEqual(templatesData);
 	});
 

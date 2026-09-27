@@ -13,7 +13,7 @@ function isAgentSessionStatus(value: unknown): value is AgentSessionStatus {
 	return typeof value === 'string' && AGENT_SESSION_STATUSES.has(value);
 }
 
-export interface SessionMetadataState {
+interface SessionMetadataState {
 	titleGenerated?: boolean;
 	contextTokensUsed?: number;
 	toolMetadata?: Record<string, ToolMetadataInfo>;
@@ -23,7 +23,7 @@ export interface SessionMetadataState {
 	stopRequested?: boolean;
 }
 
-export interface SessionHistoryStore {
+interface SessionHistoryStore {
 	get(sessionId: string): SessionInfo | null | undefined;
 	getHistory(sessionId: string): SessionMessage[] | Promise<SessionMessage[]>;
 	clearMessages(sessionId: string): unknown;

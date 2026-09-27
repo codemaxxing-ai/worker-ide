@@ -10,7 +10,7 @@ import type { AgentState } from '@shared/agent-state';
 import type { PendingFileChange, AiSession } from '@shared/types';
 
 type SessionLoadPhase = 'idle' | 'awaiting-agent-state' | 'loading-saved-session';
-type SessionLoadResult = { status: 'loaded'; session: AiSession } | { status: 'missing' } | { status: 'error' };
+type SessionLoadResult = { status: 'loaded'; session: AiSession } | { status: 'missing' } | { status: 'error' } | { status: 'superseded' };
 
 export function useAgentSessions({
 	projectId,
@@ -60,6 +60,13 @@ export function useAgentSessions({
 	const [isLoadingSession, setIsLoadingSession] = useState(false);
 	const [sessionSnapshot, setSessionSnapshot] = useState<AiSession | undefined>();
 	const [snapshotHistoryVersion, setSnapshotHistoryVersion] = useState(-1);
+	const sessionLoadSequenceReference = useRef(0);
+	useEffect(
+		() => () => {
+			sessionLoadSequenceReference.current += 1;
+		},
+		[projectId],
+	);
 	const [sessionLoadPhase, setSessionLoadPhase] = useState<SessionLoadPhase>(() => {
 		const currentSession = agentState?.currentSession;
 		return !currentSession && getActiveSessionId(projectId) ? 'awaiting-agent-state' : 'idle';
@@ -73,6 +80,8 @@ export function useAgentSessions({
 
 	const loadSessionById = useCallback(
 		async (targetSessionId: string, reason: 'manual' | 'restore'): Promise<SessionLoadResult> => {
+			const sequence = ++sessionLoadSequenceReference.current;
+			const isCurrent = () => sequence === sessionLoadSequenceReference.current;
 			if (reason === 'manual') {
 				setIsLoadingSession(true);
 			} else {
@@ -81,6 +90,7 @@ export function useAgentSessions({
 
 			try {
 				const session = await agent.stub.loadSession(targetSessionId);
+				if (!isCurrent()) return { status: 'superseded' };
 				if (!session) {
 					if (getActiveSessionId(projectId) === targetSessionId) {
 						setActiveSessionId(projectId, undefined);
@@ -96,14 +106,15 @@ export function useAgentSessions({
 				setSnapshotHistoryVersion(agent.state?.currentSession?.historyVersion ?? 0);
 				return { status: 'loaded', session };
 			} catch {
+				if (!isCurrent()) return { status: 'superseded' };
 				if (reason === 'manual') {
 					toast.error('Could not load the session. Please try again.');
 				}
 				return { status: 'error' };
 			} finally {
-				if (reason === 'manual') {
+				if (isCurrent() && reason === 'manual') {
 					setIsLoadingSession(false);
-				} else {
+				} else if (isCurrent()) {
 					updateSessionLoadPhase('idle');
 				}
 			}
@@ -143,7 +154,9 @@ export function useAgentSessions({
 		async (targetSessionId: string): Promise<boolean> => {
 			try {
 				await agent.stub.deleteSession(targetSessionId);
-				setActiveSessionId(projectId, undefined);
+				if (getActiveSessionId(projectId) === targetSessionId) {
+					setActiveSessionId(projectId, undefined);
+				}
 				return true;
 			} catch {
 				toast.error('Could not delete the session. Please try again.');
@@ -256,7 +269,7 @@ export function useAgentSessions({
 
 		attemptedRestoreSessionIdReference.current = activeSessionId;
 		void loadSessionById(activeSessionId, 'restore').then((result) => {
-			if (result.status !== 'loaded') {
+			if (result.status === 'missing' || result.status === 'error') {
 				attemptedRestoreSessionIdReference.current = undefined;
 			}
 		});
@@ -277,11 +290,18 @@ export function useAgentSessions({
 		}
 
 		let cancelled = false;
-		void agent.stub.loadSession(currentSession.sessionId).then((session) => {
-			if (cancelled || !session) return;
-			setSessionSnapshot(session);
-			setSnapshotHistoryVersion(currentSession.historyVersion);
-		});
+		void agent.stub
+			.loadSession(currentSession.sessionId)
+			.then((session) => {
+				if (cancelled || !session) return;
+				setSessionSnapshot(session);
+				setSnapshotHistoryVersion(currentSession.historyVersion);
+			})
+			.catch((error: unknown) => {
+				// Keep the last snapshot during a transient disconnect. A later
+				// state update retries the refresh without an unhandled rejection.
+				if (!cancelled) console.warn('[AgentSessions] Failed to refresh session history:', error);
+			});
 
 		return () => {
 			cancelled = true;

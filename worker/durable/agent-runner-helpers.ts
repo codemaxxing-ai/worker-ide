@@ -12,7 +12,7 @@ interface ExtensionManagerConstructor<T extends RestorableExtensionManager> {
 	new (options: { loader: WorkerLoader; storage: DurableObjectStorage }): T;
 }
 
-export interface TerminalNotification {
+interface TerminalNotification {
 	title: string;
 	body: string;
 	urgency?: PushUrgency;

@@ -1,28 +1,9 @@
 import { ScrollArea } from '@base-ui/react/scroll-area';
-import {
-	ArrowDown,
-	Download,
-	History,
-	Image as ImageIcon,
-	Map as MapIcon,
-	Mic,
-	MicOff,
-	Pencil,
-	Plus,
-	ArrowUp,
-	Square,
-	Trash2,
-	X,
-} from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
+import { ArrowDown, Download, Map as MapIcon } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 
-import { Button } from '@/components/ui/button';
 import { Collapsible } from '@/components/ui/collapsible';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { InlineConfirmGroup } from '@/components/ui/inline-confirm-group';
-import { PendingApprovalIndicator } from '@/components/ui/pending-approval-indicator';
 import { Spinner } from '@/components/ui/spinner';
 import { toast } from '@/components/ui/toast-store';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -32,14 +13,12 @@ import { useSnapshots } from '@/features/snapshots';
 import { useMobileKeyboardLayout } from '@/hooks/use-mobile-keyboard-height';
 import { createApiClient, downloadDebugLog } from '@/lib/api-client';
 import { authClient } from '@/lib/auth-client';
-import { tweenFast } from '@/lib/motion-config';
 import { setActiveSessionId } from '@/lib/project-storage';
 import { useStore } from '@/lib/store';
-import { cn, formatRelativeTime } from '@/lib/utils';
-import { MAX_IMAGE_ATTACHMENTS } from '@shared/constants';
-import { sessionTitleSchema } from '@shared/validation';
+import { cn } from '@/lib/utils';
 
-import { ContextRing } from './context-ring';
+import { ComposerControls } from './composer-controls';
+import { ImageAttachmentStrip } from './image-attachment-strip';
 import {
 	AgentError,
 	AssistantMessage,
@@ -50,8 +29,8 @@ import {
 	UserQuestionPrompt,
 	WelcomeScreen,
 } from './messages';
-import { getModelLimits } from './model-config';
-import { ModelSelectorDropdown } from './model-selector-dialog';
+import { AgentSessionHeader } from './session-header';
+import { createOptimisticUserMessage, useAgentMessageTimeline, type OptimisticMessageEntry } from './use-agent-message-timeline';
 import { useAutoScroll } from '../../hooks/use-auto-scroll';
 import { useChangeReview } from '../../hooks/use-change-review';
 import { useFileMention } from '../../hooks/use-file-mention';
@@ -66,9 +45,7 @@ import {
 	segmentsToPlainText,
 	type InputSegment,
 } from '../../lib/input-segments';
-import { AgentModeSelector } from '../agent-mode-selector';
 import { useAgentRuntime } from '../agent-runtime-context';
-import { AudioWaveform } from '../audio-waveform';
 import { BouncingDots } from '../bouncing-dots';
 import { ChangedFilesSummary } from '../changed-files-summary';
 import { FileMentionDropdown } from '../file-mention-dropdown';
@@ -76,15 +53,7 @@ import { RevertConfirmDialog } from '../revert-confirm-dialog';
 import { RichTextInput, type RichTextInputHandle } from '../rich-text-input';
 
 import type { SessionParticipantProfile } from '@shared/agent-state';
-import type { AIModelId } from '@shared/constants';
-import type { AgentMode, ChatMessage } from '@shared/types';
-
-type OptimisticMessageEntry = {
-	sessionId: string;
-	message: ChatMessage;
-	clientOnly: boolean;
-	submitting: boolean;
-};
+import type { ChatMessage } from '@shared/types';
 
 function InputInfoBar({ open, icon, children }: { open: boolean; icon: React.ReactNode; children: React.ReactNode }) {
 	return (
@@ -100,35 +69,6 @@ function InputInfoBar({ open, icon, children }: { open: boolean; icon: React.Rea
 			</div>
 		</Collapsible>
 	);
-}
-
-function isQueuedRequestMessage(message: ChatMessage): boolean {
-	return message.role === 'user' && message.metadata?.request?.state === 'queued';
-}
-
-function createOptimisticUserMessage(
-	parts: ChatMessage['parts'],
-	mode: AgentMode,
-	model: AIModelId,
-	state: 'queued' | 'committed',
-	authorUserId: string | undefined,
-	id: string,
-	createdAt: number,
-): ChatMessage {
-	return {
-		id,
-		role: 'user',
-		parts,
-		authorUserId,
-		createdAt,
-		metadata: {
-			request: {
-				mode,
-				model,
-				state,
-			},
-		},
-	};
 }
 
 export function AgentPanel({ projectId, className }: { projectId: string; className?: string }) {
@@ -155,7 +95,6 @@ export function AgentPanel({ projectId, className }: { projectId: string; classN
 		hasUploading: hasUploadingImages,
 		readyImageParts,
 	} = useImageAttachments(projectId);
-	const imageFileInputReference = useRef<HTMLInputElement>(null);
 	const [isDraggingImage, setIsDraggingImage] = useState(false);
 	const initialCursorPositionReference = useRef(cursorPosition);
 	const initialInputPlainTextLengthReference = useRef(segmentsToPlainText(segments).length);
@@ -214,47 +153,22 @@ export function AgentPanel({ projectId, className }: { projectId: string; classN
 		agent,
 		agentConnectionState,
 	});
-	const renderedSessionId = sessionId ?? optimisticMessages.at(-1)?.sessionId;
-	const renderedOptimisticEntries = useMemo(
-		() => (renderedSessionId ? optimisticMessages.filter((entry) => entry.sessionId === renderedSessionId) : []),
-		[optimisticMessages, renderedSessionId],
-	);
-	const renderedOptimisticMessages = useMemo(() => renderedOptimisticEntries.map((entry) => entry.message), [renderedOptimisticEntries]);
-	const localOnlyMessageIds = useMemo(
-		() => new Set(renderedOptimisticEntries.filter((entry) => entry.clientOnly).map((entry) => entry.message.id)),
-		[renderedOptimisticEntries],
-	);
-	const removedQueuedMessageIds = useMemo(
-		() => new Set(optimisticRemovedQueuedMessages.filter((entry) => entry.sessionId === renderedSessionId).map((entry) => entry.messageId)),
-		[optimisticRemovedQueuedMessages, renderedSessionId],
-	);
-	const serverMessages = useMemo(() => {
-		const durableMessages = sessionSnapshot && sessionSnapshot.id === renderedSessionId ? sessionSnapshot.history : [];
-		const liveMessages = currentSession && currentSession.sessionId === renderedSessionId ? currentSession.messages : [];
-		const liveById = new Map(liveMessages.map((message) => [message.id, message]));
-		return [
-			...durableMessages.map((message) => liveById.get(message.id) ?? message),
-			...liveMessages.filter((message) => !durableMessages.some((durableMessage) => durableMessage.id === message.id)),
-		];
-	}, [currentSession, renderedSessionId, sessionSnapshot]);
-	const allMessages = useMemo(() => {
-		const mergedMessages =
-			renderedOptimisticMessages.length === 0
-				? serverMessages
-				: [
-						...serverMessages,
-						...renderedOptimisticMessages.filter((message) => !new Set(serverMessages.map((entry) => entry.id)).has(message.id)),
-					];
-
-		if (removedQueuedMessageIds.size === 0) {
-			return mergedMessages;
-		}
-
-		return mergedMessages.filter((message) => !removedQueuedMessageIds.has(message.id));
-	}, [renderedOptimisticMessages, removedQueuedMessageIds, serverMessages]);
-	const queuedMessages = useMemo(() => allMessages.filter((message) => isQueuedRequestMessage(message)), [allMessages]);
-	const committedMessages = useMemo(() => allMessages.filter((message) => !isQueuedRequestMessage(message)), [allMessages]);
-
+	const {
+		renderedSessionId,
+		renderedOptimisticEntries,
+		renderedOptimisticMessages,
+		localOnlyMessageIds,
+		serverMessages,
+		allMessages,
+		queuedMessages,
+		committedMessages,
+	} = useAgentMessageTimeline({
+		sessionId,
+		currentSession,
+		sessionSnapshot,
+		optimisticMessages,
+		optimisticRemovedQueuedMessages,
+	});
 	// Derive tool metadata/errors/sub-agent activities directly from agent state via useMemo
 	const toolMetadata = useMemo(
 		() => new Map([...Object.entries(sessionSnapshot?.toolMetadata ?? {}), ...Object.entries(currentSession?.toolMetadata ?? {})]),
@@ -358,15 +272,6 @@ export function AgentPanel({ projectId, className }: { projectId: string; classN
 		cursorPosition,
 		onSelect: handleFileMentionSelect,
 	});
-
-	// Session rename UI state
-	const [isRenamingSessionTitle, setIsRenamingSessionTitle] = useState(false);
-	const [renameValue, setRenameValue] = useState('');
-
-	// Inline delete confirmation state (2-click pattern in session dropdown)
-	const [confirmingDeleteSessionId, setConfirmingDeleteSessionId] = useState<string | undefined>();
-	const [deletingSessionId, setDeletingSessionId] = useState<string | undefined>();
-	const deleteTriggerReferences = useRef<Map<string, HTMLButtonElement>>(new Map());
 
 	// Snapshot hook for revert
 	const { revertCascadeAsync, isReverting } = useSnapshots({ projectId });
@@ -707,17 +612,6 @@ export function AgentPanel({ projectId, className }: { projectId: string; classN
 		],
 	);
 
-	const handleImageFileInputChange = useCallback(
-		(event: React.ChangeEvent<HTMLInputElement>) => {
-			const files = event.target.files ? [...event.target.files] : [];
-			if (files.length > 0) {
-				addImageFiles(files);
-			}
-			event.target.value = '';
-		},
-		[addImageFiles],
-	);
-
 	const handleInputDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
 		if (![...event.dataTransfer.items].some((item) => item.kind === 'file')) {
 			return;
@@ -870,12 +764,6 @@ export function AgentPanel({ projectId, className }: { projectId: string; classN
 		if (agentError) setDismissedError(agentError.message);
 	}, [agentError]);
 
-	const focusDeleteTrigger = useCallback((sessionIdentifier: string) => {
-		requestAnimationFrame(() => {
-			deleteTriggerReferences.current.get(sessionIdentifier)?.focus();
-		});
-	}, []);
-
 	// Open revert confirmation dialog.
 	// Computes the full cascade set: all snapshot IDs from the clicked message forward
 	// within the current session, so the dialog can show what will be reverted.
@@ -1003,31 +891,6 @@ export function AgentPanel({ projectId, className }: { projectId: string; classN
 		});
 	}, [debugLogId, projectId, sessionId]);
 
-	const handleStartRenameSessionTitle = useCallback(() => {
-		if (!sessionId) return;
-		const currentSession = allSessions.find((session) => session.id === sessionId);
-		setRenameValue(currentSession?.title ?? 'New session');
-		setIsRenamingSessionTitle(true);
-	}, [allSessions, sessionId]);
-
-	const handleSubmitRenameSessionTitle = useCallback(
-		async (value: string) => {
-			if (!sessionId) return;
-			const parsed = sessionTitleSchema.safeParse(value);
-			if (!parsed.success) {
-				toast.error(parsed.error.issues[0]?.message ?? 'Invalid title');
-				return;
-			}
-
-			const success = await handleRenameSession(sessionId, parsed.data);
-			if (success) {
-				setRenameValue(parsed.data);
-				setIsRenamingSessionTitle(false);
-			}
-		},
-		[handleRenameSession, sessionId],
-	);
-
 	const handleSuggestion = useCallback(
 		(prompt: string) => {
 			void handleSubmit(prompt);
@@ -1060,265 +923,24 @@ export function AgentPanel({ projectId, className }: { projectId: string; classN
 
 	return (
 		<div ref={keyboardReference} className={cn('flex h-full flex-col bg-bg-secondary', className)} style={keyboardStyle}>
-			{(() => {
-				const hasSession = allMessages.length > 0;
-				const currentSession = allSessions.find((session) => session.id === sessionId);
-				const sessionTitle = currentSession?.title ?? 'New session';
-				const needsAttention = !!pendingQuestion || needsContinuation || !!doomLoopMessage;
-
-				// Status dot: session state takes priority over connection state
-				let statusDotClassName: string;
-				let statusTooltip: string;
-				if (!isConnected) {
-					statusDotClassName = agentConnectionState === 'connecting' ? 'animate-pulse bg-text-secondary/50' : 'animate-pulse bg-error';
-					statusTooltip = agentConnectionState === 'connecting' ? 'Connecting…' : 'Reconnecting…';
-				} else if (isProcessing) {
-					statusDotClassName = 'animate-pulse bg-warning';
-					statusTooltip = 'Generating…';
-				} else if (needsAttention) {
-					statusDotClassName = 'animate-pulse bg-accent';
-					statusTooltip = 'Waiting for input';
-				} else {
-					statusDotClassName = 'bg-success';
-					statusTooltip = 'Ready';
-				}
-
-				return (
-					<div
-						className="
-							relative flex h-9 shrink-0 items-center gap-2 border-b border-border px-3
-						"
-					>
-						{/* Left: status dot + session title + pencil (or plain label) */}
-						<div className="group flex min-w-0 flex-1 items-center gap-2">
-							{hasSession && (
-								<Tooltip content={statusTooltip} side="bottom">
-									<span className={cn('size-1.5 shrink-0 rounded-full transition-colors', statusDotClassName)} />
-								</Tooltip>
-							)}
-							{hasSession ? (
-								<>
-									<button
-										type="button"
-										onClick={handleStartRenameSessionTitle}
-										className="
-											min-w-0 cursor-pointer truncate text-xs font-medium
-											text-text-secondary
-										"
-										title={sessionTitle}
-										aria-label="Rename session"
-									>
-										{sessionTitle}
-									</button>
-									<Tooltip content="Rename session" side="bottom">
-										<button
-											type="button"
-											onClick={handleStartRenameSessionTitle}
-											className="
-												shrink-0 cursor-pointer text-text-secondary opacity-0
-												transition-opacity
-												pointer-coarse:hidden
-												hover-always:text-accent
-												group-hover-always:opacity-100
-											"
-											aria-label="Rename session"
-										>
-											<Pencil className="size-3" />
-										</button>
-									</Tooltip>
-								</>
-							) : (
-								<span className="truncate text-xs font-medium text-text-secondary">Agent</span>
-							)}
-						</div>
-
-						{/* Absolute rename overlay — sits on top of the header, avoids overflow clipping */}
-						{isRenamingSessionTitle && (
-							<div className="absolute inset-0 z-10 flex items-center px-3">
-								<input
-									autoFocus
-									type="text"
-									defaultValue={renameValue || sessionTitle}
-									onKeyDown={(event) => {
-										if (event.key === 'Enter') {
-											event.preventDefault();
-											void handleSubmitRenameSessionTitle(event.currentTarget.value);
-										}
-										if (event.key === 'Escape') {
-											event.preventDefault();
-											setIsRenamingSessionTitle(false);
-										}
-									}}
-									onBlur={(event) => {
-										void handleSubmitRenameSessionTitle(event.currentTarget.value);
-									}}
-									maxLength={80}
-									aria-label="Rename session"
-									className="
-										h-6 w-full rounded-sm border border-accent bg-bg-primary px-1.5
-										text-xs text-text-primary shadow-sm
-										focus:outline-none
-									"
-								/>
-							</div>
-						)}
-
-						{/* Right: action buttons */}
-						<div className="flex shrink-0 items-center gap-1">
-							{hasSession && (
-								<>
-									<AnimatePresence initial={false}>
-										{isProcessing && (
-											<motion.div
-												initial={{ opacity: 0, x: 4, scale: 0.96 }}
-												animate={{ opacity: 1, x: 0, scale: 1 }}
-												exit={{ opacity: 0, x: 4, scale: 0.96 }}
-												transition={tweenFast}
-												className="shrink-0"
-											>
-												<Tooltip content={isStopPending ? 'Stopping generation' : 'Stop generation'} side="bottom">
-													<Button
-														type="button"
-														focusStyle="inset"
-														variant="ghost"
-														size="icon-sm"
-														onClick={handleCancel}
-														disabled={!isConnected}
-														isLoading={isStopPending}
-														className={cn('text-error', isConnected ? 'hover:bg-error/10 hover:text-error' : 'opacity-40')}
-														aria-label={isStopPending ? 'Stopping generation' : 'Stop generation'}
-													>
-														<Square className="size-3.5" />
-													</Button>
-												</Tooltip>
-											</motion.div>
-										)}
-									</AnimatePresence>
-								</>
-							)}
-							<DropdownMenu
-								onOpenChange={(open) => {
-									if (!open) setConfirmingDeleteSessionId(undefined);
-								}}
-							>
-								<Tooltip content="Sessions" side="bottom">
-									<DropdownMenuTrigger>
-										<Button focusStyle="inset" variant="ghost" size="icon" className="size-7" aria-label="Sessions">
-											<History className="size-3.5" />
-										</Button>
-									</DropdownMenuTrigger>
-								</Tooltip>
-								<DropdownMenuContent align="end" className="max-h-80 w-64 overflow-y-auto">
-									<div className="border-b border-border p-2">
-										<input
-											type="text"
-											value={sessionSearchQuery}
-											onChange={(event) => setSessionSearchQuery(event.target.value)}
-											onKeyDown={(event) => event.stopPropagation()}
-											placeholder="Search session history..."
-											className="
-												w-full rounded-sm border border-border bg-bg-primary px-2 py-1
-												text-xs text-text-primary outline-none
-												focus:border-accent
-											"
-										/>
-									</div>
-									{savedSessions.length === 0 ? (
-										<div className="px-3 py-2 text-xs text-text-secondary">
-											{sessionSearchQuery.trim() ? 'No matching sessions' : 'No recent sessions'}
-										</div>
-									) : (
-										savedSessions.map((session) => (
-											<DropdownMenuItem key={session.id} className="group" onSelect={() => handleLoadSession(session.id)}>
-												<div className="flex w-full items-center justify-between gap-2" title={session.title}>
-													<span className="truncate text-sm">{session.title}</span>
-													<div className="flex shrink-0 items-center gap-1">
-														{deletingSessionId === session.id ? (
-															<Spinner className="size-3 text-text-secondary" />
-														) : (
-															confirmingDeleteSessionId !== session.id && (
-																<>
-																	{session.isRunning && <Spinner className="size-3 text-warning" />}
-																	<span className={cn('text-2xs text-text-secondary', 'group-hover:hidden')}>
-																		{formatRelativeTime(session.createdAt)}
-																	</span>
-																</>
-															)
-														)}
-														{deletingSessionId === session.id ? undefined : confirmingDeleteSessionId === session.id ? (
-															<InlineConfirmGroup
-																itemName={session.title}
-																onConfirm={() => {
-																	setConfirmingDeleteSessionId(undefined);
-																	setDeletingSessionId(session.id);
-																	if (session.id === sessionId) {
-																		clearHistory();
-																	}
-																	void handleDeleteSession(session.id).finally(() => {
-																		setDeletingSessionId((current) => (current === session.id ? undefined : current));
-																	});
-																}}
-																onCancel={() => {
-																	setConfirmingDeleteSessionId(undefined);
-																	focusDeleteTrigger(session.id);
-																}}
-															/>
-														) : (
-															<button
-																type="button"
-																ref={(element) => {
-																	if (element) {
-																		deleteTriggerReferences.current.set(session.id, element);
-																		return;
-																	}
-																	deleteTriggerReferences.current.delete(session.id);
-																}}
-																onClick={(event) => {
-																	event.stopPropagation();
-																	setConfirmingDeleteSessionId(session.id);
-																}}
-																className={cn(
-																	`
-																		hidden cursor-pointer rounded-sm p-0.5 text-text-secondary
-																		transition-colors
-																	`,
-																	`
-																		group-focus-within:flex
-																		group-hover-always:flex
-																	`,
-																	'hover:bg-bg-tertiary hover:text-error',
-																)}
-																aria-label={`Delete ${session.title}`}
-															>
-																<Trash2 className="size-3" />
-															</button>
-														)}
-													</div>
-												</div>
-											</DropdownMenuItem>
-										))
-									)}
-								</DropdownMenuContent>
-							</DropdownMenu>
-							{hasSession && (
-								<Tooltip content="New session" side="bottom">
-									<Button
-										focusStyle="inset"
-										variant="ghost"
-										size="icon"
-										className="size-7"
-										aria-label="New session"
-										onClick={clearHistory}
-										disabled={!isConnected}
-									>
-										<Plus className="size-3.5" />
-									</Button>
-								</Tooltip>
-							)}
-						</div>
-					</div>
-				);
-			})()}
+			<AgentSessionHeader
+				hasSession={allMessages.length > 0}
+				allSessions={allSessions}
+				savedSessions={savedSessions}
+				sessionId={sessionId}
+				isConnected={isConnected}
+				agentConnectionState={agentConnectionState}
+				isProcessing={isProcessing}
+				isStopPending={isStopPending}
+				needsAttention={!!pendingQuestion || needsContinuation || !!doomLoopMessage}
+				sessionSearchQuery={sessionSearchQuery}
+				setSessionSearchQuery={setSessionSearchQuery}
+				handleLoadSession={handleLoadSession}
+				handleRenameSession={handleRenameSession}
+				handleDeleteSession={handleDeleteSession}
+				handleCancel={handleCancel}
+				clearHistory={clearHistory}
+			/>
 
 			<div ref={wrapperReference} className="group/scroll relative flex-1 overflow-hidden">
 				<div
@@ -1529,53 +1151,7 @@ export function AgentPanel({ projectId, className }: { projectId: string; classN
 								</span>
 							</InputInfoBar>
 
-							{imageAttachments.length > 0 && (
-								<div className="flex flex-wrap gap-1.5 px-2 pt-2" data-testid="agent-image-attachments">
-									{imageAttachments.map((attachment) => (
-										<div
-											key={attachment.id}
-											className="
-												group relative size-14 overflow-hidden rounded-md border
-												border-border bg-bg-secondary
-											"
-										>
-											<img src={attachment.previewUrl} alt={attachment.name} className="size-full object-cover" />
-											{attachment.status === 'uploading' && (
-												<div
-													className="
-														absolute inset-0 flex items-center justify-center bg-bg-primary/60
-													"
-												>
-													<Spinner className="size-4 text-accent" />
-												</div>
-											)}
-											{attachment.status === 'error' && (
-												<div
-													className="
-														absolute inset-0 flex items-center justify-center bg-error/20
-														text-[10px] font-medium text-error
-													"
-												>
-													Failed
-												</div>
-											)}
-											<button
-												type="button"
-												onClick={() => removeImageAttachment(attachment.id)}
-												className="
-													absolute top-0.5 right-0.5 inline-flex items-center justify-center
-													rounded-full bg-bg-primary/80 p-0.5 text-text-secondary
-													transition-colors
-													hover:bg-bg-primary hover:text-text-primary
-												"
-												aria-label={`Remove ${attachment.name}`}
-											>
-												<X className="size-3" />
-											</button>
-										</div>
-									))}
-								</div>
-							)}
+							<ImageAttachmentStrip attachments={imageAttachments} onRemoveAttachment={removeImageAttachment} />
 
 							<RichTextInput
 								ref={inputReference}
@@ -1603,159 +1179,22 @@ export function AgentPanel({ projectId, className }: { projectId: string; classN
 									</button>
 								)}
 							</Collapsible>
-							{speechToText.isRecording ? (
-								<div className="flex min-w-0 items-center gap-x-1.5 px-1.5 py-1">
-									<div className="relative flex size-3 shrink-0 items-center justify-center">
-										{speechToText.isAwaitingPermission ? (
-											<PendingApprovalIndicator className="size-2" />
-										) : (
-											<span className="size-2 animate-pulse rounded-full bg-error" />
-										)}
-									</div>
-									<div className={cn('relative h-4', speechToText.isAwaitingPermission ? 'min-w-0 flex-1' : 'w-28 shrink-0')}>
-										{speechToText.isAwaitingPermission ? (
-											<Tooltip content="Approve microphone access in your browser to start recording" side="top">
-												<div
-													className="
-														flex h-full items-center gap-1.5 text-xs text-text-secondary
-													"
-												>
-													<span className="truncate font-medium text-text-primary">Approve microphone access</span>
-													<span className="truncate text-[11px] text-text-secondary/80">Browser prompt waiting</span>
-												</div>
-											</Tooltip>
-										) : (
-											<AudioWaveform amplitudes={speechToText.amplitudes} className="absolute inset-0" />
-										)}
-									</div>
-									{!speechToText.isAwaitingPermission && <div className="flex-1" />}
-									<button
-										type="button"
-										onClick={handleStopRecording}
-										className={cn(
-											'inline-flex cursor-pointer items-center gap-1.5 rounded-md p-1',
-											'text-xs font-medium text-error transition-colors',
-											'hover:bg-error/10',
-										)}
-										aria-label="Stop recording"
-									>
-										<Square className="size-4" />
-									</button>
-								</div>
-							) : (
-								<div
-									className="
-										@container flex flex-wrap-reverse items-center gap-x-1.5 gap-y-0.5
-										px-1.5 py-1
-									"
-									data-testid="agent-input-toolbar"
-								>
-									<AgentModeSelector mode={agentMode} onModeChange={setAgentMode} disabled={false} />
-									<ModelSelectorDropdown selectedModel={selectedModel} onSelectModel={setSelectedModel} disabled={false} />
-									<div className="ml-auto flex shrink-0 items-center justify-end gap-1" data-testid="agent-input-toolbar-actions">
-										<ContextRing tokensUsed={contextTokensUsed} contextWindow={getModelLimits(selectedModel).contextWindow} />
-										<input
-											ref={imageFileInputReference}
-											type="file"
-											accept="image/png,image/jpeg,image/webp,image/gif"
-											multiple
-											className="hidden"
-											onChange={handleImageFileInputChange}
-											aria-hidden="true"
-											tabIndex={-1}
-										/>
-										<Tooltip content="Attach images" side="top">
-											<button
-												type="button"
-												onClick={() => imageFileInputReference.current?.click()}
-												disabled={imageAttachments.length >= MAX_IMAGE_ATTACHMENTS}
-												className={cn(
-													`
-														inline-flex items-center gap-1.5 rounded-md p-1 text-xs
-														font-medium transition-colors
-													`,
-													imageAttachments.length >= MAX_IMAGE_ATTACHMENTS
-														? 'cursor-not-allowed text-text-secondary opacity-40'
-														: `
-															cursor-pointer text-text-secondary
-															hover:bg-bg-tertiary hover:text-text-primary
-														`,
-												)}
-												aria-label="Attach images"
-											>
-												<ImageIcon className="size-4" />
-											</button>
-										</Tooltip>
-										{speechToText.microphonePermission !== 'unsupported' && (
-											<Tooltip
-												content={
-													speechToText.microphonePermission === 'denied'
-														? 'Microphone blocked'
-														: speechToText.needsPermissionApproval
-															? 'Approve microphone access in your browser'
-															: 'Voice input'
-												}
-												side="top"
-												forceOpen={speechToText.needsPermissionApproval}
-											>
-												<button
-													type="button"
-													onClick={handleMicrophoneClick}
-													disabled={!isConnected}
-													className={cn(
-														'relative inline-flex items-center gap-1.5 rounded-md p-1',
-														'text-xs font-medium transition-colors',
-														speechToText.microphonePermission === 'denied'
-															? 'cursor-pointer text-text-secondary opacity-50'
-															: speechToText.needsPermissionApproval
-																? `
-																	bg-accent/6 text-accent ring-1 ring-accent/15 ring-inset
-																	hover:bg-accent/10 hover:text-accent
-																`
-																: isConnected
-																	? `
-																		cursor-pointer text-text-secondary
-																		hover:bg-bg-tertiary hover:text-text-primary
-																	`
-																	: 'cursor-not-allowed text-text-secondary opacity-40',
-													)}
-													aria-label={
-														speechToText.microphonePermission === 'denied'
-															? 'Microphone blocked'
-															: speechToText.needsPermissionApproval
-																? 'Approve microphone access in your browser'
-																: 'Start voice input'
-													}
-												>
-													{speechToText.microphonePermission === 'denied' ? (
-														<MicOff className="size-4" />
-													) : (
-														<Mic className={cn('size-4', speechToText.needsPermissionApproval && 'animate-pulse')} />
-													)}
-												</button>
-											</Tooltip>
-										)}
-										<button
-											type="button"
-											onClick={() => void handleSubmit()}
-											disabled={!canSubmit}
-											className={cn(
-												'ml-0.5 inline-flex items-center justify-center rounded-md p-1',
-												'text-xs font-medium transition-colors',
-												canSubmit
-													? `
-														cursor-pointer bg-accent text-white
-														hover:bg-accent-hover
-													`
-													: 'cursor-not-allowed text-text-secondary opacity-40',
-											)}
-											aria-label={isProcessing ? 'Queue message' : 'Send message'}
-										>
-											<ArrowUp className="size-4" />
-										</button>
-									</div>
-								</div>
-							)}
+							<ComposerControls
+								speechToText={speechToText}
+								agentMode={agentMode}
+								setAgentMode={setAgentMode}
+								selectedModel={selectedModel}
+								setSelectedModel={setSelectedModel}
+								contextTokensUsed={contextTokensUsed}
+								imageAttachmentCount={imageAttachments.length}
+								addImageFiles={addImageFiles}
+								onStopRecording={handleStopRecording}
+								onMicrophoneClick={handleMicrophoneClick}
+								onSubmit={() => void handleSubmit()}
+								isConnected={isConnected}
+								isProcessing={isProcessing}
+								canSubmit={canSubmit}
+							/>
 						</div>
 					</div>
 				</div>

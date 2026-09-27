@@ -4,12 +4,15 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ApiError } from '@/lib/api-error';
+
 import AccountPage from './account-page';
 
 const mocks = vi.hoisted(() => ({
-	listSessions: vi.fn(),
-	revokeSession: vi.fn(),
-	revokeSessions: vi.fn(),
+	fetchActiveSessions: vi.fn(),
+	revokeActiveSession: vi.fn(),
+	revokeOtherActiveSessions: vi.fn(),
+	signOut: vi.fn(),
 	useSession: vi.fn(),
 	deleteAccount: vi.fn(),
 	fetchAccountDeletePreview: vi.fn(),
@@ -19,16 +22,17 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/auth-client', () => ({
 	authClient: {
-		listSessions: mocks.listSessions,
-		revokeSession: mocks.revokeSession,
-		revokeSessions: mocks.revokeSessions,
 		useSession: mocks.useSession,
+		signOut: mocks.signOut,
 	},
 }));
 
 vi.mock('@/lib/api-client', () => ({
 	deleteAccount: mocks.deleteAccount,
 	fetchAccountDeletePreview: mocks.fetchAccountDeletePreview,
+	fetchActiveSessions: mocks.fetchActiveSessions,
+	revokeActiveSession: mocks.revokeActiveSession,
+	revokeOtherActiveSessions: mocks.revokeOtherActiveSessions,
 }));
 
 vi.mock('@/components/ui/toast-store', () => ({
@@ -65,27 +69,25 @@ describe('AccountPage', () => {
 				},
 			},
 		});
-		mocks.listSessions.mockResolvedValue({
-			data: [
-				{
-					token: 'current-session',
-					userAgent: 'Desktop Chrome',
-					ipAddress: '127.0.0.1',
-					createdAt: '2026-04-20T12:00:00.000Z',
-					current: true,
-				},
-				{
-					token: 'other-session',
-					userAgent: 'iPhone Mobile Safari',
-					ipAddress: '127.0.0.2',
-					createdAt: '2026-04-18T12:00:00.000Z',
-					current: false,
-				},
-			],
-			error: undefined,
-		});
-		mocks.revokeSession.mockResolvedValue({ error: undefined });
-		mocks.revokeSessions.mockResolvedValue({ error: undefined });
+		mocks.fetchActiveSessions.mockResolvedValue([
+			{
+				id: 'current-session',
+				userAgent: 'Desktop Chrome',
+				ipAddress: '127.0.0.1',
+				createdAt: '2026-04-20T12:00:00.000Z',
+				current: true,
+			},
+			{
+				id: 'other-session',
+				userAgent: 'iPhone Mobile Safari',
+				ipAddress: '127.0.0.2',
+				createdAt: '2026-04-18T12:00:00.000Z',
+				current: false,
+			},
+		]);
+		mocks.revokeActiveSession.mockImplementation(() => Promise.resolve());
+		mocks.revokeOtherActiveSessions.mockImplementation(() => Promise.resolve());
+		mocks.signOut.mockResolvedValue({ data: undefined, error: undefined });
 		mocks.toastError.mockReset();
 		mocks.toastSuccess.mockReset();
 	});
@@ -101,7 +103,7 @@ describe('AccountPage', () => {
 
 		await user.click(within(revokeDialog).getByRole('button', { name: 'Revoke' }));
 
-		await waitFor(() => expect(mocks.revokeSession).toHaveBeenCalledWith({ token: 'other-session' }));
+		await waitFor(() => expect(mocks.revokeActiveSession).toHaveBeenCalledWith('other-session'));
 	});
 
 	it('confirms before signing out all other sessions', async () => {
@@ -115,6 +117,19 @@ describe('AccountPage', () => {
 
 		await user.click(within(signOutDialog).getByRole('button', { name: 'Sign out' }));
 
-		await waitFor(() => expect(mocks.revokeSessions).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(mocks.revokeOtherActiveSessions).toHaveBeenCalledTimes(1));
+	});
+
+	it('asks the user to sign in again when the current session is not fresh', async () => {
+		mocks.revokeActiveSession.mockRejectedValue(new ApiError('Sign in again to manage sessions', 403, 'SESSION_NOT_FRESH'));
+		const user = userEvent.setup();
+		renderAccountPage();
+
+		await user.click(await screen.findByRole('button', { name: 'Revoke' }));
+		const revokeDialog = await screen.findByRole('dialog', { name: 'Revoke this session?' });
+		await user.click(within(revokeDialog).getByRole('button', { name: 'Revoke' }));
+
+		const reauthenticationDialog = await screen.findByRole('dialog', { name: 'Sign in again' });
+		expect(within(reauthenticationDialog).getByText(/signed in within the last 24 hours/)).toBeInTheDocument();
 	});
 });

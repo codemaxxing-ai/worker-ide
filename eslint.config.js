@@ -88,6 +88,35 @@ export default defineConfig(
 
 	importX.flatConfigs.recommended,
 	{
+		files: ['src/**/*.{ts,tsx}'],
+		ignores: ['src/**/*.test.{ts,tsx}', 'src/**/*.stories.{ts,tsx}'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						{
+							group: ['@worker/**', '@server/**'],
+							allowTypeImports: true,
+							message: 'Browser code may import Worker route types, but not Worker runtime values.',
+						},
+					],
+				},
+			],
+		},
+	},
+	{
+		files: ['worker/**/*.{ts,tsx}', 'shared/**/*.{ts,tsx}'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [{ group: ['@/**'], message: 'Worker and shared code must not depend on browser modules.' }],
+				},
+			],
+		},
+	},
+	{
 		settings: {
 			'import-x/resolver-next': [
 				createTypeScriptImportResolver({

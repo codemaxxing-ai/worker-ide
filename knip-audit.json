@@ -1,0 +1,27 @@
+{
+	"$schema": "https://unpkg.com/knip@5/schema.json",
+	"entry": [
+		"auxiliary/*/index.ts",
+		"scripts/*.ts",
+		"drizzle-d1.config.ts",
+		"drizzle-do-agent.config.ts",
+		"src/lib/fouc-prevention.js",
+		"worker/services/vite-host/node-fs/node-fs-promises.ts",
+		"worker/services/vite-host/runtime/node-module-shim.ts",
+		"worker/services/vite-host/runtime/node-os-shim.ts",
+		"worker/services/vite-host/runtime/optional-dependency-unavailable.ts",
+		"worker/services/vite-host/runtime/react-plugin-stub.ts",
+		"worker/services/vite-host/runtime/vite-module-runner-stub.ts"
+	],
+	"ignore": ["landing/**", "public/**", "auxiliary/vite-host/vendor/**", "**/worker-configuration.d.ts", "worker/migrations/**/*.d.ts"],
+	"ignoreDependencies": ["cloudflare", "vinext", "@vitejs/plugin-rsc", "react-server-dom-webpack"],
+	"ignoreExportsUsedInFile": false,
+	"rules": {
+		"exports": "warn",
+		"types": "warn",
+		"nsExports": "warn",
+		"nsTypes": "warn",
+		"enumMembers": "warn",
+		"duplicates": "warn"
+	}
+}

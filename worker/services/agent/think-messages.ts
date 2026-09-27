@@ -1,6 +1,6 @@
 import { previewElementToPromptText } from '@shared/preview-element';
 
-import type { ChatMessage, MessagePart, UserMessagePart } from '@shared/types';
+import type { ChatMessage, MessagePart } from '@shared/types';
 import type { DynamicToolUIPart, UIMessage } from 'ai';
 
 export function userMessageToUiMessage(message: ChatMessage): UIMessage {
@@ -54,10 +54,6 @@ export function chatMessageToUiMessage(message: ChatMessage): UIMessage {
 	}
 
 	return { id: message.id, role: 'assistant', parts };
-}
-
-export function createUiUserMessage(id: string, parts: UserMessagePart[]): UIMessage {
-	return userMessageToUiMessage({ id, role: 'user', parts });
 }
 
 export function uiMessagesToChatMessages(messages: UIMessage[]): ChatMessage[] {
