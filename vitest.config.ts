@@ -41,6 +41,8 @@ export default defineConfig({
 					name: 'worker',
 					include: ['worker/**/*.test.ts'],
 					exclude: ['worker/fixtures/**'],
+					// Durable Object startup and vinext setup can exceed Vitest’s 5s default.
+					testTimeout: 15_000,
 					// Pre-bundle CJS-only dependencies so workerd's ESM runtime can resolve
 					// their named exports. See: https://developers.cloudflare.com/workers/testing/vitest-integration/known-issues/#module-resolution
 					deps: {

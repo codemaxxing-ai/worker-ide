@@ -145,7 +145,7 @@
 		"format": "prettier --write . && eslint --cache --format=stylish --fix .",
 		"test": "vitest",
 		"test:unit": "vitest --project unit",
-		"test:worker": "vitest --project worker",
+		"test:worker": "vitest --project worker --maxWorkers=2",
 		"test:react": "vitest --project react",
 		"test:integration": "vitest run --config test/integration/vitest.config.ts",
 		"test:storybook": "vitest run --config .storybook/vitest.config.ts",
