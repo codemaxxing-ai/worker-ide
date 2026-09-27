@@ -12,6 +12,7 @@ export const HttpErrorCode = {
 
 	// Auth / rate limiting
 	UNAUTHORIZED: 'UNAUTHORIZED',
+	SESSION_NOT_FRESH: 'SESSION_NOT_FRESH',
 	FORBIDDEN: 'FORBIDDEN',
 	RATE_LIMITED: 'RATE_LIMITED',
 	NOT_CONFIGURED: 'NOT_CONFIGURED',
@@ -51,6 +52,7 @@ export const DEFAULT_STATUS_CODES: Record<HttpErrorCode, number> = {
 	[HttpErrorCode.VALIDATION_ERROR]: 400,
 
 	[HttpErrorCode.UNAUTHORIZED]: 401,
+	[HttpErrorCode.SESSION_NOT_FRESH]: 403,
 	[HttpErrorCode.FORBIDDEN]: 403,
 	[HttpErrorCode.RATE_LIMITED]: 429,
 	[HttpErrorCode.NOT_CONFIGURED]: 500,

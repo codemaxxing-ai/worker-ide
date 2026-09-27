@@ -9,6 +9,7 @@ describe('HttpErrorCode', () => {
 		expect(HttpErrorCode.PROTECTED_FILE).toBe('PROTECTED_FILE');
 		expect(HttpErrorCode.GIT_OPERATION_FAILED).toBe('GIT_OPERATION_FAILED');
 		expect(HttpErrorCode.VALIDATION_ERROR).toBe('VALIDATION_ERROR');
+		expect(HttpErrorCode.SESSION_NOT_FRESH).toBe('SESSION_NOT_FRESH');
 		expect(HttpErrorCode.RATE_LIMITED).toBe('RATE_LIMITED');
 		expect(HttpErrorCode.NOT_CONFIGURED).toBe('NOT_CONFIGURED');
 		expect(HttpErrorCode.NOT_FOUND).toBe('NOT_FOUND');
@@ -42,6 +43,7 @@ describe('DEFAULT_STATUS_CODES', () => {
 		expect(DEFAULT_STATUS_CODES[HttpErrorCode.PROTECTED_FILE]).toBe(403);
 		expect(DEFAULT_STATUS_CODES[HttpErrorCode.GIT_OPERATION_FAILED]).toBe(500);
 		expect(DEFAULT_STATUS_CODES[HttpErrorCode.VALIDATION_ERROR]).toBe(400);
+		expect(DEFAULT_STATUS_CODES[HttpErrorCode.SESSION_NOT_FRESH]).toBe(403);
 		expect(DEFAULT_STATUS_CODES[HttpErrorCode.RATE_LIMITED]).toBe(429);
 		expect(DEFAULT_STATUS_CODES[HttpErrorCode.NOT_CONFIGURED]).toBe(500);
 		expect(DEFAULT_STATUS_CODES[HttpErrorCode.NOT_FOUND]).toBe(404);

@@ -8,6 +8,40 @@ export interface UserLimits {
 	currentFreeOrganizations: number;
 }
 
+export interface ActiveSession {
+	id: string;
+	userAgent: string | undefined;
+	ipAddress: string | undefined;
+	createdAt: string;
+	current: boolean;
+}
+
+export async function fetchActiveSessions(): Promise<ActiveSession[]> {
+	const userApi = createUserApiClient();
+	const response = await userApi.user.sessions.$get({});
+	if (!response.ok) {
+		await throwApiError(response, 'Failed to load sessions');
+	}
+	const { sessions } = await response.json();
+	return sessions;
+}
+
+export async function revokeActiveSession(sessionId: string): Promise<void> {
+	const userApi = createUserApiClient();
+	const response = await userApi.user.sessions[':id'].$delete({ param: { id: sessionId } });
+	if (!response.ok) {
+		await throwApiError(response, 'Failed to revoke session');
+	}
+}
+
+export async function revokeOtherActiveSessions(): Promise<void> {
+	const userApi = createUserApiClient();
+	const response = await userApi.user.sessions.$delete({});
+	if (!response.ok) {
+		await throwApiError(response, 'Failed to revoke other sessions');
+	}
+}
+
 export async function fetchUserLimits(): Promise<UserLimits> {
 	const userApi = createUserApiClient();
 	const response = await userApi.user.limits.$get({});
