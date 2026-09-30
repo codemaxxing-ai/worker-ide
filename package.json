@@ -10,7 +10,7 @@
 		"@cloudflare/codemode": "0.5.1",
 		"@cloudflare/shell": "0.4.3",
 		"@cloudflare/think": "0.15.1",
-		"@cloudflare/vite-plugin": "1.52.0",
+		"@cloudflare/vite-plugin": "1.55.0",
 		"@cloudflare/vitest-pool-workers": "^0.12.21",
 		"@codemirror/autocomplete": "^6.20.1",
 		"@codemirror/commands": "^6.10.4",
@@ -112,7 +112,7 @@
 		"vitest": "^3.2.7",
 		"vitest-fetch-mock": "^0.4.5",
 		"workers-ai-provider": "^3.3.1",
-		"wrangler": "4.122.0",
+		"wrangler": "4.134.0",
 		"zod": "^4.4.3",
 		"zustand": "^5.0.14"
 	},

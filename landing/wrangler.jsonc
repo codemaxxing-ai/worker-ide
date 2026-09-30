@@ -8,6 +8,7 @@
 		"not_found_handling": "404-page",
 	},
 	"observability": {
+		"issues": { "enabled": true },
 		"logs": { "enabled": true, "head_sampling_rate": 1 },
 		"traces": { "enabled": true, "head_sampling_rate": 0.05 },
 	},

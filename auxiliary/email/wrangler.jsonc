@@ -8,6 +8,7 @@
 	"workers_dev": false,
 	"preview_urls": false,
 	"observability": {
+		"issues": { "enabled": true },
 		"logs": { "enabled": true, "head_sampling_rate": 1 },
 		"traces": { "enabled": true, "head_sampling_rate": 0.05 },
 	},
