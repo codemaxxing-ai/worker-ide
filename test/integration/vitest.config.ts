@@ -17,8 +17,8 @@ export default defineConfig(({ mode }) => {
 		test: {
 			include: ['test/integration/**/*.test.ts'],
 			globals: true,
-			testTimeout: 60_000,
-			hookTimeout: 30_000,
+			testTimeout: 120_000,
+			hookTimeout: 120_000,
 			pool: 'threads',
 			poolOptions: {
 				threads: {

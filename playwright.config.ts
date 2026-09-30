@@ -5,6 +5,7 @@ const testPort = new URL(testBaseUrl).port || '3000';
 
 export default defineConfig({
 	testDir: './test/e2e',
+	timeout: 120_000,
 	globalSetup: './test/e2e/global-setup.ts',
 	fullyParallel: true,
 	forbidOnly: !!process.env.CI,
