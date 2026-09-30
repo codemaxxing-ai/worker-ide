@@ -54,6 +54,12 @@ The auxiliary email worker does not need a local `.dev.vars` example. It uses Cl
 | Main   | `.dev.vars.example`                |
 | Push   | `auxiliary/push/.dev.vars.example` |
 
+## Session Verification
+
+Session verification keeps the existing session and device identity; it refreshes only the 24-hour eligibility window for sensitive account actions. Only configured providers linked to the account are offered. Cancellation leaves the session signed in, and successful verification requires retrying the action.
+
+Apply the additive auth migration `worker/migrations/d1-auth/0024_session-authentication.sql` before deploying these application changes (`mise exec -- bun run db:migrate:remote`). Existing sessions fall back to their original creation timestamp. Routine session renewal does not refresh verification freshness.
+
 ## Scripts
 
 | Script             | Description                                                            |

@@ -21,6 +21,7 @@ export const session = sqliteTable(
 	{
 		id: text('id').primaryKey(),
 		expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+		authenticatedAt: integer('authenticated_at', { mode: 'timestamp' }),
 		token: text('token').notNull().unique(),
 		createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 		updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),

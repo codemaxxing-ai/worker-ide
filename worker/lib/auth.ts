@@ -18,6 +18,7 @@ import { EFFECTIVE_LIMIT_ORG_MAX_MEMBERS, EFFECTIVE_LIMIT_ORG_MAX_PENDING_INVITA
 import { trackAuthEvent } from './analytics';
 import { getEffectiveLimit } from './limits';
 import { shouldBlockOrganizationCreate } from './organization-limits';
+import { sessionReauthentication } from './session-reauthentication';
 import * as schema from '../db/auth-schema';
 
 interface AuthEnvironment {
@@ -113,6 +114,7 @@ export function createAuth(environment: AuthEnvironment, baseUrl: string, reques
 			}),
 		},
 		plugins: [
+			sessionReauthentication(environment.DB, Object.keys(socialProviders)),
 			admin(ADMIN_PLUGIN_OPTIONS),
 			organization({
 				organizationLimit: async (user) => shouldBlockOrganizationCreate(drizzle(environment.DB, { schema }), user.id),
@@ -178,6 +180,7 @@ export function createAuth(environment: AuthEnvironment, baseUrl: string, reques
 			},
 		},
 		session: {
+			additionalFields: { authenticatedAt: { type: 'date', required: false, input: false } },
 			cookieCache: {
 				...SESSION_COOKIE_CACHE,
 				version: '2',

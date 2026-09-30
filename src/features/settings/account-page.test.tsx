@@ -10,6 +10,8 @@ import AccountPage from './account-page';
 
 const mocks = vi.hoisted(() => ({
 	fetchActiveSessions: vi.fn(),
+	fetchReauthenticationProviders: vi.fn(),
+	linkSocial: vi.fn(),
 	revokeActiveSession: vi.fn(),
 	revokeOtherActiveSessions: vi.fn(),
 	signOut: vi.fn(),
@@ -24,6 +26,7 @@ vi.mock('@/lib/auth-client', () => ({
 	authClient: {
 		useSession: mocks.useSession,
 		signOut: mocks.signOut,
+		linkSocial: mocks.linkSocial,
 	},
 }));
 
@@ -31,6 +34,7 @@ vi.mock('@/lib/api-client', () => ({
 	deleteAccount: mocks.deleteAccount,
 	fetchAccountDeletePreview: mocks.fetchAccountDeletePreview,
 	fetchActiveSessions: mocks.fetchActiveSessions,
+	fetchReauthenticationProviders: mocks.fetchReauthenticationProviders,
 	revokeActiveSession: mocks.revokeActiveSession,
 	revokeOtherActiveSessions: mocks.revokeOtherActiveSessions,
 }));
@@ -42,7 +46,7 @@ vi.mock('@/components/ui/toast-store', () => ({
 	},
 }));
 
-function renderAccountPage() {
+function renderAccountPage(path = '/settings/account') {
 	const queryClient = new QueryClient({
 		defaultOptions: {
 			queries: {
@@ -52,12 +56,27 @@ function renderAccountPage() {
 	});
 
 	return render(
-		<MemoryRouter>
+		<MemoryRouter initialEntries={[path]}>
 			<QueryClientProvider client={queryClient}>
 				<AccountPage />
 			</QueryClientProvider>
 		</MemoryRouter>,
 	);
+}
+
+async function clickDialogButton(user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement, name: string) {
+	const button = within(dialog).getByRole('button', { name });
+	await waitFor(() => expect(getComputedStyle(button).pointerEvents).not.toBe('none'));
+	await user.click(button);
+}
+
+async function openVerification() {
+	mocks.revokeActiveSession.mockRejectedValue(new ApiError('Sign in again to manage sessions', 403, 'SESSION_NOT_FRESH'));
+	const user = userEvent.setup();
+	renderAccountPage();
+	await user.click(await screen.findByRole('button', { name: 'Revoke' }));
+	await clickDialogButton(user, await screen.findByRole('dialog', { name: 'Revoke this session?' }), 'Revoke');
+	return { user, dialog: await screen.findByRole('dialog', { name: 'Verify it’s you' }) };
 }
 
 describe('AccountPage', () => {
@@ -88,6 +107,9 @@ describe('AccountPage', () => {
 		mocks.revokeActiveSession.mockImplementation(() => Promise.resolve());
 		mocks.revokeOtherActiveSessions.mockImplementation(() => Promise.resolve());
 		mocks.signOut.mockResolvedValue({ data: undefined, error: undefined });
+		mocks.signOut.mockClear();
+		mocks.linkSocial.mockReset().mockResolvedValue({ error: undefined });
+		mocks.fetchReauthenticationProviders.mockResolvedValue(['github']);
 		mocks.toastError.mockReset();
 		mocks.toastSuccess.mockReset();
 	});
@@ -101,7 +123,7 @@ describe('AccountPage', () => {
 
 		const revokeDialog = await screen.findByRole('dialog', { name: 'Revoke this session?' });
 
-		await user.click(within(revokeDialog).getByRole('button', { name: 'Revoke' }));
+		await clickDialogButton(user, revokeDialog, 'Revoke');
 
 		await waitFor(() => expect(mocks.revokeActiveSession).toHaveBeenCalledWith('other-session'));
 	});
@@ -115,7 +137,7 @@ describe('AccountPage', () => {
 
 		const signOutDialog = await screen.findByRole('dialog', { name: 'Sign out all sessions?' });
 
-		await user.click(within(signOutDialog).getByRole('button', { name: 'Sign out' }));
+		await clickDialogButton(user, signOutDialog, 'Sign out');
 
 		await waitFor(() => expect(mocks.revokeOtherActiveSessions).toHaveBeenCalledTimes(1));
 	});
@@ -127,9 +149,44 @@ describe('AccountPage', () => {
 
 		await user.click(await screen.findByRole('button', { name: 'Revoke' }));
 		const revokeDialog = await screen.findByRole('dialog', { name: 'Revoke this session?' });
-		await user.click(within(revokeDialog).getByRole('button', { name: 'Revoke' }));
+		await clickDialogButton(user, revokeDialog, 'Revoke');
 
-		const reauthenticationDialog = await screen.findByRole('dialog', { name: 'Sign in again' });
-		expect(within(reauthenticationDialog).getByText(/signed in within the last 24 hours/)).toBeInTheDocument();
+		const reauthenticationDialog = await screen.findByRole('dialog', { name: 'Verify it’s you' });
+		expect(within(reauthenticationDialog).getByText(/current session stays signed in/)).toBeInTheDocument();
+		await within(reauthenticationDialog).findByRole('button', { name: 'Verify with GitHub' });
+		await clickDialogButton(user, reauthenticationDialog, 'Verify with GitHub');
+		expect(mocks.linkSocial).toHaveBeenCalledWith(
+			expect.objectContaining({ provider: 'github', additionalData: { intent: 'reauthenticate' } }),
+		);
+		expect(mocks.signOut).not.toHaveBeenCalled();
+		expect(within(reauthenticationDialog).queryByRole('button', { name: 'Verify with Google' })).not.toBeInTheDocument();
+	});
+
+	it('offers configured linked providers and cancels without signing out', async () => {
+		mocks.fetchReauthenticationProviders.mockResolvedValue(['google', 'github']);
+		const { user, dialog } = await openVerification();
+		expect(await within(dialog).findByRole('button', { name: 'Verify with Google' })).toBeInTheDocument();
+		expect(within(dialog).getByRole('button', { name: 'Verify with GitHub' })).toBeInTheDocument();
+		await clickDialogButton(user, dialog, 'Cancel');
+		expect(mocks.linkSocial).not.toHaveBeenCalled();
+		expect(mocks.signOut).not.toHaveBeenCalled();
+	});
+
+	it('leaves the session intact when provider verification cannot start', async () => {
+		mocks.linkSocial.mockResolvedValue({ error: { message: 'Provider unavailable' } });
+		const { user, dialog } = await openVerification();
+		await within(dialog).findByRole('button', { name: 'Verify with GitHub' });
+		await clickDialogButton(user, dialog, 'Verify with GitHub');
+		await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Could not start verification. Your session is unchanged.'));
+		expect(mocks.signOut).not.toHaveBeenCalled();
+	});
+
+	it.each(['success', 'error'])('shows %s feedback without retrying a sensitive action', async (result) => {
+		renderAccountPage(`/settings/account?reauth=${result}`);
+		expect(await screen.findByRole('status')).toHaveTextContent(
+			result === 'success' ? 'Identity verified. Retry your action.' : 'Verification was not completed. Your session is unchanged.',
+		);
+		expect(mocks.linkSocial).not.toHaveBeenCalled();
+		expect(mocks.signOut).not.toHaveBeenCalled();
 	});
 });

@@ -169,6 +169,13 @@
 			"when": 1783887747476,
 			"tag": "0023_jazzy_nomad",
 			"breakpoints": true
+		},
+		{
+			"idx": 24,
+			"version": "6",
+			"when": 1790727913379,
+			"tag": "0024_session-authentication",
+			"breakpoints": true
 		}
 	]
 }

@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Monitor, Smartphone, Trash2 } from 'lucide-react';
 import { useCallback, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 
 import { Button } from '@/components/ui/button';
 import { ConfirmButton } from '@/components/ui/confirm-button';
@@ -13,6 +13,7 @@ import {
 	deleteAccount,
 	fetchAccountDeletePreview,
 	fetchActiveSessions,
+	fetchReauthenticationProviders,
 	revokeActiveSession,
 	revokeOtherActiveSessions,
 } from '@/lib/api-client';
@@ -24,6 +25,8 @@ import type { AccountDeletePreview } from '@/lib/api-client';
 
 export default function AccountPage() {
 	const navigate = useNavigate();
+	const [search] = useSearchParams();
+	const verificationResult = search.get('reauth');
 	const { data: session } = authClient.useSession();
 
 	const sessionsQuery = useQuery({
@@ -34,6 +37,12 @@ export default function AccountPage() {
 
 	const queryClient = useQueryClient();
 	const [showReauthenticationModal, setShowReauthenticationModal] = useState(false);
+	const [isVerifying, setIsVerifying] = useState(false);
+	const providersQuery = useQuery({
+		queryKey: ['reauthentication-providers'],
+		queryFn: fetchReauthenticationProviders,
+		enabled: showReauthenticationModal,
+	});
 
 	const handleRevocationError = useCallback((error: unknown) => {
 		if (error instanceof ApiError && error.code === 'SESSION_NOT_FRESH') {
@@ -67,16 +76,23 @@ export default function AccountPage() {
 		}
 	}, [handleRevocationError, queryClient]);
 
-	const handleSignInAgain = useCallback(async () => {
+	const handleVerifyIdentity = useCallback(async (provider: 'google' | 'github') => {
+		setIsVerifying(true);
 		try {
-			const { error } = await authClient.signOut();
+			const { error } = await authClient.linkSocial({
+				provider,
+				callbackURL: '/settings/account',
+				errorCallbackURL: '/settings/account?reauth=error',
+				additionalData: { intent: 'reauthenticate' },
+			});
 			if (error) {
-				toast.error(error.message ?? 'Could not sign out. Please try again.');
+				toast.error('Could not start verification. Your session is unchanged.');
 				return;
 			}
-			globalThis.location.href = '/?next=%2Fsettings%2Faccount';
 		} catch {
-			toast.error('Could not sign out. Please check your connection and try again.');
+			toast.error('Could not start verification. Your session is unchanged.');
+		} finally {
+			setIsVerifying(false);
 		}
 	}, []);
 
@@ -121,6 +137,13 @@ export default function AccountPage() {
 
 	return (
 		<div className="flex flex-col gap-8">
+			{verificationResult === 'success' || verificationResult === 'error' ? (
+				<p role="status" className="text-sm text-text-secondary">
+					{verificationResult === 'success'
+						? 'Identity verified. Retry your action.'
+						: 'Verification was not completed. Your session is unchanged.'}
+				</p>
+			) : undefined}
 			<div>
 				<h2 className="mb-1 text-lg font-semibold text-text-primary">Account</h2>
 				<p className="text-sm text-text-secondary">Manage sessions and account settings.</p>
@@ -261,19 +284,28 @@ export default function AccountPage() {
 				onConfirm={() => void handleConfirmDelete()}
 			/>
 
-			<Modal open={showReauthenticationModal} onOpenChange={setShowReauthenticationModal} title="Sign in again">
+			<Modal open={showReauthenticationModal} onOpenChange={setShowReauthenticationModal} title="Verify it’s you">
 				<ModalBody>
-					<p className="text-sm text-text-secondary">
-						For your security, you need to have signed in within the last 24 hours before revoking sessions.
-					</p>
+					<p className="text-sm text-text-secondary">Verify your identity to continue. Your current session stays signed in.</p>
+					{providersQuery.isPending ? <p className="text-sm text-text-secondary">Loading verification options…</p> : undefined}
+					{providersQuery.isError ? (
+						<p role="alert" className="text-sm text-text-secondary">
+							Could not load verification options. Close this dialog and retry.
+						</p>
+					) : undefined}
+					{providersQuery.data?.length === 0 ? (
+						<p className="text-sm text-text-secondary">No linked sign-in provider is available for verification.</p>
+					) : undefined}
 				</ModalBody>
 				<ModalFooter>
 					<Button variant="secondary" size="sm" onClick={() => setShowReauthenticationModal(false)}>
 						Cancel
 					</Button>
-					<Button size="sm" onClick={() => void handleSignInAgain()}>
-						Sign in again
-					</Button>
+					{providersQuery.data?.map((provider) => (
+						<Button key={provider} size="sm" disabled={isVerifying} onClick={() => void handleVerifyIdentity(provider)}>
+							Verify with {provider === 'google' ? 'Google' : 'GitHub'}
+						</Button>
+					))}
 				</ModalFooter>
 			</Modal>
 

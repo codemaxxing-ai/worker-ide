@@ -42,6 +42,7 @@ export {
 	updateUserPreferences,
 	type ActiveSession,
 	fetchActiveSessions,
+	fetchReauthenticationProviders,
 	revokeActiveSession,
 	revokeOtherActiveSessions,
 	type AccountDeletePreview,

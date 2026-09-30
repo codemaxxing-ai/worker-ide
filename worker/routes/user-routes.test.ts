@@ -16,8 +16,9 @@ beforeAll(async () => {
 		`CREATE TABLE IF NOT EXISTS "user" (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, email_verified INTEGER NOT NULL DEFAULT 0, image TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, banned_at INTEGER, role TEXT NOT NULL DEFAULT 'user', banned INTEGER DEFAULT 0, ban_reason TEXT, ban_expires INTEGER)`,
 	);
 	await env.DB.exec(
-		`CREATE TABLE IF NOT EXISTS "session" (id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, token TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, ip_address TEXT, user_agent TEXT, user_id TEXT NOT NULL, active_organization_id TEXT, impersonated_by TEXT)`,
+		`CREATE TABLE IF NOT EXISTS "session" (id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, authenticated_at INTEGER, token TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, ip_address TEXT, user_agent TEXT, user_id TEXT NOT NULL, active_organization_id TEXT, impersonated_by TEXT)`,
 	);
+	await env.DB.exec('CREATE TABLE IF NOT EXISTS account (provider_id TEXT NOT NULL, user_id TEXT NOT NULL)');
 });
 
 function createId(): string {
@@ -64,6 +65,41 @@ function createApp(currentSession: { id: string; userId: string }) {
 }
 
 describe('user session routes', () => {
+	it('offers only configured providers linked to the current account', async () => {
+		const userId = await insertUser();
+		const currentSessionId = await insertSession(userId);
+		await env.DB.prepare('INSERT INTO account (provider_id, user_id) VALUES (?, ?), (?, ?)').bind('google', userId, 'github', userId).run();
+		const response = await createApp({ id: currentSessionId, userId }).request(
+			'https://example.com/user/reauthentication-providers',
+			{},
+			{
+				...env,
+				GOOGLE_CLIENT_ID: 'configured',
+				GOOGLE_CLIENT_SECRET: 'configured',
+				GITHUB_CLIENT_ID: '',
+				GITHUB_CLIENT_SECRET: '',
+			},
+		);
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ providers: ['google'] });
+	});
+
+	it('uses recent verification without changing session creation time', async () => {
+		const userId = await insertUser();
+		const createdAt = new Date(Math.floor((Date.now() - 3 * 24 * 60 * 60 * 1000) / 1000) * 1000);
+		const currentSessionId = await insertSession(userId, { createdAt });
+		const otherSessionId = await insertSession(userId);
+		await database.update(schema.session).set({ authenticatedAt: new Date() }).where(eq(schema.session.id, currentSessionId));
+		const response = await createApp({ id: currentSessionId, userId }).request(
+			`https://example.com/user/sessions/${otherSessionId}`,
+			{ method: 'DELETE' },
+			env,
+		);
+		expect(response.status).toBe(200);
+		const [current] = await database.select().from(schema.session).where(eq(schema.session.id, currentSessionId));
+		expect(current.createdAt).toEqual(createdAt);
+	});
+
 	it('lists active owned sessions without exposing bearer tokens when the current session is older than 24 hours', async () => {
 		const userId = await insertUser();
 		const currentSessionCreatedAt = new Date(Date.now() - 25 * 60 * 60 * 1000);

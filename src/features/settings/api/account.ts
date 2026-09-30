@@ -26,6 +26,13 @@ export async function fetchActiveSessions(): Promise<ActiveSession[]> {
 	return sessions;
 }
 
+export async function fetchReauthenticationProviders() {
+	const response = await createUserApiClient().user['reauthentication-providers'].$get({});
+	if (!response.ok) await throwApiError(response, 'Could not load verification providers');
+	const result = await response.json();
+	return result.providers;
+}
+
 export async function revokeActiveSession(sessionId: string): Promise<void> {
 	const userApi = createUserApiClient();
 	const response = await userApi.user.sessions[':id'].$delete({ param: { id: sessionId } });

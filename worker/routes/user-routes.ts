@@ -36,9 +36,15 @@ interface UserDeletionImpact {
 
 async function requireFreshSession(database: ReturnType<typeof drizzle>, currentSession: { id: string; userId: string }) {
 	const currentSessionRows = await database
-		.select({ createdAt: schema.session.createdAt })
+		.select({ createdAt: schema.session.createdAt, authenticatedAt: schema.session.authenticatedAt })
 		.from(schema.session)
-		.where(and(eq(schema.session.id, currentSession.id), eq(schema.session.userId, currentSession.userId)))
+		.where(
+			and(
+				eq(schema.session.id, currentSession.id),
+				eq(schema.session.userId, currentSession.userId),
+				gt(schema.session.expiresAt, new Date()),
+			),
+		)
 		.limit(1);
 	const currentSessionRow = currentSessionRows[0];
 
@@ -46,7 +52,7 @@ async function requireFreshSession(database: ReturnType<typeof drizzle>, current
 		throw httpError(HttpErrorCode.UNAUTHORIZED, 'Session is no longer valid');
 	}
 
-	if (Date.now() - currentSessionRow.createdAt.getTime() >= SESSION_FRESHNESS_MAX_AGE_MS) {
+	if (Date.now() - (currentSessionRow.authenticatedAt ?? currentSessionRow.createdAt).getTime() >= SESSION_FRESHNESS_MAX_AGE_MS) {
 		throw httpError(HttpErrorCode.SESSION_NOT_FRESH, 'Sign in again to manage sessions');
 	}
 }
@@ -125,6 +131,19 @@ async function getUserDeletionImpact(database: ReturnType<typeof drizzle>, userI
 }
 
 export const userRoutes = new Hono<AuthedEnvironment>()
+	.get('/user/reauthentication-providers', async (context) => {
+		const current = context.get('session');
+		const linked = await drizzle(context.env.DB)
+			.select({ providerId: schema.account.providerId })
+			.from(schema.account)
+			.where(eq(schema.account.userId, current.userId));
+		const providers = [...new Set(linked.map((entry) => entry.providerId))].filter(
+			(provider): provider is 'google' | 'github' =>
+				(provider === 'google' && Boolean(context.env.GOOGLE_CLIENT_ID && context.env.GOOGLE_CLIENT_SECRET)) ||
+				(provider === 'github' && Boolean(context.env.GITHUB_CLIENT_ID && context.env.GITHUB_CLIENT_SECRET)),
+		);
+		return context.json({ providers });
+	})
 	// GET /api/user/sessions — Active sessions without exposing bearer tokens
 	.get('/user/sessions', async (c) => {
 		const currentSession = c.get('session');
