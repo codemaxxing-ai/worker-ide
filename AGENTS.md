@@ -30,6 +30,10 @@ This document is a collection of guidelines for agents working on the project.
 - Install all dependencies as devDependencies (`bun add -d`) since everything is bundled with Vite.
 - Use `bun` as the package manager (not npm/yarn/pnpm).
 
+## Product Copy
+
+- Keep UI copy terse and factual. Do not add routine reassurance about sessions staying signed in or explanations of invisible implementation details.
+
 ## API Communication (Hono RPC)
 
 All frontend-to-backend API calls **must** use the Hono RPC client (`createApiClient(projectId)` from `@/lib/api-client`). This gives fully type-safe requests and responses inferred from route definitions. For non-project-scoped routes, use `createUserApiClient()`, `createOrgApiClient()`, or `createTransferApiClient()` from the same module.

@@ -19,6 +19,7 @@ import {
 } from '@/lib/api-client';
 import { ApiError } from '@/lib/api-error';
 import { authClient } from '@/lib/auth-client';
+import { formatIpAddress } from '@/lib/ip-address';
 import { formatRelativeTime } from '@/lib/utils';
 
 import type { AccountDeletePreview } from '@/lib/api-client';
@@ -86,11 +87,11 @@ export default function AccountPage() {
 				additionalData: { intent: 'reauthenticate' },
 			});
 			if (error) {
-				toast.error('Could not start verification. Your session is unchanged.');
+				toast.error('Could not start verification.');
 				return;
 			}
 		} catch {
-			toast.error('Could not start verification. Your session is unchanged.');
+			toast.error('Could not start verification.');
 		} finally {
 			setIsVerifying(false);
 		}
@@ -139,9 +140,7 @@ export default function AccountPage() {
 		<div className="flex flex-col gap-8">
 			{verificationResult === 'success' || verificationResult === 'error' ? (
 				<p role="status" className="text-sm text-text-secondary">
-					{verificationResult === 'success'
-						? 'Identity verified. Retry your action.'
-						: 'Verification was not completed. Your session is unchanged.'}
+					{verificationResult === 'success' ? 'Identity verified. Retry your action.' : 'Verification was not completed.'}
 				</p>
 			) : undefined}
 			<div>
@@ -150,7 +149,7 @@ export default function AccountPage() {
 			</div>
 
 			<section>
-				<div className="mb-3 flex items-center justify-between">
+				<div className="mb-3 flex flex-wrap items-center justify-between gap-3">
 					<h3
 						className="
 							text-xs font-medium tracking-wider text-text-secondary uppercase
@@ -196,15 +195,21 @@ export default function AccountPage() {
 							const createdAt = new Date(session.createdAt).getTime();
 							return (
 								<div key={session.id} className="flex items-center justify-between gap-3 px-4 py-3">
-									<div className="flex min-w-0 items-center gap-3">
+									<div className="flex min-w-0 flex-1 items-center gap-3">
 										<Icon className="size-4 shrink-0 text-text-secondary" />
-										<div className="min-w-0">
+										<div className="min-w-0 flex-1">
 											<p className="truncate text-sm text-text-primary">
 												{session.userAgent?.slice(0, 60) ?? 'Unknown device'}
 												{session.current && <span className="ml-1.5 text-xs font-medium text-accent">(current)</span>}
 											</p>
-											<p className="text-xs text-text-secondary">
-												{session.ipAddress ?? 'Unknown IP'} &middot; {formatRelativeTime(createdAt)}
+											<p
+												className="
+													flex flex-wrap items-baseline gap-x-1 gap-y-0.5 text-xs
+													text-text-secondary
+												"
+											>
+												<span className="max-w-full font-mono break-all">{formatIpAddress(session.ipAddress ?? 'Unknown IP')}</span>
+												<span className="max-w-full">&middot; {formatRelativeTime(createdAt)}</span>
 											</p>
 										</div>
 									</div>
@@ -286,7 +291,6 @@ export default function AccountPage() {
 
 			<Modal open={showReauthenticationModal} onOpenChange={setShowReauthenticationModal} title="Verify it’s you">
 				<ModalBody>
-					<p className="text-sm text-text-secondary">Verify your identity to continue. Your current session stays signed in.</p>
 					{providersQuery.isPending ? <p className="text-sm text-text-secondary">Loading verification options…</p> : undefined}
 					{providersQuery.isError ? (
 						<p role="alert" className="text-sm text-text-secondary">

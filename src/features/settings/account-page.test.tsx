@@ -114,6 +114,21 @@ describe('AccountPage', () => {
 		mocks.toastSuccess.mockReset();
 	});
 
+	it('formats IPv6 session addresses without hiding the revoke action', async () => {
+		mocks.fetchActiveSessions.mockResolvedValue([
+			{
+				id: 'other-session',
+				userAgent: 'iPhone Mobile Safari',
+				ipAddress: '2001:0DB8:0000:0000:0000:0000:0000:0001',
+				createdAt: '2026-04-18T12:00:00.000Z',
+				current: false,
+			},
+		]);
+		renderAccountPage();
+		expect(await screen.findByText('2001:db8::1')).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Revoke' })).toBeInTheDocument();
+	});
+
 	it('confirms before revoking an individual session', async () => {
 		const user = userEvent.setup();
 		renderAccountPage();
@@ -152,7 +167,7 @@ describe('AccountPage', () => {
 		await clickDialogButton(user, revokeDialog, 'Revoke');
 
 		const reauthenticationDialog = await screen.findByRole('dialog', { name: 'Verify it’s you' });
-		expect(within(reauthenticationDialog).getByText(/current session stays signed in/)).toBeInTheDocument();
+		expect(within(reauthenticationDialog).queryByText(/current session stays signed in/)).not.toBeInTheDocument();
 		await within(reauthenticationDialog).findByRole('button', { name: 'Verify with GitHub' });
 		await clickDialogButton(user, reauthenticationDialog, 'Verify with GitHub');
 		expect(mocks.linkSocial).toHaveBeenCalledWith(
@@ -177,14 +192,14 @@ describe('AccountPage', () => {
 		const { user, dialog } = await openVerification();
 		await within(dialog).findByRole('button', { name: 'Verify with GitHub' });
 		await clickDialogButton(user, dialog, 'Verify with GitHub');
-		await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Could not start verification. Your session is unchanged.'));
+		await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Could not start verification.'));
 		expect(mocks.signOut).not.toHaveBeenCalled();
 	});
 
 	it.each(['success', 'error'])('shows %s feedback without retrying a sensitive action', async (result) => {
 		renderAccountPage(`/settings/account?reauth=${result}`);
 		expect(await screen.findByRole('status')).toHaveTextContent(
-			result === 'success' ? 'Identity verified. Retry your action.' : 'Verification was not completed. Your session is unchanged.',
+			result === 'success' ? 'Identity verified. Retry your action.' : 'Verification was not completed.',
 		);
 		expect(mocks.linkSocial).not.toHaveBeenCalled();
 		expect(mocks.signOut).not.toHaveBeenCalled();
