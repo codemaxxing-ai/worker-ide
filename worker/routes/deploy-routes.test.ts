@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { env } from 'cloudflare:test';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
+	deployRoutes,
 	extractFrontendEntryPoint,
 	generateProductionHtml,
 	hashFileForManifest,
@@ -9,6 +11,33 @@ import {
 	sanitizeR2BucketName,
 	sanitizeWorkerName,
 } from './deploy-routes';
+
+describe('deployment status', () => {
+	it('reports workflow rollback as running for deployment clients', async () => {
+		const instanceId = crypto.randomUUID();
+		const workflowInstance: WorkflowInstance = {
+			id: instanceId,
+			status: vi.fn<WorkflowInstance['status']>().mockResolvedValue({ status: 'rollingBack' }),
+			pause: vi.fn<WorkflowInstance['pause']>(),
+			resume: vi.fn<WorkflowInstance['resume']>(),
+			terminate: vi.fn<WorkflowInstance['terminate']>(),
+			restart: vi.fn<WorkflowInstance['restart']>(),
+			delete: vi.fn<WorkflowInstance['delete']>(),
+			sendEvent: vi.fn<WorkflowInstance['sendEvent']>(),
+			subscribe: vi.fn<WorkflowInstance['subscribe']>(),
+		};
+		const getInstance = vi.spyOn(env.DEPLOY_WORKFLOW, 'get').mockResolvedValue(workflowInstance);
+
+		try {
+			const response = await deployRoutes.request(`https://example.com/deploy/status?instanceId=${instanceId}`, {}, env);
+
+			expect(response.status).toBe(200);
+			expect(await response.json()).toEqual({ instanceId, status: 'running' });
+		} finally {
+			getInstance.mockRestore();
+		}
+	});
+});
 
 describe('sanitizeWorkerName', () => {
 	it('lowercases uppercase characters', () => {

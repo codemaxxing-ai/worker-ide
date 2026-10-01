@@ -130,7 +130,7 @@ export const deployRoutes = new Hono<AppEnvironment>()
 		const result = parseDeployResult(workflowStatus.output);
 		return c.json({
 			instanceId,
-			status: workflowStatus.status,
+			status: workflowStatus.status === 'rollingBack' ? 'running' : workflowStatus.status,
 			result: result?.success ? result : undefined,
 			error: sanitizeDeployError(result?.error ?? workflowStatus.error?.message),
 		} satisfies DeployStatusResponse);
