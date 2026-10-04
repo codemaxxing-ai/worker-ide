@@ -2,45 +2,25 @@ import { useCallback, useEffect, useRef } from 'react';
 
 import { toast } from '@/components/ui/toast-store';
 import { useRegisterSW } from '@/lib/pwa-register';
-import { markUpdateActivationReloadPending, recoverFromStaleAsset } from '@/lib/stale-asset-recovery';
-
-// Grace period to distinguish "new SW was already waiting on page load"
-// from "update arrived mid-session".
-const INITIAL_LOAD_GRACE_PERIOD_MS = 2000;
+import { clearUpdateActivationReloadPending, markUpdateActivationReloadPending } from '@/lib/stale-asset-recovery';
 
 export function usePwaUpdate() {
 	const updateIntervalReference = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
-	const isInitialLoadReference = useRef(true);
-	const isAwaitingActivationReloadReference = useRef(false);
-
-	useEffect(() => {
-		function handleControllerChange() {
-			if (!isAwaitingActivationReloadReference.current) {
-				return;
-			}
-
-			isAwaitingActivationReloadReference.current = false;
-			recoverFromStaleAsset();
-		}
-
-		navigator.serviceWorker?.addEventListener('controllerchange', handleControllerChange);
-		return () => {
-			navigator.serviceWorker?.removeEventListener('controllerchange', handleControllerChange);
-		};
-	}, []);
+	const isMountedReference = useRef(true);
+	const isActivationRequestedReference = useRef(false);
+	const hasNotifiedUpdateReference = useRef(false);
 
 	const {
 		needRefresh: [needRefresh],
 		updateServiceWorker,
 	} = useRegisterSW({
 		onRegisteredSW(_swUrl, registration) {
-			if (registration) {
-				void registration.update();
+			if (registration && isMountedReference.current) {
+				void registration.update().catch(() => {});
 				const intervalMs = 5 * 60 * 1000;
+				clearInterval(updateIntervalReference.current);
 				updateIntervalReference.current = setInterval(async () => {
-					if (!(!registration.installing && navigator)) return;
-
-					if ('connection' in navigator && !navigator.onLine) return;
+					if (registration.installing || !navigator.onLine) return;
 
 					try {
 						const response = await fetch(_swUrl, {
@@ -62,32 +42,30 @@ export function usePwaUpdate() {
 	});
 
 	const activateUpdate = useCallback(() => {
-		isAwaitingActivationReloadReference.current = true;
+		if (!isMountedReference.current || isActivationRequestedReference.current) return;
+		isActivationRequestedReference.current = true;
 		markUpdateActivationReloadPending();
-		void updateServiceWorker(true);
+		void updateServiceWorker(true).catch(() => {
+			isActivationRequestedReference.current = false;
+			clearUpdateActivationReloadPending();
+		});
 	}, [updateServiceWorker]);
 
 	useEffect(() => {
-		const timeout = setTimeout(() => {
-			isInitialLoadReference.current = false;
-		}, INITIAL_LOAD_GRACE_PERIOD_MS);
-		return () => clearTimeout(timeout);
-	}, []);
-
-	useEffect(() => {
+		isMountedReference.current = true;
 		return () => {
+			isMountedReference.current = false;
 			clearInterval(updateIntervalReference.current);
 		};
 	}, []);
 
 	useEffect(() => {
-		if (!needRefresh) return;
-
-		// Non-disruptive: silently activate during initial load
-		if (isInitialLoadReference.current) {
-			activateUpdate();
+		if (!needRefresh) {
+			hasNotifiedUpdateReference.current = false;
 			return;
 		}
+		if (hasNotifiedUpdateReference.current) return;
+		hasNotifiedUpdateReference.current = true;
 
 		toast.info('New version available', {
 			persist: true,

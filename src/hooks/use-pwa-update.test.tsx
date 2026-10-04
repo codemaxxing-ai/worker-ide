@@ -1,14 +1,22 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, cleanup, renderHook } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { markUpdateActivationReloadPendingMock, recoverFromStaleAssetMock, toastInfoMock, updateServiceWorkerMock, useRegisterSWMock } =
-	vi.hoisted(() => ({
-		markUpdateActivationReloadPendingMock: vi.fn(),
-		recoverFromStaleAssetMock: vi.fn(),
-		toastInfoMock: vi.fn(),
-		updateServiceWorkerMock: vi.fn(),
-		useRegisterSWMock: vi.fn(),
-	}));
+const {
+	clearUpdateActivationReloadPendingMock,
+	markUpdateActivationReloadPendingMock,
+	recoverFromStaleAssetMock,
+	toastInfoMock,
+	updateServiceWorkerMock,
+	useRegisterSWMock,
+} = vi.hoisted(() => ({
+	clearUpdateActivationReloadPendingMock: vi.fn(),
+	markUpdateActivationReloadPendingMock: vi.fn(),
+	recoverFromStaleAssetMock: vi.fn(),
+	toastInfoMock: vi.fn(),
+	updateServiceWorkerMock: vi.fn<(reloadPage?: boolean) => Promise<void>>(),
+	useRegisterSWMock: vi.fn(),
+}));
 
 vi.mock('@/components/ui/toast-store', () => ({
 	toast: {
@@ -17,6 +25,7 @@ vi.mock('@/components/ui/toast-store', () => ({
 }));
 
 vi.mock('@/lib/stale-asset-recovery', () => ({
+	clearUpdateActivationReloadPending: clearUpdateActivationReloadPendingMock,
 	markUpdateActivationReloadPending: markUpdateActivationReloadPendingMock,
 	recoverFromStaleAsset: recoverFromStaleAssetMock,
 }));
@@ -45,8 +54,10 @@ describe('usePwaUpdate', () => {
 		vi.useFakeTimers();
 		toastInfoMock.mockReset();
 		markUpdateActivationReloadPendingMock.mockReset();
+		clearUpdateActivationReloadPendingMock.mockReset();
 		recoverFromStaleAssetMock.mockReset();
 		updateServiceWorkerMock.mockReset();
+		updateServiceWorkerMock.mockResolvedValue();
 		registrationUpdateMock = vi.fn(async () => {});
 		fetchMock = vi.fn(async () => new Response(undefined, { status: 200 }));
 		controllerChangeListener = undefined;
@@ -78,6 +89,7 @@ describe('usePwaUpdate', () => {
 	});
 
 	afterEach(() => {
+		cleanup();
 		vi.useRealTimers();
 		vi.unstubAllGlobals();
 		Object.defineProperty(navigator, 'serviceWorker', {
@@ -86,7 +98,7 @@ describe('usePwaUpdate', () => {
 		});
 	});
 
-	it('activates immediately during the initial-load grace period and reloads after controller change', async () => {
+	it('prompts for a startup update without automatically activating or reloading', async () => {
 		useRegisterSWMock.mockImplementationOnce((options?: RegisterSWOptions) => {
 			options?.onRegisteredSW?.('/sw.js', {
 				update: registrationUpdateMock,
@@ -102,19 +114,19 @@ describe('usePwaUpdate', () => {
 		const { usePwaUpdate } = await import('./use-pwa-update');
 		renderHook(() => usePwaUpdate());
 
-		expect(updateServiceWorkerMock).toHaveBeenCalledWith(true);
-		expect(markUpdateActivationReloadPendingMock).toHaveBeenCalledTimes(1);
-		expect(toastInfoMock).not.toHaveBeenCalled();
+		expect(updateServiceWorkerMock).not.toHaveBeenCalled();
+		expect(markUpdateActivationReloadPendingMock).not.toHaveBeenCalled();
+		expect(toastInfoMock).toHaveBeenCalledTimes(1);
 		expect(registrationUpdateMock).toHaveBeenCalledTimes(1);
 
 		await act(async () => {
 			controllerChangeListener?.(new Event('controllerchange'));
 		});
 
-		expect(recoverFromStaleAssetMock).toHaveBeenCalledTimes(1);
+		expect(recoverFromStaleAssetMock).not.toHaveBeenCalled();
 	});
 
-	it('shows a reload toast after the grace period and reloads after activating the waiting worker', async () => {
+	it('prompts immediately when an update arrives and delegates one reload to the PWA plugin', async () => {
 		useRegisterSWMock.mockImplementationOnce((options?: RegisterSWOptions) => {
 			options?.onRegisteredSW?.('/sw.js', {
 				update: registrationUpdateMock,
@@ -130,10 +142,6 @@ describe('usePwaUpdate', () => {
 		const { usePwaUpdate } = await import('./use-pwa-update');
 		const { rerender } = renderHook(() => usePwaUpdate());
 
-		act(() => {
-			vi.advanceTimersByTime(2001);
-		});
-
 		useRegisterSWMock.mockImplementation((options?: RegisterSWOptions) => {
 			options?.onRegisteredSW?.('/sw.js', {
 				update: registrationUpdateMock,
@@ -147,8 +155,10 @@ describe('usePwaUpdate', () => {
 		});
 
 		rerender();
+		rerender();
 
 		expect(toastInfoMock).toHaveBeenCalledTimes(1);
+		expect(updateServiceWorkerMock).not.toHaveBeenCalled();
 		const toastCall = toastInfoMock.mock.calls[0];
 		expect(toastCall).toBeDefined();
 		if (!toastCall) {
@@ -165,16 +175,77 @@ describe('usePwaUpdate', () => {
 
 		await act(async () => {
 			toastOptions.action.onClick();
+			toastOptions.action.onClick();
 		});
 
-		expect(updateServiceWorkerMock).toHaveBeenCalledWith(true);
+		expect(updateServiceWorkerMock).toHaveBeenCalledExactlyOnceWith(true);
 		expect(markUpdateActivationReloadPendingMock).toHaveBeenCalledTimes(1);
 
 		await act(async () => {
 			controllerChangeListener?.(new Event('controllerchange'));
 		});
 
-		expect(recoverFromStaleAssetMock).toHaveBeenCalledTimes(1);
+		expect(recoverFromStaleAssetMock).not.toHaveBeenCalled();
+	});
+
+	it('does not duplicate a startup update prompt in Strict Mode', async () => {
+		useRegisterSWMock.mockReturnValue({
+			needRefresh: [true, vi.fn()],
+			updateServiceWorker: updateServiceWorkerMock,
+		});
+		const { usePwaUpdate } = await import('./use-pwa-update');
+		renderHook(() => usePwaUpdate(), { wrapper: StrictMode });
+		expect(toastInfoMock).toHaveBeenCalledOnce();
+		expect(updateServiceWorkerMock).not.toHaveBeenCalled();
+	});
+
+	it('allows retrying a failed activation without leaving recovery suppressed', async () => {
+		useRegisterSWMock.mockReturnValue({
+			needRefresh: [true, vi.fn()],
+			updateServiceWorker: updateServiceWorkerMock,
+		});
+		updateServiceWorkerMock.mockRejectedValueOnce(new Error('Unavailable'));
+		const { usePwaUpdate } = await import('./use-pwa-update');
+		renderHook(() => usePwaUpdate());
+		const reloadAction = toastInfoMock.mock.calls[0]?.[1]?.action?.onClick;
+		if (!reloadAction) throw new Error('Expected a reload action');
+		await act(async () => reloadAction());
+		expect(clearUpdateActivationReloadPendingMock).toHaveBeenCalledOnce();
+		await act(async () => reloadAction());
+		expect(updateServiceWorkerMock).toHaveBeenCalledTimes(2);
+	});
+
+	it('stops polling and ignores update actions after unmount', async () => {
+		useRegisterSWMock.mockImplementationOnce((options?: RegisterSWOptions) => {
+			options?.onRegisteredSW?.('/sw.js', {
+				update: registrationUpdateMock,
+				installing: undefined,
+			});
+			return {
+				needRefresh: [true, vi.fn()],
+				updateServiceWorker: updateServiceWorkerMock,
+			};
+		});
+		const { usePwaUpdate } = await import('./use-pwa-update');
+		const { unmount } = renderHook(() => usePwaUpdate());
+		const reloadAction = toastInfoMock.mock.calls[0]?.[1]?.action?.onClick;
+		if (!reloadAction) throw new Error('Expected a reload action');
+		expect(registrationUpdateMock).toHaveBeenCalledOnce();
+		unmount();
+		reloadAction();
+		await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(updateServiceWorkerMock).not.toHaveBeenCalled();
+	});
+
+	it('keeps polling after a failed initial update check', async () => {
+		registrationUpdateMock.mockRejectedValueOnce(new Error('Unavailable'));
+		const { usePwaUpdate } = await import('./use-pwa-update');
+		renderHook(() => usePwaUpdate());
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+		});
+		expect(registrationUpdateMock).toHaveBeenCalledTimes(2);
 	});
 
 	it('ignores service worker polling fetch failures', async () => {
