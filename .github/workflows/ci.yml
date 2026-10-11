@@ -323,6 +323,7 @@ jobs:
         run: |
           docker_daemon_pid=$(pgrep -u "$(id -u)" -x dockerd)
           [[ "$docker_daemon_pid" =~ ^[0-9]+$ ]]
+          sudo -E nsenter --target "$docker_daemon_pid" --net --setuid "$(id -u)" --setgid "$(id -g)" "$(command -v bun)" --version
           echo "COMPUTER_DOCKER_PID=$docker_daemon_pid" >> "$GITHUB_ENV"
 
       - name: Apply D1 migrations
@@ -332,7 +333,7 @@ jobs:
         run: |
           for attempt in 1 2 3; do
             echo "Starting dev server (attempt $attempt/3)..."
-            nsenter --target "$COMPUTER_DOCKER_PID" --user --net --preserve-credentials bun run dev > "$RUNNER_TEMP/worker-ide-dev.log" 2>&1 &
+            sudo -E nsenter --target "$COMPUTER_DOCKER_PID" --net --setuid "$(id -u)" --setgid "$(id -g)" env "PATH=$PATH" bun run dev > "$RUNNER_TEMP/worker-ide-dev.log" 2>&1 &
             DEV_SERVER_PID=$!
             echo "DEV_SERVER_PID=$DEV_SERVER_PID" >> "$GITHUB_ENV"
 
@@ -342,7 +343,7 @@ jobs:
                 echo "Dev server process exited unexpectedly"
                 break
               fi
-              if nsenter --target "$COMPUTER_DOCKER_PID" --user --net --preserve-credentials curl -sf --max-time 5 http://localhost:3000/api/templates > /dev/null 2>&1; then
+              if sudo -E nsenter --target "$COMPUTER_DOCKER_PID" --net --setuid "$(id -u)" --setgid "$(id -g)" env "PATH=$PATH" curl -sf --max-time 5 http://localhost:3000/api/templates > /dev/null 2>&1; then
                 ready=true
                 break
               fi
@@ -369,7 +370,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Run integration tests
-        run: nsenter --target "$COMPUTER_DOCKER_PID" --user --net --preserve-credentials bun run test:integration
+        run: sudo -E nsenter --target "$COMPUTER_DOCKER_PID" --net --setuid "$(id -u)" --setgid "$(id -g)" env "PATH=$PATH" bun run test:integration
         env:
           TEST_BASE_URL: 'http://localhost:3000'
 
@@ -459,6 +460,7 @@ jobs:
         run: |
           docker_daemon_pid=$(pgrep -u "$(id -u)" -x dockerd)
           [[ "$docker_daemon_pid" =~ ^[0-9]+$ ]]
+          sudo -E nsenter --target "$docker_daemon_pid" --net --setuid "$(id -u)" --setgid "$(id -g)" "$(command -v bun)" --version
           echo "COMPUTER_DOCKER_PID=$docker_daemon_pid" >> "$GITHUB_ENV"
 
       - name: Apply D1 migrations
@@ -468,7 +470,7 @@ jobs:
         run: |
           for attempt in 1 2 3; do
             echo "Starting dev server (attempt $attempt/3)..."
-            nsenter --target "$COMPUTER_DOCKER_PID" --user --net --preserve-credentials bun run dev > "$RUNNER_TEMP/worker-ide-dev.log" 2>&1 &
+            sudo -E nsenter --target "$COMPUTER_DOCKER_PID" --net --setuid "$(id -u)" --setgid "$(id -g)" env "PATH=$PATH" bun run dev > "$RUNNER_TEMP/worker-ide-dev.log" 2>&1 &
             DEV_SERVER_PID=$!
             echo "DEV_SERVER_PID=$DEV_SERVER_PID" >> "$GITHUB_ENV"
 
@@ -478,7 +480,7 @@ jobs:
                 echo "Dev server process exited unexpectedly"
                 break
               fi
-              if nsenter --target "$COMPUTER_DOCKER_PID" --user --net --preserve-credentials curl -sf --max-time 5 http://localhost:3000/api/templates > /dev/null 2>&1; then
+              if sudo -E nsenter --target "$COMPUTER_DOCKER_PID" --net --setuid "$(id -u)" --setgid "$(id -g)" env "PATH=$PATH" curl -sf --max-time 5 http://localhost:3000/api/templates > /dev/null 2>&1; then
                 ready=true
                 break
               fi
@@ -507,7 +509,7 @@ jobs:
       - name: Run E2E tests
         id: e2e
         run: |
-          nsenter --target "$COMPUTER_DOCKER_PID" --user --net --preserve-credentials xvfb-run --auto-servernum -- bun run test:e2e
+          sudo -E nsenter --target "$COMPUTER_DOCKER_PID" --net --setuid "$(id -u)" --setgid "$(id -g)" env "PATH=$PATH" xvfb-run --auto-servernum -- bun run test:e2e
 
       - name: Stop dev server
         if: always()
