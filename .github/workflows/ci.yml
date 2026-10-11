@@ -306,12 +306,18 @@ jobs:
         with:
           rootless: true
           set-host: true
+          # GitHub runners have no user systemd session for container cgroups.
+          daemon-config: |
+            { "exec-opts": ["native.cgroupdriver=cgroupfs"] }
 
       - name: Verify Docker runtime
         run: docker info
 
       - name: Build pinned Computer image
         run: docker build --platform linux/amd64 -f Dockerfile.computer -t worker-ide-computer:0.4.1 .
+
+      - name: Verify container startup and FUSE access
+        run: docker run --rm --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined --entrypoint sh worker-ide-computer:0.4.1 -c 'test -c /dev/fuse && node --version'
 
       - name: Apply D1 migrations
         run: bun run db:migrate:local
@@ -430,12 +436,18 @@ jobs:
         with:
           rootless: true
           set-host: true
+          # GitHub runners have no user systemd session for container cgroups.
+          daemon-config: |
+            { "exec-opts": ["native.cgroupdriver=cgroupfs"] }
 
       - name: Verify Docker runtime
         run: docker info
 
       - name: Build pinned Computer image
         run: docker build --platform linux/amd64 -f Dockerfile.computer -t worker-ide-computer:0.4.1 .
+
+      - name: Verify container startup and FUSE access
+        run: docker run --rm --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined --entrypoint sh worker-ide-computer:0.4.1 -c 'test -c /dev/fuse && node --version'
 
       - name: Apply D1 migrations
         run: bun run db:migrate:local
