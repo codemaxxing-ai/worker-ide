@@ -59,7 +59,6 @@ export async function initSnapshot(
  */
 export async function addFileToSnapshot(context: SnapshotContext, change: FileChange): Promise<void> {
 	if (context.savedPaths.has(change.path)) return;
-	context.savedPaths.add(change.path);
 
 	if (change.action !== 'create' && change.beforeContent !== undefined) {
 		const filePath = `${context.directory}${change.path}`;
@@ -74,10 +73,17 @@ export async function addFileToSnapshot(context: SnapshotContext, change: FileCh
 		const metadataPath = `${context.directory}/metadata.json`;
 		const raw = await fs.readFile(metadataPath, 'utf8');
 		const metadata: SnapshotMetadata = JSON.parse(raw);
-		metadata.changes.push({ path: change.path, action: change.action });
+		metadata.changes.push({
+			path: change.path,
+			action: change.action,
+			isBinary: change.isBinary || undefined,
+			entryType: change.entryType,
+			beforeEntryType: change.beforeEntryType,
+		});
 		await fs.writeFile(metadataPath, JSON.stringify(metadata, undefined, 2));
-	} catch {
-		// Non-fatal
+		context.savedPaths.add(change.path);
+	} catch (error) {
+		throw new Error(`Cannot save snapshot for ${change.path}`, { cause: error });
 	}
 }
 

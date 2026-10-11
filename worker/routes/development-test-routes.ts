@@ -1,6 +1,10 @@
+import { Buffer } from 'node:buffer';
+
 import { zValidator } from '@hono/zod-validator';
 import { Hono } from 'hono';
 import { z } from 'zod';
+
+import { parseHost } from '@shared/domain';
 
 import { addFileToSnapshot, initSnapshot } from '../services/agent/snapshot-manager';
 
@@ -30,10 +34,8 @@ const seedSnapshotSchema = z.object({
  * snapshot-manager functions the agent uses — instead of writing hidden files
  * via the public file API (which now rejects hidden paths).
  */
-export const developmentTestRoutes = new Hono<AppEnvironment>().post(
-	'/__test/seed-snapshot',
-	zValidator('json', seedSnapshotSchema),
-	async (c) => {
+export const developmentTestRoutes = new Hono<AppEnvironment>()
+	.post('/__test/seed-snapshot', zValidator('json', seedSnapshotSchema), async (c) => {
 		const projectRoot = c.get('projectRoot');
 		const { label, sessionId, changes } = c.req.valid('json');
 
@@ -55,5 +57,60 @@ export const developmentTestRoutes = new Hono<AppEnvironment>().post(
 		}
 
 		return c.json({ id: context.id });
-	},
-);
+	})
+	.post(
+		'/__test/computer-exec',
+		zValidator(
+			'json',
+			z.object({
+				command: z.string(),
+				backend: z.enum(['shell', 'container']).default('shell'),
+				id: z.string().optional(),
+				sessionId: z.string().default('computer-integration'),
+				snapshot: z.boolean().default(false),
+			}),
+		),
+		async (c) => {
+			const input = c.req.valid('json');
+			const project = c.get('fsStub');
+			const url = new URL(c.req.url);
+			await project.registerComputerSession(input.sessionId, 'code', {
+				baseDomain: parseHost(url.host).baseDomain,
+				protocol: url.protocol,
+			});
+			using result = await project.computerExec(
+				input.command,
+				{ id: input.id ?? crypto.randomUUID(), backend: input.backend },
+				input.sessionId,
+			);
+			using changes = await project.drainWorkspaceChanges(input.sessionId);
+			let snapshotId: string | undefined;
+			if (input.snapshot) {
+				const snapshot = await initSnapshot(c.get('projectRoot'), input.sessionId, [], () => {});
+				for (const change of changes) {
+					await addFileToSnapshot(snapshot, {
+						path: change.path,
+						action: change.type === 'create' ? 'create' : change.type === 'delete' ? 'delete' : 'edit',
+						isBinary: change.isBinary,
+						beforeContent: change.beforeBytes ? new Uint8Array(Buffer.from(change.beforeBytes, 'base64')) : change.beforeContent,
+						afterContent: undefined,
+						entryType: change.entryType,
+						beforeEntryType: change.beforeEntryType,
+					});
+				}
+				snapshotId = snapshot.id;
+			}
+			return c.json({ result: { ...result }, changes: changes.map((change) => ({ ...change })), snapshotId });
+		},
+	)
+	.get('/__test/computer-executions', zValidator('query', z.object({ sessionId: z.string() })), async (c) => {
+		using executions = await c.get('fsStub').getComputerExecutions(c.req.valid('query').sessionId);
+		return c.json({ executions: executions.map((execution) => ({ ...execution })) });
+	})
+	.post('/__test/computer-cancel', zValidator('json', z.object({ id: z.string(), sessionId: z.string() })), async (c) => {
+		const { id, sessionId } = c.req.valid('json');
+		await c.get('fsStub').cancelComputerExecution(id, sessionId);
+		return c.json({ success: true });
+	});
+
+export type DevelopmentTestRoutes = typeof developmentTestRoutes;

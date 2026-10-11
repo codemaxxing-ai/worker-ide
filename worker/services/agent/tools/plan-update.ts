@@ -1,5 +1,4 @@
 import { ToolExecutionError } from '@shared/tool-errors';
-import { fs } from '@worker/lib/project-fs';
 
 import { buildPlanArtifactEntry } from '../memory/artifacts';
 
@@ -30,27 +29,15 @@ export async function execute(
 	sendEvent: SendEventFunction,
 	context: ToolExecutorContext,
 ): Promise<ToolResult> {
-	const { projectRoot, sessionId } = context;
+	const { sessionId } = context;
 	const content = input.content;
 
 	sendEvent('status', { message: 'Updating plan...' });
 
 	try {
-		const planDirectory = `${projectRoot}/.agent/plans`;
-		await fs.mkdir(planDirectory, { recursive: true });
-		const planFileName = `${sessionId || 'default'}.md`;
-		const planFilePath = `.agent/plans/${planFileName}`;
-		const planFile = `${planDirectory}/${planFileName}`;
+		const { path, previousContent } = await context.fsStub.writeAgentDocument('plan', sessionId || 'default', content);
+		const planFilePath = path.replace(/^\//, '');
 
-		// Read previous plan to compute a meaningful diff
-		let previousContent: string | undefined;
-		try {
-			previousContent = await fs.readFile(planFile, 'utf8');
-		} catch {
-			// No previous plan — this is a new plan
-		}
-
-		await fs.writeFile(planFile, content);
 		if (context.indexArtifact) {
 			await context.indexArtifact(buildPlanArtifactEntry(sessionId, content));
 		}

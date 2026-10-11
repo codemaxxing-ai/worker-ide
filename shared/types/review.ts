@@ -46,6 +46,9 @@ export interface ReviewSummary {
  * can approve (keep) or reject (revert) each change.
  */
 export interface PendingFileChange {
+	isBinary?: boolean;
+	entryType?: 'file' | 'directory' | 'symlink';
+	beforeEntryType?: 'file' | 'directory' | 'symlink';
 	path: string;
 	action: 'create' | 'edit' | 'delete' | 'move';
 	beforeContent: string | undefined;

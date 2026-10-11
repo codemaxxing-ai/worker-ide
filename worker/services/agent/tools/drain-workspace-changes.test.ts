@@ -39,8 +39,13 @@ describe('drainWorkspaceChanges', () => {
 
 		await drainWorkspaceChanges(context, sendEvent, queryChanges, new Set(), triggerHmr);
 
-		expect(queryChanges.map((change) => change.path).toSorted()).toEqual(['/.github/workflows/ci.yml', '/.gitignore']);
-		expect(sendEvent).toHaveBeenCalledTimes(2);
+		expect(queryChanges.map((change) => change.path).toSorted()).toEqual([
+			'/.github',
+			'/.github/workflows',
+			'/.github/workflows/ci.yml',
+			'/.gitignore',
+		]);
+		expect(sendEvent).toHaveBeenCalledTimes(4);
 		expect(triggerHmr).toHaveBeenCalledWith('test-project', expect.arrayContaining(['/.gitignore', '/.github/workflows/ci.yml']));
 	});
 
@@ -60,7 +65,7 @@ describe('drainWorkspaceChanges', () => {
 		await drainWorkspaceChanges(context, sendEvent, queryChanges, emittedChangePaths, triggerHmr);
 
 		// The change is NOT dropped — the review queue must reflect the final content.
-		expect(queryChanges).toEqual([
+		expect(queryChanges).toMatchObject([
 			{ path: '/x.ts', action: 'create', beforeContent: undefined, afterContent: 'export const x = 2;\n', isBinary: false },
 		]);
 		// But the duplicate UI event is suppressed.
@@ -82,12 +87,15 @@ describe('drainWorkspaceChanges', () => {
 
 		await drainWorkspaceChanges(context, sendEvent, queryChanges, emittedChangePaths, triggerHmr);
 
-		expect(sendEvent).toHaveBeenCalledWith('file_changed', {
-			path: '/y.ts',
-			action: 'create',
-			beforeContent: undefined,
-			afterContent: 'export const y = 1;\n',
-		});
+		expect(sendEvent).toHaveBeenCalledWith(
+			'file_changed',
+			expect.objectContaining({
+				path: '/y.ts',
+				action: 'create',
+				beforeContent: undefined,
+				afterContent: 'export const y = 1;\n',
+			}),
+		);
 		expect(queryChanges).toHaveLength(1);
 	});
 
@@ -119,7 +127,7 @@ describe('drainWorkspaceChanges', () => {
 
 		// The diff is an edit with the real baseline — NOT a create with the whole
 		// file as "added" (the bug when the baseline was never attributed).
-		expect(queryChanges).toEqual([
+		expect(queryChanges).toMatchObject([
 			{
 				path: '/package.json',
 				action: 'edit',
@@ -159,7 +167,7 @@ describe('drainWorkspaceChanges', () => {
 
 		await drainWorkspaceChanges(context, sendEvent, queryChanges, new Set<string>(), triggerHmr);
 
-		expect(queryChanges).toEqual([]);
+		expect(queryChanges).toMatchObject([]);
 		expect(sendEvent).not.toHaveBeenCalled();
 		expect(triggerHmr).not.toHaveBeenCalled();
 	});

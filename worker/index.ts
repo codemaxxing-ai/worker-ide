@@ -2,6 +2,8 @@ export { AgentRunner, DurableObjectFilesystem, ProjectCoordinatorV2, ProjectMeta
 // The browser/codemode tools run their durable runtime inside a Durable Object
 // facet, so the facet class must be exported from the worker entry.
 export { CodemodeRuntime } from '@cloudflare/codemode';
+export { WorkspaceProxy, WorkspaceServiceProxy } from '@cloudflare/computer';
+export { ComputerEgress } from './lib/computer-egress';
 export { LogTailer } from './services/log-tailer';
 export { ObjectStorageBinding } from './services/object-storage-binding';
 export { BuildArtifact } from './services/vite-host/build-artifact';

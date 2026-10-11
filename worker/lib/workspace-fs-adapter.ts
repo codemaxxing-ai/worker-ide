@@ -15,8 +15,8 @@ export interface WorkspaceLike {
 	writeFileBytes(path: string, data: Uint8Array): Promise<void>;
 	appendFile(path: string, content: string): Promise<void>;
 	exists(path: string): Promise<boolean>;
-	stat(path: string): Promise<FileStat | null>;
-	lstat(path: string): Promise<FileStat | null>;
+	stat(path: string): Promise<(FileStat & { mode?: number }) | null>;
+	lstat(path: string): Promise<(FileStat & { mode?: number }) | null>;
 	mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
 	readDir(path: string): Promise<FileInfo[]>;
 	rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
@@ -25,6 +25,7 @@ export interface WorkspaceLike {
 	symlink(target: string, linkPath: string): Promise<void>;
 	readlink(path: string): Promise<string>;
 	glob(pattern: string): Promise<FileInfo[]>;
+	chmod?(path: string, mode: number): Promise<void>;
 }
 
 type EntryType = 'file' | 'directory' | 'symlink';
@@ -91,13 +92,13 @@ export class WorkspaceStats {
 	readonly nlink = 1;
 	private readonly entryType: EntryType;
 
-	constructor(stat: FileStat) {
+	constructor(stat: FileStat & { mode?: number }) {
 		this.entryType = stat.type;
 		this.size = stat.size;
 		this.mtimeMs = stat.updatedAt;
 		this.ctimeMs = stat.updatedAt;
 		this.birthtimeMs = stat.createdAt;
-		this.mode = stat.type === 'directory' ? 0o4_0000 : stat.type === 'symlink' ? 0o12_0000 : 0o10_0644;
+		this.mode = stat.mode ?? (stat.type === 'directory' ? 0o4_0000 : stat.type === 'symlink' ? 0o12_0000 : 0o10_0644);
 	}
 
 	get mtime(): Date {
@@ -326,10 +327,8 @@ export class WorkspaceFsAdapter {
 		return this.normalize(path);
 	}
 
-	// Workspace has no permission bits; accept and ignore to satisfy callers
-	// (isomorphic-git, executable-bit checkouts) without erroring.
-	async chmod(_path: string, _mode: number): Promise<void> {
-		// no-op
+	async chmod(path: string, mode: number): Promise<void> {
+		await this.ws.chmod?.(this.normalize(path), mode);
 	}
 
 	async utimes(_path: string, _atime: Date | number, _mtime: Date | number): Promise<void> {

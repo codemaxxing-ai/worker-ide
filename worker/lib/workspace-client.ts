@@ -68,16 +68,20 @@ export class WorkspaceClient implements WorkspaceLike {
 	async exists(path: string): Promise<boolean> {
 		return this.stub.wsExists(this.strip(path));
 	}
-	async stat(path: string): Promise<FileStat | null> {
+	async stat(path: string): Promise<(FileStat & { mode?: number }) | null> {
 		using info = await this.stub.wsStat(this.strip(path));
 		return info ? this.mapInfo(info) : info;
 	}
-	async lstat(path: string): Promise<FileStat | null> {
+	async lstat(path: string): Promise<(FileStat & { mode?: number }) | null> {
 		using info = await this.stub.wsLstat(this.strip(path));
 		return info ? this.mapInfo(info) : info;
 	}
+	async chmod(path: string, mode: number): Promise<void> {
+		await this.stub.wsChmod(this.strip(path), mode, this.writerId);
+	}
+
 	async mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
-		await this.stub.wsMkdir(this.strip(path), options?.recursive ?? false);
+		await this.stub.wsMkdir(this.strip(path), options?.recursive ?? false, this.writerId);
 	}
 	async readDir(path: string): Promise<FileInfo[]> {
 		using entries = await this.stub.wsReadDir(this.strip(path));
@@ -93,10 +97,11 @@ export class WorkspaceClient implements WorkspaceLike {
 		await this.stub.wsMv(this.strip(source), this.strip(destination), this.writerId);
 	}
 	async symlink(target: string, linkPath: string): Promise<void> {
-		await this.stub.wsSymlink(target, this.strip(linkPath));
+		await this.stub.wsSymlink(target.startsWith('/') ? this.strip(target) : target, this.strip(linkPath), this.writerId);
 	}
 	async readlink(path: string): Promise<string> {
-		return this.stub.wsReadlink(this.strip(path));
+		const target = await this.stub.wsReadlink(this.strip(path));
+		return target.startsWith('/') ? this.add(target) : target;
 	}
 	async glob(pattern: string): Promise<FileInfo[]> {
 		using entries = await this.stub.wsGlob(this.strip(pattern));

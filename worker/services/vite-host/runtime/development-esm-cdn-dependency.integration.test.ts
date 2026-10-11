@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { serveDevelopmentModule } from './development-module-server';
 import { ensureEsbuild } from '../esbuild-runtime';
+import { buildEsmCdnUrl } from '../esm-cdn';
 import { MemoryFileSystem } from '../node-fs/memory-file-system';
 
 const IS_EVEN_MARKER = 'is_even_marker_a91f2';
@@ -30,7 +31,13 @@ const PACKAGE_JSON = JSON.stringify({
 });
 
 describe('dev module server esm.sh dependency fallback', () => {
-	beforeEach(() => {
+	beforeEach(async () => {
+		// Storage isolation is disabled for SQLite workspace tests. Reset this
+		// suite's cache entry so each cache-hit assertion has a known baseline.
+		const sourceCache = await caches.open('vite-host-esm-cdn-v1');
+		await sourceCache.delete(buildEsmCdnUrl('is-even', '1.0.0'));
+		const cache = await caches.open('vinext-dev-dep-bundle-v1');
+		await cache.delete(`https://vinext-dev-dep.internal/esm/${encodeURIComponent(buildEsmCdnUrl('is-even', '1.0.0'))}`);
 		vi.stubGlobal(
 			'fetch',
 			vi.fn(async (input: RequestInfo | URL) => {

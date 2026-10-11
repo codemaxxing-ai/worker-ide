@@ -64,6 +64,9 @@ export function ToolIcon({ name, className }: { name: ToolName; className?: stri
 		case 'bash': {
 			return <Terminal className={cn('size-3', className)} />;
 		}
+		case 'exec': {
+			return <Terminal className={cn('size-3', className)} />;
+		}
 		case 'codemode': {
 			return <SquareTerminal className={cn('size-3', className)} />;
 		}

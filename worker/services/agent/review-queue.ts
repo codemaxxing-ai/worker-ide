@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 
-import { computeDiffHunkSessionIds, resolveReviewContent } from '@shared/review-diff';
+import { computeDiffHunkSessionIds } from '@shared/review-diff';
 import {
 	createHmrUpdateForFile,
 	type ChangeSetFile,
@@ -35,7 +35,8 @@ import {
 	sessionPendingChangeIndex,
 	sessionPendingChanges,
 } from '../../durable/db/schema';
-import { coordinatorNamespace } from '../../lib/durable-object-namespaces';
+import { coordinatorNamespace, filesystemNamespace } from '../../lib/durable-object-namespaces';
+import { toDurableObjectId } from '../../lib/project-id';
 
 import type { AgentDatabase } from '../../durable/db';
 
@@ -58,18 +59,6 @@ async function readWorkspaceContent(projectRoot: string, path: string): Promise<
 	} catch {
 		return undefined;
 	}
-}
-
-async function writeWorkspaceContent(projectRoot: string, path: string, content: string): Promise<void> {
-	const directory = path.slice(0, path.lastIndexOf('/'));
-	if (directory) {
-		await fs.mkdir(`${projectRoot}${directory}`, { recursive: true });
-	}
-	await fs.writeFile(`${projectRoot}${path}`, content);
-}
-
-async function deleteWorkspacePath(projectRoot: string, path: string): Promise<void> {
-	await fs.rm(`${projectRoot}${path}`, { recursive: true, force: true });
 }
 
 async function notifyWorkspaceChange(projectId: string, path: string, forceFullReload = false): Promise<void> {
@@ -545,38 +534,17 @@ export class ReviewQueueStore {
 	}
 
 	private async applyReviewEntryWorkspaceState(
-		projectRoot: string,
+		_projectRoot: string,
 		projectId: string,
 		reviewEntry: SharedReviewEntry,
 		hunkStatuses: SharedReviewHunkStatus[],
 		finalizing: boolean,
-		liveContentOverride?: string,
+		liveContent?: string,
+		decision?: ReviewResolutionDecision,
 	): Promise<void> {
-		if (reviewEntry.action === 'move') {
-			return;
-		}
-		if (reviewEntry.beforeContent === undefined && reviewEntry.afterContent === undefined) {
-			return;
-		}
-
-		const workspaceContent = liveContentOverride ?? (await readWorkspaceContent(projectRoot, reviewEntry.path));
-		const resolution = resolveReviewContent({
-			action: reviewEntry.action,
-			beforeContent: reviewEntry.beforeContent,
-			agentAfterContent: reviewEntry.afterContent,
-			liveContent: workspaceContent,
-			hunkStatuses,
-			finalizing,
-		});
-
-		if (resolution.action === 'delete') {
-			await deleteWorkspacePath(projectRoot, reviewEntry.path);
-			await notifyWorkspaceChange(projectId, reviewEntry.path, true);
-			return;
-		}
-
-		await writeWorkspaceContent(projectRoot, reviewEntry.path, resolution.content);
-		await notifyWorkspaceChange(projectId, reviewEntry.path);
+		const project = filesystemNamespace.get(toDurableObjectId(filesystemNamespace, projectId));
+		const changed = await project.resolveWorkspaceReview({ entry: reviewEntry, hunkStatuses, finalizing, liveContent, decision });
+		if (changed) await notifyWorkspaceChange(projectId, reviewEntry.path, true);
 	}
 
 	private async finalizeResolvedEntry(
@@ -597,11 +565,19 @@ export class ReviewQueueStore {
 		if (finalHunkStatuses.length === 0) {
 			const initialStatuses = buildInitialHunkStatuses(reviewEntry);
 			finalHunkStatuses = initialStatuses.map(() => (decision === 'reject' ? 'rejected' : 'approved'));
-			resolutionDecision = resolveDecisionFromHunks(finalHunkStatuses);
+			resolutionDecision = finalHunkStatuses.length > 0 ? resolveDecisionFromHunks(finalHunkStatuses) : decision;
 		}
 
-		if (finalHunkStatuses.length > 0) {
-			await this.applyReviewEntryWorkspaceState(projectRoot, projectId, reviewEntry, finalHunkStatuses, true, liveContent);
+		if (finalHunkStatuses.length > 0 || reviewEntry.snapshotId) {
+			await this.applyReviewEntryWorkspaceState(
+				projectRoot,
+				projectId,
+				reviewEntry,
+				finalHunkStatuses,
+				true,
+				liveContent,
+				resolutionDecision,
+			);
 		}
 
 		this.db

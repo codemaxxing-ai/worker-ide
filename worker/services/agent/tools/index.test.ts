@@ -103,6 +103,14 @@ describe('SUB_AGENT_EXCLUDED_TOOLS', () => {
 
 describe('tool registration sync', () => {
 	const externalToolNames = [
+		'read',
+		'ls',
+		'find',
+		'grep',
+		'write',
+		'edit',
+		'delete',
+		'exec',
 		'browser_execute',
 		'browser_markdown',
 		'browser_extract',

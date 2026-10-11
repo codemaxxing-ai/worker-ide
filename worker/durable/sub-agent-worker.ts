@@ -39,7 +39,7 @@ interface SubAgentState {
 
 export class SubAgentWorker extends Think<Env, SubAgentState> {
 	initialState: SubAgentState = {};
-	chatStreamStallTimeoutMs = 120_000;
+	chatStreamStallTimeoutMs = 600_000;
 	maxSteps = 100;
 	exposeMcpTools = false;
 	private eventQueue: StreamEvent[] = [];

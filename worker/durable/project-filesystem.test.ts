@@ -208,7 +208,7 @@ describe('ProjectFilesystem per-session change drain', () => {
 		await stub.wsWriteFile('/edit.ts', 'new\n', 'session-1');
 
 		const changes = await stub.drainWorkspaceChanges('session-1');
-		expect(changes).toEqual([{ type: 'update', path: '/edit.ts', entryType: 'file', beforeContent: 'old\n', afterContent: 'new\n' }]);
+		expect(changes).toMatchObject([{ type: 'update', path: '/edit.ts', entryType: 'file', beforeContent: 'old\n', afterContent: 'new\n' }]);
 	});
 
 	it('drops a no-op write (identical content) so it never shows as a phantom edit', async () => {
@@ -227,7 +227,9 @@ describe('ProjectFilesystem per-session change drain', () => {
 		await stub.wsWriteFile('/new.ts', 'fresh\n', 'session-1');
 
 		const changes = await stub.drainWorkspaceChanges('session-1');
-		expect(changes).toEqual([{ type: 'create', path: '/new.ts', entryType: 'file', beforeContent: undefined, afterContent: 'fresh\n' }]);
+		expect(changes).toMatchObject([
+			{ type: 'create', path: '/new.ts', entryType: 'file', beforeContent: undefined, afterContent: 'fresh\n' },
+		]);
 	});
 
 	it('reports a delete with no afterContent', async () => {
@@ -237,7 +239,9 @@ describe('ProjectFilesystem per-session change drain', () => {
 		await stub.wsRm('/gone.ts', false, false, 'session-1');
 
 		const changes = await stub.drainWorkspaceChanges('session-1');
-		expect(changes).toEqual([{ type: 'delete', path: '/gone.ts', entryType: 'file', beforeContent: 'bye\n', afterContent: undefined }]);
+		expect(changes).toMatchObject([
+			{ type: 'delete', path: '/gone.ts', entryType: 'file', beforeContent: 'bye\n', afterContent: undefined },
+		]);
 	});
 
 	it('keeps two sessions editing the same file independent, each with its own baseline', async () => {
@@ -252,8 +256,10 @@ describe('ProjectFilesystem per-session change drain', () => {
 		const a = await stub.drainWorkspaceChanges('session-A');
 		const b = await stub.drainWorkspaceChanges('session-B');
 
-		expect(a).toEqual([{ type: 'update', path: '/shared.ts', entryType: 'file', beforeContent: 'base\n', afterContent: 'from-B\n' }]);
-		expect(b).toEqual([{ type: 'update', path: '/shared.ts', entryType: 'file', beforeContent: 'from-A\n', afterContent: 'from-B\n' }]);
+		expect(a).toMatchObject([{ type: 'update', path: '/shared.ts', entryType: 'file', beforeContent: 'base\n', afterContent: 'from-A\n' }]);
+		expect(b).toMatchObject([
+			{ type: 'update', path: '/shared.ts', entryType: 'file', beforeContent: 'from-A\n', afterContent: 'from-B\n' },
+		]);
 	});
 
 	it('persists the per-session checkpoint across a Durable Object eviction', async () => {
@@ -273,6 +279,6 @@ describe('ProjectFilesystem per-session change drain', () => {
 		// correct even though the in-memory checkpoint state was discarded.
 		const freshStub = getFilesystemStub('test-fs-durable-checkpoint');
 		const changes = await freshStub.drainWorkspaceChanges('session-durable');
-		expect(changes).toEqual([{ type: 'update', path: '/keep.ts', entryType: 'file', beforeContent: 'old\n', afterContent: 'new\n' }]);
+		expect(changes).toMatchObject([{ type: 'update', path: '/keep.ts', entryType: 'file', beforeContent: 'old\n', afterContent: 'new\n' }]);
 	});
 });

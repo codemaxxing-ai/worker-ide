@@ -11,6 +11,7 @@ import * as assetSettingsUpdateTool from './asset-settings-update';
 import * as bashTool from './bash';
 import * as bindingsGetTool from './bindings-get';
 import * as bindingsUpdateTool from './bindings-update';
+import { createComputerTools } from './computer-tools';
 import * as dependenciesListTool from './dependencies-list';
 import * as dependenciesUpdateTool from './dependencies-update';
 import * as documentationSearchTool from './documentation-search';
@@ -137,6 +138,10 @@ const EDITING_TOOL_NAMES = new Set(['lint_fix', 'image_generate', 'bash']);
  * These have no side effects and are safe to execute in parallel.
  */
 export const READ_ONLY_TOOL_NAMES = new Set([
+	'read',
+	'ls',
+	'find',
+	'grep',
 	'docs_search',
 	'todos_get',
 	'dependencies_list',
@@ -161,6 +166,10 @@ export const SUB_AGENT_EXCLUDED_TOOLS = new Set(['sub_agent', 'user_question', '
  * Used by the doom loop detector and logging to track mutation activity.
  */
 export const MUTATION_TOOL_NAMES = new Set([
+	'write',
+	'edit',
+	'delete',
+	'exec',
 	'lint_fix',
 	'dependencies_update',
 	'asset_settings_update',
@@ -217,6 +226,8 @@ export async function createServerTools(
 	_pendingToolCallIds?: PendingToolCallIds,
 	excludedToolNames?: ReadonlySet<string>,
 ): Promise<ToolSet> {
+	context = { ...context, sessionId: context.sessionId ?? `agent:${context.projectId}` };
+	await context.fsStub.registerComputerSession(context.sessionId ?? `agent:${context.projectId}`, mode, context.requestOriginContext);
 	// Paths whose file_changed event a tool already emitted, so the Code Mode
 	// drain can skip re-emitting them after a sandbox run.
 	const emittedChangePaths = new Set<string>();
@@ -246,6 +257,12 @@ export async function createServerTools(
 	// 2. Code Mode `tools.*` — domain tools, MCP tools, extension tools, browser tools.
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool generic variance; createExecuteRuntime accepts ToolSet (Record<string, Tool<any, any>>)
 	const codeModeTools: Record<string, any> = {};
+	for (const [name, definition] of Object.entries(createComputerTools(context, mode))) {
+		if (isExcluded(name)) continue;
+		const wrapped = wrapCodemodeTool(definition, context, trackedSendEvent, queryChanges, emittedChangePaths, name);
+		codeModeTools[name] = wrapped;
+		llmTools[name] = wrapped;
+	}
 	for (const name of codeModeToolNames(mode)) {
 		if (isExcluded(name)) continue;
 		const definition = DEFINITIONS_BY_NAME.get(name);
@@ -346,6 +363,7 @@ function wrapCodemodeTool(
 	sendEvent: SendEventFunction,
 	queryChanges: FileChange[],
 	emittedChangePaths: ReadonlySet<string>,
+	computerToolName?: string,
 ): AnyTool {
 	const originalExecute = tool.execute;
 	if (typeof originalExecute !== 'function') return tool;
@@ -353,7 +371,23 @@ function wrapCodemodeTool(
 		...tool,
 		execute: async (input: unknown, options: unknown) => {
 			try {
-				return await Reflect.apply(originalExecute, tool, [input, options]);
+				const output: unknown = await Reflect.apply(originalExecute, tool, [input, options]);
+				if (computerToolName) {
+					const record = output && typeof output === 'object' ? output : {};
+					const argumentsValue = input && typeof input === 'object' ? input : {};
+					const metadata = Object.fromEntries(
+						Object.entries(record).filter(([key]) =>
+							['backend', 'exitCode', 'error', 'status', 'syncStatus', 'path', 'kind', 'sizeBytes'].includes(key),
+						),
+					);
+					sendEvent('tool_result', {
+						tool_name: computerToolName,
+						toolCallId: options && typeof options === 'object' && 'toolCallId' in options ? options.toolCallId : context.toolCallId,
+						title: 'path' in argumentsValue ? argumentsValue.path : computerToolName,
+						metadata,
+					});
+				}
+				return output;
 			} finally {
 				await drainWorkspaceChanges(context, sendEvent, queryChanges, emittedChangePaths);
 			}

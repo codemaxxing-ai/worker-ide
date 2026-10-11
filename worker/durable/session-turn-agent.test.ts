@@ -20,7 +20,9 @@ describe('session turn lifecycle', () => {
 		const instructions = await buildSessionTurnInstructions('code', 'Use project conventions.');
 
 		expect(instructions).toContain(CODE_MODE_SYSTEM_PROMPT);
-		expect(instructions).toContain('single `codemode` tool');
+		expect(instructions).toContain('Computer tools');
+		expect(instructions).toContain('backend "container"');
+		expect(instructions).toContain('single `codemode` snippet');
 		expect(instructions).toContain('state.readdir');
 		expect(instructions).toContain('## Project Guidelines (from AGENTS.md)\nUse project conventions.');
 	});

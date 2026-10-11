@@ -6,7 +6,7 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 import { FileReference } from '../../file-reference';
-import { isToolName } from '../helpers';
+import { isRecord, isToolName } from '../helpers';
 import { InlineSubAgentActivity } from './sub-agent-activity';
 import { ToolIcon } from './tool-icon';
 import {
@@ -27,7 +27,23 @@ import type { SubAgentActivityRecord } from '@shared/agent-state';
 import type { ToolCallPart, ToolErrorInfo, ToolMetadataInfo, ToolResultPart } from '@shared/types';
 import type { ToolName } from '@shared/validation';
 
-const CONTENT_STREAMING_TOOLS = new Set<string>(['codemode', 'bash']);
+const CONTENT_STREAMING_TOOLS = new Set<string>(['codemode', 'bash', 'exec']);
+
+function readAttachment(content?: string) {
+	if (!content) return;
+	try {
+		const result: unknown = JSON.parse(content);
+		if (!isRecord(result) || typeof result.data !== 'string' || typeof result.mediaType !== 'string') return;
+		if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf'].includes(result.mediaType)) return;
+		return {
+			source: `data:${result.mediaType};base64,${result.data}`,
+			name: typeof result.name === 'string' ? result.name : 'File',
+			image: result.kind === 'image',
+		};
+	} catch {
+		return;
+	}
+}
 
 export function InlineToolCall({
 	toolCall,
@@ -60,6 +76,7 @@ export function InlineToolCall({
 	const isExecuting = !toolResult && !!isStreaming;
 	const isCancelled = !toolResult && !isStreaming;
 	const rawResultContent = getToolResultContent(toolResult);
+	const attachment = knownToolName === 'read' ? readAttachment(rawResultContent) : undefined;
 	const isUnknownTool = knownToolName === undefined;
 
 	// Whether tool arguments are still being streamed (empty arguments = still receiving deltas)
@@ -341,6 +358,23 @@ export function InlineToolCall({
 					</pre>
 				))}
 			{isExpanded && diagnostics && diagnostics.length > 0 && <InlineDiagnosticsList diagnostics={diagnostics} />}
+			{isExpanded &&
+				attachment &&
+				(attachment.image ? (
+					<img src={attachment.source} alt={attachment.name} className="max-h-80 max-w-full rounded-md object-contain" />
+				) : (
+					<a
+						id={`tool-file-${toolCall.toolCallId}`}
+						href={attachment.source}
+						download={attachment.name}
+						className="
+							text-sm text-accent underline
+							focus-visible:outline-2
+						"
+					>
+						{attachment.name}
+					</a>
+				))}
 			{knownToolName === 'sub_agent' && (
 				<InlineSubAgentActivity
 					toolCallId={toolCall.toolCallId}
