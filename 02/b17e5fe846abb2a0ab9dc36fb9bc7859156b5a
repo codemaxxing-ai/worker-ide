@@ -1,0 +1,23 @@
+docs/computer-migration-validation.md
+  s_457989c78dafac::t_35189ec93e4dd9 3-10
+test/e2e/vinext-preview.test.ts
+  s_457989c78dafac::t_e826f00420b2d2 58
+worker/fixtures/vinext/app/counter.tsx
+  s_457989c78dafac::t_af6bd0cb8cbbe7 3-9,13-17,19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "02b17e5fe846abb2a0ab9dc36fb9bc7859156b5a",
+  "prompts": {},
+  "sessions": {
+    "s_457989c78dafac": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12c91-7af0-7ef0-bcfd-17269d020b36",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
