@@ -89,6 +89,7 @@ export class ComputerWorkspace implements WorkspaceLike {
 		await this.computer.fs.mkdir(computerPath(path), options);
 	}
 	async readDir(path: string): Promise<FileInfo[]> {
+		if (computerPath(path) === COMPUTER_ROOT && !(await this.exists('/'))) return [];
 		const entries = await this.computer.fs.readdir(computerPath(path));
 		return entries.map((entry) => ({
 			path: `${projectPath(path).replace(/\/$/, '')}/${entry.name}`,
@@ -137,6 +138,7 @@ export class ComputerWorkspace implements WorkspaceLike {
 		return target.startsWith('/') ? projectPath(target) : target;
 	}
 	async _getAllPaths(): Promise<string[]> {
+		if (!(await this.exists('/'))) return [];
 		const paths: string[] = [];
 		const visit = async (path: string): Promise<void> => {
 			paths.push(path);

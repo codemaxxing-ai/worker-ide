@@ -6,9 +6,7 @@ import { WorkerShellBackend } from '@cloudflare/computer/backends/worker-shell';
 import { createGitClient } from '@cloudflare/computer/git';
 import jqCommands from '@cloudflare/computer/shell/jq';
 import { createAITools } from '@cloudflare/computer/tools';
-import { Workspace } from '@cloudflare/shell';
 import { DurableObject, exports } from 'cloudflare:workers';
-import { minimatch } from 'minimatch';
 import { z } from 'zod';
 
 import { toolInputSchemas } from '@shared/validation/tools';
@@ -16,7 +14,6 @@ import { toolInputSchemas } from '@shared/validation/tools';
 import { GitService } from './git-service';
 import { ComputerChanges } from '../lib/computer-changes';
 import { drainComputerOutput } from '../lib/computer-execution';
-import { ComputerMigration } from '../lib/computer-migration';
 import { ComputerMutationQueue, ComputerSynchronizationPending } from '../lib/computer-mutation-queue';
 import { resolveComputerReview } from '../lib/computer-review';
 import { ComputerShellWorkspace } from '../lib/computer-shell-workspace';
@@ -92,7 +89,6 @@ const COMPUTER_MUTATIONS = new Set([
 	'computerExec',
 	'computerApplyTool',
 	'destroyStorage',
-	'retryComputerMigration',
 	'restoreSnapshots',
 	'resolveWorkspaceReview',
 	'writeAgentDocument',
@@ -109,30 +105,33 @@ const COMPUTER_MUTATIONS = new Set([
 class ProjectFilesystemBase extends DurableObject<Env> {}
 
 export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemBase) implements ProjectFilesystemRpc {
-	private workspaceInstance?: Workspace;
 	private computerInstance?: Computer;
 	private computerAdapter?: ComputerWorkspace;
 	private containerInstance?: ContainerBackend;
-	private migrationInstance?: ComputerMigration;
 	private queueInstance?: ComputerMutationQueue;
-	private migrationPromise?: Promise<void>;
 	private changesInstance?: ComputerChanges;
 
 	private get projectId(): string {
 		return generateProjectId(this.ctx.id);
 	}
 
-	private get legacyWorkspace(): Workspace {
-		this.workspaceInstance ??= new Workspace({
-			sql: this.ctx.storage.sql,
-			r2: this.env.STORAGE_BUCKET,
-			r2Prefix: `workspace/${this.projectId}`,
-			name: () => this.projectId,
-		});
-		return this.workspaceInstance;
+	private assertComputerStore(): void {
+		const store = this.ctx.storage.kv.get<string>('project-active-store');
+		if (store === 'computer') return;
+		const hasStoredProject =
+			store !== undefined ||
+			this.ctx.storage.kv.get<boolean>('initialized') === true ||
+			this.ctx.storage.kv.get('computer-migration-v1') !== undefined;
+		const hasLegacyTable =
+			this.ctx.storage.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'cf_workspace_default'").toArray().length >
+			0;
+		const hasLegacyEntries = hasLegacyTable && this.ctx.storage.sql.exec('SELECT 1 FROM cf_workspace_default LIMIT 1').toArray().length > 0;
+		if (!hasStoredProject && !hasLegacyEntries) return;
+		throw new Error('Project workspace has no verified Computer store. Workspace recovery is required.');
 	}
 
 	private get computer(): Computer {
+		this.assertComputerStore();
 		if (this.computerInstance) return this.computerInstance;
 		const reference = { binding: 'DurableObjectFilesystem', id: this.ctx.id.toString() };
 		this.containerInstance = new ContainerBackend({
@@ -146,7 +145,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 		});
 		this.computerInstance = new Computer({
 			storage: computerStorage(this.ctx.storage),
-			git: createGitClient({ adapter: async () => new WorkspaceFsAdapter(this.destination) }),
+			git: createGitClient({ adapter: async () => new WorkspaceFsAdapter(this.workspace) }),
 			backends: [
 				new WorkerShellBackend({
 					id: 'shell',
@@ -162,16 +161,9 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 		return this.computerInstance;
 	}
 
-	private get destination(): ComputerWorkspace {
+	private get workspace(): ComputerWorkspace {
+		this.assertComputerStore();
 		return (this.computerAdapter ??= new ComputerWorkspace(this.computer));
-	}
-
-	private get migration(): ComputerMigration {
-		return (this.migrationInstance ??= new ComputerMigration(this.ctx.storage, this.legacyWorkspace, this.destination));
-	}
-
-	private get workspace(): Workspace | ComputerWorkspace {
-		return this.migration.active ? this.destination : this.legacyWorkspace;
 	}
 
 	private get queue(): ComputerMutationQueue {
@@ -197,8 +189,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 
 	private async mutate<T>(operation: string, parameters: unknown[], execute: () => Promise<T>): Promise<T> {
 		return this.queue.run(operation, parameters, async () => {
-			if (this.migration.status().phase !== 'failed' || ['computerExec', 'computerApplyTool'].includes(operation))
-				await this.ensureComputer();
+			await this.ensureComputer();
 			try {
 				const result = await execute();
 				await this.changes.finish();
@@ -211,23 +202,9 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	}
 
 	private async ensureComputer(): Promise<void> {
-		if (this.migration.active) return;
-		this.migrationPromise ??= (async () => {
-			while (!(await this.migration.batch())) await this.ctx.storage.setAlarm(Date.now() + 1000);
-		})().finally(() => {
-			this.migrationPromise = undefined;
-		});
-		return this.migrationPromise;
-	}
-
-	getComputerMigrationStatus() {
-		return this.migration.status();
-	}
-	async retryComputerMigration(): Promise<void> {
-		await this.queue.run('retryComputerMigration', [], async () => {
-			await this.migration.retry();
-			await this.ensureComputer();
-		});
+		if (this.ctx.storage.kv.get<string>('project-active-store') === 'computer') return;
+		await this.workspace.mkdir('/', { recursive: true });
+		this.ctx.storage.kv.put('project-active-store', 'computer');
 	}
 	async alarm(): Promise<void> {
 		await this.queue.resume();
@@ -326,7 +303,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 			if (!previous && backend === 'container') await this.getWorkspaceContainer().setInactivityTimeout(120_000);
 			this.changes.resume(sessionId);
 			if (!previous) {
-				for (const path of await this.destination._getAllPaths()) await this.captureBaseline(sessionId, path);
+				for (const path of await this.workspace._getAllPaths()) await this.captureBaseline(sessionId, path);
 				this.ctx.storage.kv.put(key, { status: 'starting', sessionId, backend });
 			}
 			try {
@@ -364,7 +341,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 						if (!progress.complete) continue;
 					}
 				}
-				for (const path of await this.destination._getAllPaths()) this.markTouched(sessionId, path);
+				for (const path of await this.workspace._getAllPaths()) this.markTouched(sessionId, path);
 				await this.changes.finish();
 				response = { ...response, syncStatus: 'complete' };
 				this.ctx.storage.kv.put(key, { status: response.status, sessionId, backend, result: response });
@@ -415,18 +392,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	}
 
 	async computerReadFile(path: string, options?: { byteOffset?: number; byteLength?: number }): Promise<ReadableStream<Uint8Array>> {
-		const target = computerPath(path);
-		if (this.migration.active) return this.computer.fs.readFile(target, options ?? {});
-		const bytes = await this.legacyWorkspace.readFileBytes(projectPath(target));
-		if (!bytes) throw new Error(`ENOENT: ${path}`);
-		const offset = options?.byteOffset ?? 0;
-		const content = bytes.slice(offset, options?.byteLength === undefined ? undefined : offset + options.byteLength);
-		return new ReadableStream({
-			start(controller) {
-				controller.enqueue(content);
-				controller.close();
-			},
-		});
+		return this.computer.fs.readFile(computerPath(path), options ?? {});
 	}
 
 	async computerFind(
@@ -434,17 +400,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 		pattern?: string,
 		options?: { limit?: number; offset?: number },
 	): Promise<Array<{ path: string; type: 'file' | 'dir' }>> {
-		const root = computerPath(directory);
-		if (this.migration.active) return this.computer.fs.find(root, pattern, options);
-		const result: Array<{ path: string; type: 'file' | 'dir' }> = [];
-		for (const path of await this.legacyWorkspace._getAllPaths()) {
-			const target = computerPath(path);
-			if (target !== root && !target.startsWith(`${root}/`)) continue;
-			if (pattern && !minimatch(target.slice(root.length + 1), pattern, { dot: true, matchBase: true })) continue;
-			const info = await this.legacyWorkspace.lstat(path);
-			if (info) result.push({ path: target, type: info.type === 'directory' ? 'dir' : 'file' });
-		}
-		return result.slice(options?.offset ?? 0, (options?.offset ?? 0) + (options?.limit ?? result.length));
+		return this.computer.fs.find(computerPath(directory), pattern, options);
 	}
 
 	async computerGrep(
@@ -459,35 +415,15 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 			include?: string;
 			exclude?: string[];
 		},
-	) {
-		const root = computerPath(path);
-		if (this.migration.active) return this.computer.fs.grep(pattern, root, options);
-		const matches: Array<{ path: string; line: number; text: string }> = [];
-		const expression = options?.regex ? new RegExp(pattern, options.ignoreCase ? 'i' : '') : undefined;
-		for (const entry of await this.computerFind(root)) {
-			if (entry.type !== 'file') continue;
-			const relative = entry.path.slice(root.length + 1);
-			if (options?.include && !minimatch(relative, options.include, { matchBase: true })) continue;
-			if (options?.exclude?.some((excluded) => minimatch(relative, excluded, { dot: true }))) continue;
-			const content = await this.legacyWorkspace.readFile(projectPath(entry.path));
-			if (typeof content !== 'string') continue;
-			for (const [index, text] of content.split('\n').entries()) {
-				const included = expression
-					? expression.test(text)
-					: options?.ignoreCase
-						? text.toLowerCase().includes(pattern.toLowerCase())
-						: text.includes(pattern);
-				if (included) matches.push({ path: entry.path, line: index + 1, text });
-			}
-		}
-		return matches.slice(options?.offset ?? 0, (options?.offset ?? 0) + (options?.limit ?? 100));
+	): ReturnType<Computer['fs']['grep']> {
+		return this.computer.fs.grep(pattern, computerPath(path), options);
 	}
 
 	async computerApplyTool(name: 'write' | 'edit' | 'delete', input: unknown, sessionId: string): Promise<unknown> {
 		this.assertWritable(sessionId);
 		return this.mutate('computerApplyTool', [name, input, sessionId], async () => {
 			this.assertWritable(sessionId);
-			for (const path of await this.destination._getAllPaths()) await this.captureBaseline(sessionId, path);
+			for (const path of await this.workspace._getAllPaths()) await this.captureBaseline(sessionId, path);
 			const parameters = toolInputSchemas[name].parse(input);
 			const definition = createAITools({ workspace: this.computer, assets: false })[name];
 			if (!definition.execute) throw new Error(`Computer tool ${name} is unavailable`);
@@ -495,7 +431,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 				{ ...parameters, path: computerPath(parameters.path) },
 				{ toolCallId: crypto.randomUUID(), messages: [] },
 			);
-			for (const path of await this.destination._getAllPaths()) this.markTouched(sessionId, path);
+			for (const path of await this.workspace._getAllPaths()) this.markTouched(sessionId, path);
 			return result;
 		});
 	}
@@ -652,8 +588,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 		this.assertWritable(writerId);
 		await this.mutate('wsChmod', [path, mode, writerId], async () => {
 			this.assertWritable(writerId);
-			if (!this.migration.active) throw new Error('Permissions require a verified Computer workspace');
-			await this.destination.chmod(path, mode);
+			await this.workspace.chmod(path, mode);
 		});
 	}
 
@@ -668,6 +603,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	// Project lifecycle
 	// =========================================================================
 	async projectExists(): Promise<boolean> {
+		this.assertComputerStore();
 		if (this.ctx.storage.kv.get<boolean>('initialized')) return true;
 		const info = await this.workspace.getWorkspaceInfo().catch(() => {});
 		return Boolean(info && info.fileCount > 0);
@@ -770,11 +706,9 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 				this.ctx.storage.sql.exec(`DROP TABLE "${name.replaceAll('"', '""')}"`);
 			}
 			for (const [key] of this.ctx.storage.kv.list()) this.ctx.storage.kv.delete(key);
-			this.workspaceInstance = undefined;
 			this.computerInstance = undefined;
 			this.computerAdapter = undefined;
 			this.containerInstance = undefined;
-			this.migrationInstance = undefined;
 			this.changesInstance = undefined;
 		});
 	}
