@@ -1,0 +1,23 @@
+docs/computer-migration-validation.md
+  s_457989c78dafac::t_5a2c05cce13537 11-12
+worker-configuration.d.ts
+  s_457989c78dafac::t_d59d2d7e4582ad 3
+wrangler.jsonc
+  s_457989c78dafac::t_92d95e76f1fb3e 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7ed446d4a311730c1322ad516546ca6667a52171",
+  "prompts": {},
+  "sessions": {
+    "s_457989c78dafac": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12c91-7af0-7ef0-bcfd-17269d020b36",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
