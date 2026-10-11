@@ -309,7 +309,7 @@ jobs:
         run: |
           for attempt in 1 2 3; do
             echo "Starting dev server (attempt $attempt/3)..."
-            bun run dev &
+            bun run dev > "$RUNNER_TEMP/worker-ide-dev.log" 2>&1 &
             DEV_SERVER_PID=$!
             echo "DEV_SERVER_PID=$DEV_SERVER_PID" >> "$GITHUB_ENV"
 
@@ -349,6 +349,15 @@ jobs:
         run: bun run test:integration
         env:
           TEST_BASE_URL: 'http://localhost:3000'
+
+      - name: Show runtime diagnostics
+        if: failure()
+        run: |
+          tail -n 200 "$RUNNER_TEMP/worker-ide-dev.log" || true
+          while read -r container; do
+            docker inspect --format '{{json .State}}' "$container" || true
+            docker logs --tail 100 "$container" || true
+          done < <(docker ps -a --filter name=workerd-worker-ide-DurableObjectFilesystem --format '{{.ID}}')
 
       - name: Stop dev server
         if: always()

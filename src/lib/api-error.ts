@@ -1,6 +1,10 @@
 import { HttpErrorCode } from '@shared/http-errors';
 
 type HttpErrorCodeValue = (typeof HttpErrorCode)[keyof typeof HttpErrorCode];
+interface ApiErrorResponse {
+	readonly status: number;
+	json(): Promise<unknown>;
+}
 
 const HTTP_ERROR_CODES = new Set<string>(Object.values(HttpErrorCode));
 
@@ -42,7 +46,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && !!value;
 }
 
-async function parseErrorBody(response: Response): Promise<ErrorResponseBody | undefined> {
+async function parseErrorBody(response: ApiErrorResponse): Promise<ErrorResponseBody | undefined> {
 	try {
 		const body: unknown = await response.json();
 		if (isRecord(body) && 'error' in body) {
@@ -67,7 +71,7 @@ async function parseErrorBody(response: Response): Promise<ErrorResponseBody | u
  * @param fallback - Fallback error message if the body can't be parsed
  * @returns Never — always throws
  */
-export async function throwApiError(response: Response, fallback: string): Promise<never> {
+export async function throwApiError(response: ApiErrorResponse, fallback: string): Promise<never> {
 	const body = await parseErrorBody(response);
 	const message = body?.error || fallback;
 	const code = body?.code && isHttpErrorCode(body.code) ? body.code : undefined;

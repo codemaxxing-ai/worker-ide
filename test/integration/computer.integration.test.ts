@@ -2,6 +2,7 @@ import { hc } from 'hono/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { BASE_URL, cleanupProjects, createdProjectIds, ensureTestSession, TEST_ORGANIZATION_ID } from './helpers';
+import { throwApiError } from '../../src/lib/api-error';
 
 import type { ApiRoutes, RootApiRoutes } from '../../worker/routes';
 import type { DevelopmentTestRoutes } from '../../worker/routes/development-test-routes';
@@ -68,7 +69,7 @@ describe('Computer live runtime', () => {
 				snapshot: true,
 			},
 		});
-		if (!response.ok) throw new Error(`Native execution failed: ${response.status}`);
+		if (!response.ok) await throwApiError(response, `Native execution failed: ${response.status}`);
 		const data = await response.json();
 		expect(data.result.exitCode, `${data.result.stdout}\n${data.result.stderr}`).toBe(0);
 		expect(data.result).toMatchObject({ syncStatus: 'complete', backend: 'container' });
