@@ -8,6 +8,8 @@ Linux CI passed all nine checks on `0d4931b`. Rootless Docker keeps its bridge n
 
 The refreshed production inventory contains 85 registered projects and the same 85 stored filesystem objects. Migration and production verification remain pending before removal of the legacy runtime.
 
+PR #7 merged into `main` as `66b6035`. Its deployment was rejected by Cloudflare because the broad `experimental` compatibility flag cannot be deployed. The production configuration now retains only `nodejs_compat`, matching the current [Worker Loader configuration](https://developers.cloudflare.com/dynamic-workers/getting-started/#configure-worker-loader) and the application's previous production flags; generated runtime types were refreshed. The pinned Computer README's experimental flag example applies an unnecessary local flag to the host Worker. The migration Workflow remains untriggered until deployment succeeds.
+
 Verified locally on October 7, 2026, using the Node 24 and Bun 1.3.14 versions selected by `mise.toml`, workerd, Chromium, and Docker Desktop on macOS ARM64. Computer and the Linux amd64 computerd image are pinned to 0.4.1.
 
 ## Required checks
