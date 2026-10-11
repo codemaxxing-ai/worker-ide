@@ -29,6 +29,7 @@ Types, constants, validation, and WebSocket message definitions shared between f
 
 - [mise](https://mise.jdx.dev/) for the Node 24 and Bun 1.3.14 versions in `mise.toml`
 - [Docker](https://docs.docker.com/get-docker/) running locally for Computer container commands and live integration/E2E suites. Ordinary Worker tests use controlled runtime doubles and do not need Docker.
+- Computer 0.4.1's container cache exclusions require FUSE. Docker Desktop on macOS/WSL provides it; Linux development and CI require rootless Docker with `/dev/fuse` available. Rootful Linux Docker falls back to an unsupported userspace mode for this configuration.
 - A Cloudflare account for permanent deployments. The IDE can also deploy a Worker to a new temporary Cloudflare account; claim it within 60 minutes to keep the deployment.
 
 ## Getting Started
