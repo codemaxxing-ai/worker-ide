@@ -55,6 +55,7 @@ test.describe('vinext preview + HMR', () => {
 		await expect(preview.getByRole('heading', { name: 'Hello vinext' })).toBeVisible({ timeout: 60_000 });
 		const counter = preview.getByRole('button', { name: /Count:/ });
 		await expect(counter).toBeVisible({ timeout: 60_000 });
+		await expect(counter).toBeEnabled({ timeout: 60_000 });
 
 		// Build up client state, and mark the document so a full reload is detectable.
 		const previewHandle = await previewIframe.elementHandle();

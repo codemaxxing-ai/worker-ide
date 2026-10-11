@@ -1,5 +1,13 @@
 # Computer migration validation
 
+## October 11 recovery validation
+
+Recovered the rollout after the original chat hit a rate-limit error. With Wrangler 4.137.0 and the Cloudflare Vite plugin 1.58.0, local format, typecheck, Knip, 595 unit tests, 920 Worker tests, 485 React tests, 102 Storybook tests, and 57 live integration tests passed. The complete 27-test browser suite passed without retries after the vinext template disabled its counter until hydration completed; before that fix, the first click could be lost while the server-rendered button was visible.
+
+Linux CI passed all nine checks on `0d4931b`. Rootless Docker keeps its bridge namespace attached to the daemon; the dev server and tests enter its network and mount namespaces and preserve the repository working directory. The mount namespace supplies RootlessKit's DNS resolver. CI verifies DNS and FUSE access before starting the server and captures both startup and container diagnostics on failure.
+
+The refreshed production inventory contains 85 registered projects and the same 85 stored filesystem objects. Migration and production verification remain pending before removal of the legacy runtime.
+
 Verified locally on October 7, 2026, using the Node 24 and Bun 1.3.14 versions selected by `mise.toml`, workerd, Chromium, and Docker Desktop on macOS ARM64. Computer and the Linux amd64 computerd image are pinned to 0.4.1.
 
 ## Required checks
