@@ -303,6 +303,9 @@ jobs:
 
       - name: Set up rootless Docker for Computer
         uses: docker/setup-docker-action@v5
+        env:
+          # Keep dockerd in the bridge namespace shared with workerd's gateway.
+          DOCKERD_ROOTLESS_ROOTLESSKIT_DETACH_NETNS: 'false'
         with:
           rootless: true
           set-host: true
@@ -440,6 +443,9 @@ jobs:
 
       - name: Set up rootless Docker for Computer
         uses: docker/setup-docker-action@v5
+        env:
+          # Keep dockerd in the bridge namespace shared with workerd's gateway.
+          DOCKERD_ROOTLESS_ROOTLESSKIT_DETACH_NETNS: 'false'
         with:
           rootless: true
           set-host: true
