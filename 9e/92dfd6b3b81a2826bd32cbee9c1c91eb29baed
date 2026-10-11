@@ -1,0 +1,23 @@
+.github/workflows/ci.yml
+  s_17be6bd6b3627a::t_53d41c30b33a91 312,353-361
+src/lib/api-error.ts
+  s_17be6bd6b3627a::t_ad9a610ac596e7 4-7,49,74
+test/integration/computer.integration.test.ts
+  s_17be6bd6b3627a::t_b48a5b0f760396 5,72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9e92dfd6b3b81a2826bd32cbee9c1c91eb29baed",
+  "prompts": {},
+  "sessions": {
+    "s_17be6bd6b3627a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a10ced-3a23-7f83-a438-5c32111edf1e",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
