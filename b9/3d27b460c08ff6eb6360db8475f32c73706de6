@@ -1,0 +1,31 @@
+AGENTS.md
+  s_457989c78dafac::t_bb030e75103ded 190
+README.md
+  s_457989c78dafac::t_f49cf9a729b97f 99,101
+docs/architecture.md
+  s_457989c78dafac::t_a10b41a0431a05 17
+docs/computer-migration-validation.md
+  s_457989c78dafac::t_2e27c8374bbddb 3-10,17-19,21,47,67
+worker/durable/computer-canonical.test.ts
+  s_457989c78dafac::t_deb92ef76d17cb 3,5-6,8-22,26-33,35-51,56-73,77-91,94-115
+worker/durable/project-filesystem.ts
+  s_457989c78dafac::t_3a52a849e3778f 118-130,134,148,164-165,192,205-207,306,344,395,403,418-419,426,434,591,606
+worker/lib/computer-workspace.ts
+  s_457989c78dafac::t_8199bfacdbae21 92,141
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b93d27b460c08ff6eb6360db8475f32c73706de6",
+  "prompts": {},
+  "sessions": {
+    "s_457989c78dafac": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12c91-7af0-7ef0-bcfd-17269d020b36",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
