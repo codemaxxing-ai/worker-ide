@@ -1,3 +1,5 @@
+import { Buffer } from 'node:buffer';
+
 import { Think } from '@cloudflare/think';
 
 import { AGENT_SYSTEM_PROMPT, DEFAULT_AI_MODEL, MCP_SERVERS } from '@shared/constants';
@@ -60,7 +62,7 @@ interface SessionTurnState {
 
 export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 	initialState: SessionTurnState = {};
-	chatStreamStallTimeoutMs = 120_000;
+	chatStreamStallTimeoutMs = 600_000;
 	maxSteps = 100;
 	exposeMcpTools = false;
 	private eventQueue: StreamEvent[] = [];
@@ -104,6 +106,12 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		}
 		const filesystemId = toDurableObjectId(filesystemNamespace, configuration.projectId);
 		const filesystemStub = filesystemNamespace.get(filesystemId);
+		await filesystemStub.beginComputerSessionTurn(
+			configuration.sessionId,
+			turnConfiguration.submissionId,
+			turnConfiguration.mode,
+			turnConfiguration.requestOriginContext ?? configuration.requestOriginContext,
+		);
 		const agentsContext = await runWithProjectStub(filesystemStub, () => readAgentsContext('/project'));
 		const instructions = await buildSessionTurnInstructions(turnConfiguration.mode, agentsContext);
 
@@ -266,14 +274,26 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 	}
 
 	async cancelSubmissionById(submissionId: string): Promise<void> {
-		await this.cancelSubmission(submissionId, 'Cancelled by user');
+		try {
+			await this.cancelWorkspaceCommands();
+		} finally {
+			await this.cancelSubmission(submissionId, 'Cancelled by user');
+		}
 	}
 
 	async cancelActiveSubmissions(): Promise<void> {
-		const submissions = await this.listSubmissions({ status: ['pending', 'running'] });
-		for (const submission of submissions) {
-			await this.cancelSubmission(submission.submissionId, 'Cancelled by user');
+		try {
+			await this.cancelWorkspaceCommands();
+		} finally {
+			const submissions = await this.listSubmissions({ status: ['pending', 'running'] });
+			for (const submission of submissions) await this.cancelSubmission(submission.submissionId, 'Cancelled by user');
 		}
+	}
+
+	private async cancelWorkspaceCommands(): Promise<void> {
+		const configuration = this.requireConfiguration();
+		const identifier = toDurableObjectId(filesystemNamespace, configuration.projectId);
+		await filesystemNamespace.get(identifier).cancelComputerSessionExecutions(configuration.sessionId);
 	}
 
 	async receiveSubAgentEvents(events: StreamEvent[]): Promise<void> {
@@ -318,9 +338,11 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 				{
 					path: event.path,
 					action: event.action,
-					beforeContent: event.beforeContent,
-					afterContent: event.afterContent,
-					isBinary: false,
+					beforeContent: event.beforeBytes === undefined ? event.beforeContent : new Uint8Array(Buffer.from(event.beforeBytes, 'base64')),
+					afterContent: event.afterBytes === undefined ? event.afterContent : new Uint8Array(Buffer.from(event.afterBytes, 'base64')),
+					isBinary: event.isBinary ?? false,
+					entryType: event.entryType,
+					beforeEntryType: event.beforeEntryType,
 				},
 			];
 		});

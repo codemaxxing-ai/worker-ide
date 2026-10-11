@@ -70,6 +70,9 @@ export class SessionStreamState {
 						const changesMap = new Map(Object.entries(current.pendingChanges));
 						accumulatePendingChange(changesMap, {
 							path: event.path,
+							isBinary: event.isBinary,
+							entryType: event.entryType,
+							beforeEntryType: event.beforeEntryType,
 							action: event.action,
 							beforeContent: event.beforeContent,
 							afterContent: event.afterContent,

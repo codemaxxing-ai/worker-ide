@@ -8,7 +8,17 @@
 	"name": "worker-ide",
 	"main": "worker/index.ts",
 	"compatibility_date": "2026-03-24",
-	"compatibility_flags": ["nodejs_compat"],
+	"compatibility_flags": ["nodejs_compat", "experimental"],
+	"durable_objects": {
+		"bindings": [{ "name": "DurableObjectFilesystem", "class_name": "DurableObjectFilesystem" }],
+	},
+	"containers": [
+		{
+			"class_name": "DurableObjectFilesystem",
+			"scheduling_policy": "durable_object",
+			"images": { "computer": { "dockerfile": "./Dockerfile.computer" } },
+		},
+	],
 	"cache": {
 		"enabled": true,
 	},

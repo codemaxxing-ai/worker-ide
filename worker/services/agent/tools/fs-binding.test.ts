@@ -36,6 +36,7 @@ const PACKAGE_JSON = JSON.stringify({
 /** A minimal ProjectFilesystem DO stub backing `readFile` from an in-memory map. */
 function createFakeFsStub(files: Record<string, string>): ToolExecutorContext['fsStub'] {
 	const stub = {
+		registerComputerSession: async () => {},
 		// eslint-disable-next-line unicorn/no-null -- the ProjectFilesystem RPC contract returns `null` for a missing file
 		wsReadFile: async (path: string): Promise<string | null> => (path in files ? files[path] : null),
 		// The no-loader fallback drains after each tool; this fake has no writes.

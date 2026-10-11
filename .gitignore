@@ -19,3 +19,4 @@ playwright-report
 
 vendor/*.version
 landing/.astro/
+.wrangler-tests.json

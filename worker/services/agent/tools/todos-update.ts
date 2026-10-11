@@ -1,6 +1,5 @@
 import { ToolExecutionError } from '@shared/tool-errors';
 import { todoItemSchema } from '@shared/validation';
-import { fs } from '@worker/lib/project-fs';
 
 import { buildTodosArtifactEntry } from '../memory/artifacts';
 
@@ -58,23 +57,12 @@ export const definition: ToolDefinition = {
 	},
 };
 
-function getTodoFilePath(projectRoot: string, sessionId: string = 'default'): string {
-	return `${projectRoot}/.agent/todo/${sessionId}.json`;
-}
-
-async function writeTodos(todos: TodoItem[], projectRoot: string, sessionId?: string): Promise<void> {
-	const filePath = getTodoFilePath(projectRoot, sessionId);
-	const directory = filePath.slice(0, filePath.lastIndexOf('/'));
-	await fs.mkdir(directory, { recursive: true });
-	await fs.writeFile(filePath, JSON.stringify(todos, undefined, 2));
-}
-
 export async function execute(
 	input: Record<string, string>,
 	sendEvent: SendEventFunction,
 	context: ToolExecutorContext,
 ): Promise<ToolResult> {
-	const { projectRoot, sessionId } = context;
+	const { sessionId } = context;
 
 	sendEvent('status', { message: 'Updating TODOs...' });
 
@@ -100,7 +88,7 @@ export async function execute(
 			validated.push(parsed.data);
 		}
 
-		await writeTodos(validated, projectRoot, sessionId);
+		await context.fsStub.writeAgentDocument('todos', sessionId || 'default', JSON.stringify(validated, undefined, 2));
 		if (context.indexArtifact) {
 			await context.indexArtifact(buildTodosArtifactEntry(sessionId, validated));
 		}

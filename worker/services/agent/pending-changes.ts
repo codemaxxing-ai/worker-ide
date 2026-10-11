@@ -16,6 +16,7 @@ export function accumulatePendingChange(
 
 	// Keep the first beforeContent and existing snapshotId for dedup
 	const beforeContent = existing.beforeContent;
+	const beforeEntryType = existing.beforeEntryType;
 	const snapshotId = existing.snapshotId ?? change.snapshotId;
 	const originalAction = existing.action;
 	const newAction = change.action;
@@ -32,7 +33,15 @@ export function accumulatePendingChange(
 			pendingChanges.delete(change.path);
 			return;
 		}
-		pendingChanges.set(change.path, { ...change, action: 'create', beforeContent, snapshotId, status: 'pending', hunkStatuses: [] });
+		pendingChanges.set(change.path, {
+			...change,
+			action: 'create',
+			beforeContent,
+			beforeEntryType,
+			snapshotId,
+			status: 'pending',
+			hunkStatuses: [],
+		});
 		return;
 	}
 
@@ -42,7 +51,15 @@ export function accumulatePendingChange(
 			pendingChanges.delete(change.path);
 			return;
 		}
-		pendingChanges.set(change.path, { ...change, action: 'edit', beforeContent, snapshotId, status: 'pending', hunkStatuses: [] });
+		pendingChanges.set(change.path, {
+			...change,
+			action: 'edit',
+			beforeContent,
+			beforeEntryType,
+			snapshotId,
+			status: 'pending',
+			hunkStatuses: [],
+		});
 		return;
 	}
 
@@ -51,5 +68,5 @@ export function accumulatePendingChange(
 		pendingChanges.delete(change.path);
 		return;
 	}
-	pendingChanges.set(change.path, { ...change, beforeContent, snapshotId, status: 'pending', hunkStatuses: [] });
+	pendingChanges.set(change.path, { ...change, beforeContent, beforeEntryType, snapshotId, status: 'pending', hunkStatuses: [] });
 }

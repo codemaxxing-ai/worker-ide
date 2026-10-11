@@ -38,6 +38,17 @@ function parsePendingChangesRecord(raw: string): Record<string, PendingFileChang
 			const rawSessionIds: unknown[] = Array.isArray(pendingChange.sessionIds) ? pendingChange.sessionIds : [];
 			record[key] = {
 				path: pendingChange.path,
+				isBinary: pendingChange.isBinary === true ? true : undefined,
+				entryType:
+					pendingChange.entryType === 'file' || pendingChange.entryType === 'directory' || pendingChange.entryType === 'symlink'
+						? pendingChange.entryType
+						: undefined,
+				beforeEntryType:
+					pendingChange.beforeEntryType === 'file' ||
+					pendingChange.beforeEntryType === 'directory' ||
+					pendingChange.beforeEntryType === 'symlink'
+						? pendingChange.beforeEntryType
+						: undefined,
 				action:
 					pendingChange.action === 'create' ||
 					pendingChange.action === 'edit' ||
@@ -128,6 +139,9 @@ function areSamePendingChange(left: PendingFileChange | undefined, right: Pendin
 	return (
 		left.path === right.path &&
 		left.action === right.action &&
+		left.isBinary === right.isBinary &&
+		left.entryType === right.entryType &&
+		left.beforeEntryType === right.beforeEntryType &&
 		left.beforeContent === right.beforeContent &&
 		left.afterContent === right.afterContent &&
 		left.snapshotId === right.snapshotId
@@ -209,6 +223,14 @@ function buildReviewEntryHunkSessionIds(
 }
 
 function derivePendingChangeFromWorkspace(change: PendingFileChange, currentContent: string | undefined): PendingFileChange | undefined {
+	if (
+		change.isBinary ||
+		change.entryType === 'symlink' ||
+		change.entryType === 'directory' ||
+		change.beforeEntryType === 'symlink' ||
+		change.beforeEntryType === 'directory'
+	)
+		return change;
 	if (currentContent === undefined) {
 		if (change.beforeContent === undefined) {
 			return undefined;

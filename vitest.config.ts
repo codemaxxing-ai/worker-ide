@@ -1,8 +1,9 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { defineWorkersProject } from '@cloudflare/vitest-pool-workers/config';
+import { parse } from 'jsonc-parser';
 import { defineConfig } from 'vitest/config';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -10,6 +11,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Wrangler validates the asset directory even though these tests exercise
 // Worker APIs. A clean checkout should not need a production build first.
 mkdirSync(path.resolve(__dirname, 'dist/client'), { recursive: true });
+
+// Ordinary Worker tests use runtime doubles and never start Docker. The pool's
+// Wrangler predates named container images; keep that deployment-only setting
+// out of its configuration while retaining all the real application bindings.
+const workerTestConfiguration = parse(readFileSync(path.resolve(__dirname, 'wrangler.jsonc'), 'utf8'));
+workerTestConfiguration.containers = [];
+workerTestConfiguration.queues.consumers = [];
+writeFileSync(path.resolve(__dirname, '.wrangler-tests.json'), JSON.stringify(workerTestConfiguration));
 
 const sharedAlias = {
 	'@': path.resolve(__dirname, './src'),
@@ -59,6 +68,7 @@ export default defineConfig({
 					},
 					poolOptions: {
 						workers: {
+							isolatedStorage: false,
 							// Bindings flagged `remote: true` in wrangler.jsonc (AI, ARTIFACTS,
 							// BROWSER) are stubbed/mocked in tests, so we don't need a remote
 							// proxy session. Disabling it also avoids the non-interactive
@@ -79,14 +89,14 @@ export default defineConfig({
 								// runtime) but needs an explicit binding here so tests can access
 								// it through `env` from `cloudflare:test`.
 								durableObjects: {
-									AgentRunner: 'AgentRunner',
-									ProjectCoordinatorV2: 'ProjectCoordinatorV2',
-									SubAgentWorker: 'SubAgentWorker',
-									DurableObjectFilesystem: 'DurableObjectFilesystem',
+									AgentRunner: { className: 'AgentRunner', useSQLite: true },
+									ProjectCoordinatorV2: { className: 'ProjectCoordinatorV2', useSQLite: true },
+									SubAgentWorker: { className: 'SubAgentWorker', useSQLite: true },
+									DurableObjectFilesystem: { className: 'DurableObjectFilesystem', useSQLite: true },
 								},
 							},
 							wrangler: {
-								configPath: './wrangler.jsonc',
+								configPath: './.wrangler-tests.json',
 							},
 						},
 					},

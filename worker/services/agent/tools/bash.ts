@@ -1,20 +1,17 @@
-import { WorkspaceFileSystem } from '@cloudflare/shell';
-
 import { ToolErrorCode, toolError } from '@shared/tool-errors';
-import { PROJECT_ROOT, WorkspaceClient } from '@worker/lib/workspace-client';
 
-import { BASH_CWD, formatBashOutput, runBashCommand } from './bash/run-bash';
+import { executeComputerCommand } from './computer-tools';
 
 import type { SendEventFunction, ToolDefinition, ToolExecutorContext, ToolResult } from '../types';
 
-const DESCRIPTION = `Run a sandboxed Bash script against the project's files (mounted at ${BASH_CWD}).
+const DESCRIPTION = `Compatibility adapter for Computer exec with the shell backend, mounted at /workspace.
 
 Use this for shell-style workflows that combine multiple file operations or text processing in one step — pipelines with cat, grep, sed, awk, jq, sort, uniq, wc, cut, find, ls, tr, head, tail, diff, and friends. For a single read/write/edit, prefer the dedicated state.* operations.
 
 Environment:
-- The project root is the working directory (${BASH_CWD}); paths are resolved relative to it.
+- The project root is the working directory (/workspace); paths are resolved relative to it.
 - Created, updated, and deleted files persist back to the workspace.
-- Network access, Python, and arbitrary JS execution are DISABLED. Only built-in commands are available; there are no external binaries (no node, npm, git, python).
+- Network access, Python, and arbitrary JS execution are DISABLED. Only built-in commands and local Git operations are available. Use exec with the container backend for native binaries and package installation.
 - Each invocation runs in a fresh shell (env/cwd reset); only filesystem changes persist between calls.`;
 
 export const definition: ToolDefinition = {
@@ -42,12 +39,11 @@ export async function execute(
 		return toolError(ToolErrorCode.MISSING_INPUT, 'A non-empty command is required.');
 	}
 
-	const fileSystem = new WorkspaceFileSystem(new WorkspaceClient(context.fsStub, PROJECT_ROOT, context.sessionId));
-	const result = await runBashCommand(command, fileSystem, { abortSignal: context.abortSignal });
+	const result = await executeComputerCommand(context, command, { backend: 'shell' });
 
 	return {
 		title: command.length > 60 ? `${command.slice(0, 60)}…` : command,
-		metadata: { exitCode: result.exitCode, timedOut: result.timedOut },
-		output: formatBashOutput(result),
+		metadata: { exitCode: result.exitCode, backend: result.backend, status: result.status },
+		output: [result.stdout, result.stderr].filter(Boolean).join('\n'),
 	};
 }

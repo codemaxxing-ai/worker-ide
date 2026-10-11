@@ -34,9 +34,22 @@ export function isReasoningPart(part: MessagePart): part is ReasoningPart {
  * metadata is not available (e.g. loaded sessions where tool_result events
  * were not persisted).
  */
-export function deriveCompletedLabel(toolName: ToolName | undefined, _rawContent: string | undefined): string {
+export function deriveCompletedLabel(toolName: ToolName | undefined, rawContent: string | undefined): string {
 	// codemode has no structured metadata summary; its label is always the same.
 	if (toolName === 'codemode') return 'Ran code';
+	if ((toolName === 'exec' || toolName === 'bash') && rawContent) {
+		try {
+			const output: unknown = JSON.parse(rawContent);
+			if (isRecord(output)) {
+				const backend = typeof output.backend === 'string' ? `${output.backend} · ` : '';
+				if (typeof output.error === 'string') return `${backend}Failed`;
+				if (output.status === 'cancelled' || [130, 137, 143].includes(Number(output.exitCode))) return `${backend}Cancelled`;
+				if (typeof output.exitCode === 'number') return `${backend}Exit ${output.exitCode}`;
+			}
+		} catch {
+			/* Legacy Bash output may be plain text. */
+		}
+	}
 	return 'Completed';
 }
 
@@ -195,9 +208,13 @@ export function summarizeFromMetadata(toolName: ToolName | undefined, info: Tool
 			return undefined;
 		}
 
+		case 'exec':
 		case 'bash': {
+			const backend = typeof metadata.backend === 'string' ? `${metadata.backend} · ` : '';
+			if (typeof metadata.error === 'string') return `${backend}Failed`;
 			if (typeof metadata.exitCode === 'number') {
-				return metadata.exitCode === 0 ? 'Done' : `Exit ${metadata.exitCode}`;
+				if ([130, 137, 143].includes(metadata.exitCode)) return `${backend}Cancelled`;
+				return `${backend}Exit ${metadata.exitCode}`;
 			}
 			return undefined;
 		}
@@ -294,6 +311,32 @@ function extractResultField(rawResult: string): string | undefined {
  * Strips XML tags and formats per-tool content cleanly.
  */
 function formatToolResultDetail(toolName: ToolName, rawResult: string): string {
+	if (toolName === 'read') {
+		try {
+			const output: unknown = JSON.parse(rawResult);
+			if (isRecord(output) && output.kind && output.kind !== 'text')
+				return `${String(output.name ?? output.path)} · ${String(output.mediaType)} · ${String(output.sizeBytes)} bytes`;
+		} catch {
+			/* Text reads use the normal formatter. */
+		}
+	}
+	if (toolName === 'exec') {
+		try {
+			const output: unknown = JSON.parse(rawResult);
+			if (isRecord(output))
+				return [
+					typeof output.backend === 'string' ? `Backend: ${output.backend}` : '',
+					typeof output.exitCode === 'number' ? `Exit: ${output.exitCode}` : '',
+					typeof output.stdout === 'string' ? output.stdout : '',
+					typeof output.stderr === 'string' && output.stderr ? `stderr:\n${output.stderr}` : '',
+					typeof output.error === 'string' ? output.error : '',
+				]
+					.filter(Boolean)
+					.join('\n\n');
+		} catch {
+			/* Fall back to the preserved result. */
+		}
+	}
 	// Errors are plain text — return as-is
 	if (isErrorResult(rawResult)) {
 		return rawResult;
@@ -509,7 +552,7 @@ function unwrapToolContent(value: unknown): string | undefined {
 				return parsed.content;
 			}
 			// The AI SDK wraps tool execution errors as {"error":"..."}
-			if (isRecord(parsed) && typeof parsed.error === 'string') {
+			if (isRecord(parsed) && typeof parsed.error === 'string' && typeof parsed.backend !== 'string') {
 				return parsed.error;
 			}
 		} catch {

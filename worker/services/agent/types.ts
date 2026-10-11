@@ -14,6 +14,8 @@ export interface FileChange {
 	beforeContent: string | Uint8Array | undefined;
 	afterContent: string | Uint8Array | undefined;
 	isBinary: boolean;
+	entryType?: 'file' | 'directory' | 'symlink';
+	beforeEntryType?: 'file' | 'directory' | 'symlink';
 }
 
 export interface SnapshotMetadata {
@@ -21,7 +23,13 @@ export interface SnapshotMetadata {
 	timestamp: number;
 	label: string;
 	sessionId?: string;
-	changes: Array<{ path: string; action: 'create' | 'edit' | 'delete' }>;
+	changes: Array<{
+		path: string;
+		action: 'create' | 'edit' | 'delete';
+		isBinary?: boolean;
+		entryType?: 'file' | 'directory' | 'symlink';
+		beforeEntryType?: 'file' | 'directory' | 'symlink';
+	}>;
 }
 
 export type TodoItem = {

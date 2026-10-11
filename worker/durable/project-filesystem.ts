@@ -1,7 +1,28 @@
+import { Buffer } from 'node:buffer';
+
+import { Workspace as Computer } from '@cloudflare/computer';
+import { ContainerBackend, withWorkspaceContainer } from '@cloudflare/computer/backends/container';
+import { WorkerShellBackend } from '@cloudflare/computer/backends/worker-shell';
+import { createGitClient } from '@cloudflare/computer/git';
+import jqCommands from '@cloudflare/computer/shell/jq';
+import { createAITools } from '@cloudflare/computer/tools';
 import { Workspace } from '@cloudflare/shell';
-import { DurableObject } from 'cloudflare:workers';
+import { DurableObject, exports } from 'cloudflare:workers';
+import { minimatch } from 'minimatch';
+import { z } from 'zod';
+
+import { toolInputSchemas } from '@shared/validation/tools';
 
 import { GitService } from './git-service';
+import { ComputerChanges } from '../lib/computer-changes';
+import { drainComputerOutput } from '../lib/computer-execution';
+import { ComputerMigration } from '../lib/computer-migration';
+import { ComputerMutationQueue, ComputerSynchronizationPending } from '../lib/computer-mutation-queue';
+import { resolveComputerReview } from '../lib/computer-review';
+import { ComputerShellWorkspace } from '../lib/computer-shell-workspace';
+import { restoreComputerSnapshots } from '../lib/computer-snapshots';
+import { computerStorage } from '../lib/computer-storage';
+import { ComputerWorkspace, computerPath, projectPath } from '../lib/computer-workspace';
 import { generateProjectId } from '../lib/project-id';
 import { hashSnapshot } from '../lib/snapshot-hash';
 import { withSpan } from '../lib/tracing';
@@ -9,7 +30,9 @@ import { WorkspaceFsAdapter } from '../lib/workspace-fs-adapter';
 
 import type { GitAuthor, GitStatusResponse } from './git-service';
 import type { PreviewBootstrap, PreviewBootstrapInputs } from '../lib/preview-bootstrap';
-import type { FileInfo, FileStat, WorkspaceChangeEvent } from '@cloudflare/shell';
+import type { RequestOriginContext } from '../services/agent/request-origin-context';
+import type { FileInfo, FileStat } from '@cloudflare/shell';
+import type { ComputerExecOptions, ComputerExecResult, ComputerReviewOptions } from '@shared/computer';
 import type { ProjectFilesystemRpc } from '@shared/project-filesystem-rpc';
 import type { GitBranchInfo, GitCommitEntry, GitFileDiff, GitMergeResult } from '@shared/types';
 
@@ -24,13 +47,6 @@ interface SeedFile {
  * create/delete (respectively) or when content could not be read (binary,
  * directory, …).
  */
-interface DrainedWorkspaceChange {
-	type: WorkspaceChangeEvent['type'];
-	path: string;
-	entryType: WorkspaceChangeEvent['entryType'];
-	beforeContent?: string;
-	afterContent?: string;
-}
 
 /**
  * SQLite table backing per-writer (per agent session) change tracking. Concurrent
@@ -44,26 +60,69 @@ interface DrainedWorkspaceChange {
  * semantics. `baseline` is NULL when the path did not exist (or was unreadable)
  * at first touch, i.e. a create.
  */
-const WRITER_CHANGE_TABLE = 'agent_writer_change';
+const COMPUTER_MUTATIONS = new Set([
+	'wsWriteFile',
+	'wsWriteFileBytes',
+	'wsAppendFile',
+	'wsMkdir',
+	'wsRm',
+	'wsCp',
+	'wsMv',
+	'wsSymlink',
+	'wsChmod',
+	'writeFileContent',
+	'writeFiles',
+	'importTree',
+	'gitInitialCommit',
+	'gitInit',
+	'gitStage',
+	'gitUnstage',
+	'gitStageAll',
+	'gitUnstageAll',
+	'gitDiscard',
+	'gitDiscardAll',
+	'gitCommit',
+	'gitCreateBranch',
+	'gitDeleteBranch',
+	'gitRenameBranch',
+	'gitCheckout',
+	'gitMerge',
+	'gitCreateTag',
+	'gitDeleteTag',
+	'computerExec',
+	'computerApplyTool',
+	'destroyStorage',
+	'retryComputerMigration',
+	'restoreSnapshots',
+	'resolveWorkspaceReview',
+	'writeAgentDocument',
+]);
 
 /**
  * Project filesystem Durable Object.
  *
- * A single durable `@cloudflare/shell` `Workspace` (SQLite + R2 spillover) holds
+ * A single durable Computer SQLite workspace holds
  * both the working tree and a real `.git`. Git operations run here, locally,
  * against that Workspace via {@link GitService}; Cloudflare Artifacts remains
  * the remote. There is no in-memory filesystem.
  */
-export class ProjectFilesystem extends DurableObject<Env> implements ProjectFilesystemRpc {
+class ProjectFilesystemBase extends DurableObject<Env> {}
+
+export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemBase) implements ProjectFilesystemRpc {
 	private workspaceInstance?: Workspace;
-	/** Whether the per-writer change table has been created this isolate. */
-	private writerTableReady = false;
+	private computerInstance?: Computer;
+	private computerAdapter?: ComputerWorkspace;
+	private containerInstance?: ContainerBackend;
+	private migrationInstance?: ComputerMigration;
+	private queueInstance?: ComputerMutationQueue;
+	private migrationPromise?: Promise<void>;
+	private changesInstance?: ComputerChanges;
 
 	private get projectId(): string {
 		return generateProjectId(this.ctx.id);
 	}
 
-	private get workspace(): Workspace {
+	private get legacyWorkspace(): Workspace {
 		this.workspaceInstance ??= new Workspace({
 			sql: this.ctx.storage.sql,
 			r2: this.env.STORAGE_BUCKET,
@@ -73,103 +132,413 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 		return this.workspaceInstance;
 	}
 
-	/** Create the per-writer change table once per isolate (idempotent). */
-	private ensureWriterTable(): void {
-		if (this.writerTableReady) return;
-		this.ctx.storage.sql.exec(
-			`CREATE TABLE IF NOT EXISTS ${WRITER_CHANGE_TABLE} (writer_id TEXT NOT NULL, path TEXT NOT NULL, baseline TEXT, PRIMARY KEY (writer_id, path))`,
-		);
-		this.writerTableReady = true;
+	private get computer(): Computer {
+		if (this.computerInstance) return this.computerInstance;
+		const reference = { binding: 'DurableObjectFilesystem', id: this.ctx.id.toString() };
+		this.containerInstance = new ContainerBackend({
+			id: 'container',
+			name: 'computer',
+			instance: 'standard-1',
+			container: () => this,
+			workspace: reference,
+			egress: { mode: 'http-gateway', gateway: exports.ComputerEgress({ props: { projectObjectId: this.ctx.id.toString() } }) },
+			ignore: ['**/node_modules', '**/.cache', '**/.bun', '**/.next', '**/dist', '**/coverage', '**/tmp'],
+		});
+		this.computerInstance = new Computer({
+			storage: computerStorage(this.ctx.storage),
+			git: createGitClient({ adapter: async () => new WorkspaceFsAdapter(this.destination) }),
+			backends: [
+				new WorkerShellBackend({
+					id: 'shell',
+					loader: this.env.LOADER,
+					ctx: this.ctx,
+					workspace: reference,
+					commands: [jqCommands],
+					egress: { mode: 'none' },
+				}),
+				this.containerInstance,
+			],
+		});
+		return this.computerInstance;
 	}
 
-	/**
-	 * Record a path's pre-edit content for `writerId`, once per path per drain
-	 * window. Called BEFORE the mutation so the captured content is the true
-	 * baseline. Reads that fail (new file, directory, binary) store NULL.
-	 */
-	private async captureBaseline(writerId: string, path: string): Promise<void> {
-		if (path === '/.git' || path.startsWith('/.git/')) return;
-		this.ensureWriterTable();
-		const existing = this.ctx.storage.sql
-			.exec(`SELECT 1 FROM ${WRITER_CHANGE_TABLE} WHERE writer_id = ? AND path = ? LIMIT 1`, writerId, path)
-			.toArray();
-		if (existing.length > 0) return;
-		let content: string | undefined;
-		try {
-			content = (await this.workspace.readFile(path)) ?? undefined;
-		} catch {
-			content = undefined;
-		}
-		if (content === undefined) {
-			// No readable pre-edit content — leave `baseline` NULL (a create).
-			this.ctx.storage.sql.exec(`INSERT OR IGNORE INTO ${WRITER_CHANGE_TABLE} (writer_id, path) VALUES (?, ?)`, writerId, path);
-			return;
-		}
-		this.ctx.storage.sql.exec(
-			`INSERT OR IGNORE INTO ${WRITER_CHANGE_TABLE} (writer_id, path, baseline) VALUES (?, ?, ?)`,
-			writerId,
-			path,
-			content,
-		);
+	private get destination(): ComputerWorkspace {
+		return (this.computerAdapter ??= new ComputerWorkspace(this.computer));
 	}
 
-	/**
-	 * Mark `path` as touched by `writerId` (after the mutation completed). Ensures
-	 * a row exists even if the baseline capture was skipped; `INSERT OR IGNORE`
-	 * never clobbers a baseline already captured before the write.
-	 */
-	private markTouched(writerId: string, path: string): void {
-		if (path === '/.git' || path.startsWith('/.git/')) return;
-		this.ensureWriterTable();
-		this.ctx.storage.sql.exec(
-			`INSERT OR IGNORE INTO ${WRITER_CHANGE_TABLE} (writer_id, path, baseline) VALUES (?, ?, NULL)`,
-			writerId,
-			path,
-		);
+	private get migration(): ComputerMigration {
+		return (this.migrationInstance ??= new ComputerMigration(this.ctx.storage, this.legacyWorkspace, this.destination));
 	}
 
-	/**
-	 * Drain the changes attributed to `writerId` (an agent session), each enriched
-	 * with before/after content and with true no-ops (content unchanged) dropped.
-	 * Reads the durable per-writer baselines, then clears that writer's rows.
-	 *
-	 * Returns `[]` when no `writerId` is given — changes are only ever surfaced
-	 * per session; there is no unattributed/global drain.
-	 *
-	 * Concurrent same-file boundary: `afterContent` is the CURRENT content, so if
-	 * two sessions edit the same path, each session's diff reflects its own
-	 * baseline but the shared latest content. Non-overlapping paths (the common
-	 * multi-agent case) are attributed exactly.
-	 */
-	async drainWorkspaceChanges(writerId?: string): Promise<DrainedWorkspaceChange[]> {
-		if (writerId === undefined) return [];
-		this.ensureWriterTable();
-		const rows = this.ctx.storage.sql
-			.exec<{ path: string; baseline: string | null }>(`SELECT path, baseline FROM ${WRITER_CHANGE_TABLE} WHERE writer_id = ?`, writerId)
-			.toArray();
-		this.ctx.storage.sql.exec(`DELETE FROM ${WRITER_CHANGE_TABLE} WHERE writer_id = ?`, writerId);
+	private get workspace(): Workspace | ComputerWorkspace {
+		return this.migration.active ? this.destination : this.legacyWorkspace;
+	}
 
-		const result: DrainedWorkspaceChange[] = [];
-		for (const row of rows) {
-			const path = row.path;
-			const beforeContent = row.baseline ?? undefined;
-			let afterContent: string | undefined;
+	private get queue(): ComputerMutationQueue {
+		return (this.queueInstance ??= new ComputerMutationQueue(this.ctx.storage, async (operation, argumentsJson) => {
+			const argumentsValue: unknown = JSON.parse(argumentsJson, (_key, value) => {
+				const bytes = z.object({ computerBytes: z.union([z.array(z.number()), z.string()]) }).safeParse(value);
+				return bytes.success
+					? typeof bytes.data.computerBytes === 'string'
+						? new Uint8Array(Buffer.from(bytes.data.computerBytes, 'base64'))
+						: new Uint8Array(bytes.data.computerBytes)
+					: value;
+			});
+			const parameters = z
+				.array(z.unknown())
+				.parse(argumentsValue)
+				.map((parameter) => parameter ?? undefined);
+			if (!COMPUTER_MUTATIONS.has(operation)) throw new Error(`Unknown queued mutation: ${operation}`);
+			const method = Reflect.get(this, operation);
+			if (typeof method !== 'function') throw new Error(`Missing queued mutation: ${operation}`);
+			await Reflect.apply(method, this, parameters);
+		}));
+	}
+
+	private async mutate<T>(operation: string, parameters: unknown[], execute: () => Promise<T>): Promise<T> {
+		return this.queue.run(operation, parameters, async () => {
+			if (this.migration.status().phase !== 'failed' || ['computerExec', 'computerApplyTool'].includes(operation))
+				await this.ensureComputer();
 			try {
-				afterContent = (await this.workspace.readFile(path)) ?? undefined;
-			} catch {
-				afterContent = undefined;
+				const result = await execute();
+				await this.changes.finish();
+				return result;
+			} catch (error) {
+				if (!(error instanceof ComputerSynchronizationPending)) await this.changes.finish();
+				throw error;
 			}
+		});
+	}
 
-			// Nothing on either side — not a real change.
-			if (beforeContent === undefined && afterContent === undefined) continue;
-			// Content unchanged — a no-op write (e.g. read-then-rewrite). Drop it so
-			// it never surfaces as a phantom "edited" entry with an empty diff.
-			if (beforeContent === afterContent) continue;
+	private async ensureComputer(): Promise<void> {
+		if (this.migration.active) return;
+		this.migrationPromise ??= (async () => {
+			while (!(await this.migration.batch())) await this.ctx.storage.setAlarm(Date.now() + 1000);
+		})().finally(() => {
+			this.migrationPromise = undefined;
+		});
+		return this.migrationPromise;
+	}
 
-			const type: WorkspaceChangeEvent['type'] = afterContent === undefined ? 'delete' : beforeContent === undefined ? 'create' : 'update';
-			result.push({ type, path, entryType: 'file', beforeContent, afterContent });
+	getComputerMigrationStatus() {
+		return this.migration.status();
+	}
+	async retryComputerMigration(): Promise<void> {
+		await this.queue.run('retryComputerMigration', [], async () => {
+			await this.migration.retry();
+			await this.ensureComputer();
+		});
+	}
+	async alarm(): Promise<void> {
+		await this.queue.resume();
+	}
+	async __getWorkspaceStub() {
+		void this.queue;
+		const owner = this.ctx.storage.sql
+			.exec<{ sequence: number; operation: string }>(
+				"SELECT sequence, operation FROM computer_mutation_queue WHERE status IN ('running', 'sync-pending') ORDER BY sequence LIMIT 1",
+			)
+			.toArray()[0];
+		return new ComputerShellWorkspace(this.computer, () => {
+			const current = this.ctx.storage.sql
+				.exec<{ sequence: number; operation: string }>(
+					"SELECT sequence, operation FROM computer_mutation_queue WHERE status IN ('running', 'sync-pending') ORDER BY sequence LIMIT 1",
+				)
+				.toArray()[0];
+			if (!owner || owner.operation !== 'computerExec' || current?.sequence !== owner.sequence)
+				throw new Error('Runtime writes require the original execution ownership');
+		});
+	}
+
+	getComputerRequestOrigin() {
+		return this.ctx.storage.kv.get<RequestOriginContext>('computer-request-origin');
+	}
+	async fetch(request: Request): Promise<Response> {
+		void this.computer;
+		if (!this.containerInstance) throw new Error('Container backend is unavailable');
+		return this.containerInstance.handleFetch(request);
+	}
+
+	async registerComputerSession(sessionId: string, mode: 'code' | 'plan' | 'ask', origin?: RequestOriginContext): Promise<void> {
+		this.ctx.storage.kv.put(`computer-session:${sessionId}`, mode);
+
+		if (origin) this.ctx.storage.kv.put('computer-request-origin', origin);
+	}
+
+	async beginComputerSessionTurn(
+		sessionId: string,
+		submissionId: string,
+		mode: 'code' | 'plan' | 'ask',
+		origin?: RequestOriginContext,
+	): Promise<void> {
+		await this.registerComputerSession(sessionId, mode, origin);
+		const key = `computer-session-turn:${sessionId}`;
+		if (this.ctx.storage.kv.get(key) === submissionId) return;
+		this.ctx.storage.kv.put(key, submissionId);
+		this.ctx.storage.kv.delete(`computer-session-cancelled:${sessionId}`);
+	}
+
+	/** Trusted plan/todo tools get a constrained path, even in read-only modes. */
+	async writeAgentDocument(
+		kind: 'plan' | 'todos',
+		sessionId: string,
+		content: string,
+	): Promise<{ path: string; previousContent?: string }> {
+		if (!/^[\w:-]+$/.test(sessionId)) throw new Error('Invalid agent document session');
+		if (kind !== 'plan' && kind !== 'todos') throw new Error('Invalid agent document kind');
+		const path = kind === 'plan' ? `/.agent/plans/${sessionId}.md` : `/.agent/todo/${sessionId}.json`;
+		return this.mutate('writeAgentDocument', [kind, sessionId, content], async () => {
+			const previousContent = (await this.workspace.readFile(path)) ?? undefined;
+			await this.workspace.writeFile(path, content);
+			return { path, previousContent };
+		});
+	}
+
+	private assertWritable(writerId?: string): void {
+		if (!writerId) return;
+		const mode = this.ctx.storage.kv.get<string>(`computer-session:${writerId}`);
+		if (mode === 'plan' || mode === 'ask') throw new Error(`${mode} mode cannot mutate the project workspace`);
+	}
+
+	async computerExec(command: string, options: ComputerExecOptions, sessionId: string): Promise<ComputerExecResult> {
+		this.assertWritable(sessionId);
+		const identifier = options.id ?? crypto.randomUUID();
+		const backend = options.backend ?? 'shell';
+		if (backend !== 'shell' && backend !== 'container') throw new Error(`Unsupported execution backend: ${backend}`);
+		return this.mutate('computerExec', [command, { ...options, id: identifier }, sessionId], async () => {
+			this.assertWritable(sessionId);
+			const key = `computer-execution:${identifier}`;
+			const previous = this.ctx.storage.kv.get<{ status: string; sessionId: string; result?: ComputerExecResult }>(key);
+			if (previous && previous.sessionId !== sessionId) throw new Error('Execution belongs to another session');
+			if (previous?.result?.syncStatus === 'complete') return previous.result;
+			if (
+				this.ctx.storage.kv.get(`computer-cancelled:${identifier}`) ||
+				this.ctx.storage.kv.get(`computer-session-cancelled:${sessionId}`)
+			) {
+				if (!previous)
+					return { id: identifier, backend, status: 'cancelled', exitCode: 137, stdout: '', stderr: '', syncStatus: 'complete' };
+				await this.computer.runtime.killExec(identifier, { backend, signal: 'SIGKILL' });
+			}
+			// Validate and prepare before recording a possibly dispatched command.
+			// Known preparation failures must not become an uncertain execution.
+			const cwd = previous ? undefined : computerPath(options.cwd ?? '/');
+			const input = previous || options.inputJson === undefined ? undefined : z.json().parse(JSON.parse(options.inputJson));
+			if (!previous && backend === 'container') await this.getWorkspaceContainer().setInactivityTimeout(120_000);
+			this.changes.resume(sessionId);
+			if (!previous) {
+				for (const path of await this.destination._getAllPaths()) await this.captureBaseline(sessionId, path);
+				this.ctx.storage.kv.put(key, { status: 'starting', sessionId, backend });
+			}
+			try {
+				if (previous && backend === 'container') await this.getWorkspaceContainer().setInactivityTimeout(120_000);
+				let response = previous?.result;
+				if (!response) {
+					using handle = previous
+						? await this.computer.runtime.getExec(identifier, { backend, encoding: 'utf8', resume: 'full' })
+						: await this.computer.runtime.exec(command, {
+								...options,
+								input,
+								id: identifier,
+								backend,
+								cwd,
+								encoding: 'utf8',
+								timeoutMs: backend === 'container' ? 300_000 : 30_000,
+								sync: 'wait',
+							});
+					this.ctx.storage.kv.put(key, { status: 'running', sessionId, backend });
+					const output = await drainComputerOutput(handle, () => this.ctx.storage.setAlarm(Date.now() + 30_000));
+					const cancelled =
+						Boolean(this.ctx.storage.kv.get(`computer-cancelled:${identifier}`)) || [130, 137, 143].includes(output.exitCode);
+					response = {
+						id: identifier,
+						backend,
+						status: cancelled ? 'cancelled' : output.exitCode === 0 ? 'completed' : 'failed',
+						...output,
+						syncStatus: 'pending',
+					};
+					this.ctx.storage.kv.put(key, { status: 'synchronization-pending', sessionId, backend, result: response });
+				}
+				if (backend === 'container') {
+					for await (const progress of this.computer.pull(backend)) {
+						await this.ctx.storage.setAlarm(Date.now() + 30_000);
+						if (!progress.complete) continue;
+					}
+				}
+				for (const path of await this.destination._getAllPaths()) this.markTouched(sessionId, path);
+				await this.changes.finish();
+				response = { ...response, syncStatus: 'complete' };
+				this.ctx.storage.kv.put(key, { status: response.status, sessionId, backend, result: response });
+				return response;
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				this.ctx.storage.kv.put(key, {
+					status: 'synchronization-pending',
+					sessionId,
+					backend,
+					result: this.ctx.storage.kv.get<{ result?: ComputerExecResult }>(key)?.result,
+					error: message,
+				});
+				throw new ComputerSynchronizationPending(
+					`Execution ${identifier} cannot be released until synchronization succeeds: ${message}. The command will not be replayed.`,
+					{ cause: error },
+				);
+			}
+		});
+	}
+
+	async cancelComputerExecution(identifier: string, sessionId: string): Promise<void> {
+		const record = this.ctx.storage.kv.get<{ sessionId: string; backend: string }>(`computer-execution:${identifier}`);
+		if (record && record.sessionId !== sessionId) throw new Error('Execution does not belong to this session');
+		this.ctx.storage.kv.put(`computer-cancelled:${identifier}`, true);
+		if (!record) return;
+		await this.computer.runtime.killExec(identifier, { backend: record.backend, signal: 'SIGKILL' });
+	}
+
+	async cancelComputerSessionExecutions(sessionId: string): Promise<void> {
+		this.ctx.storage.kv.put(`computer-session-cancelled:${sessionId}`, true);
+		for (const [key, record] of this.ctx.storage.kv.list<{ sessionId: string; backend: string; status: string }>({
+			prefix: 'computer-execution:',
+		})) {
+			if (record.sessionId !== sessionId || !['starting', 'running', 'synchronization-pending'].includes(record.status)) continue;
+			await this.cancelComputerExecution(key.slice('computer-execution:'.length), sessionId);
 		}
-		return result;
+	}
+
+	getComputerExecutions(sessionId: string) {
+		return [
+			...this.ctx.storage.kv.list<{ sessionId: string; backend: string; status: string; error?: string; result?: ComputerExecResult }>({
+				prefix: 'computer-execution:',
+			}),
+		]
+			.filter(([, record]) => record.sessionId === sessionId)
+			.map(([key, record]) => ({ id: key.slice('computer-execution:'.length), ...record }));
+	}
+
+	async computerReadFile(path: string, options?: { byteOffset?: number; byteLength?: number }): Promise<ReadableStream<Uint8Array>> {
+		const target = computerPath(path);
+		if (this.migration.active) return this.computer.fs.readFile(target, options ?? {});
+		const bytes = await this.legacyWorkspace.readFileBytes(projectPath(target));
+		if (!bytes) throw new Error(`ENOENT: ${path}`);
+		const offset = options?.byteOffset ?? 0;
+		const content = bytes.slice(offset, options?.byteLength === undefined ? undefined : offset + options.byteLength);
+		return new ReadableStream({
+			start(controller) {
+				controller.enqueue(content);
+				controller.close();
+			},
+		});
+	}
+
+	async computerFind(
+		directory: string,
+		pattern?: string,
+		options?: { limit?: number; offset?: number },
+	): Promise<Array<{ path: string; type: 'file' | 'dir' }>> {
+		const root = computerPath(directory);
+		if (this.migration.active) return this.computer.fs.find(root, pattern, options);
+		const result: Array<{ path: string; type: 'file' | 'dir' }> = [];
+		for (const path of await this.legacyWorkspace._getAllPaths()) {
+			const target = computerPath(path);
+			if (target !== root && !target.startsWith(`${root}/`)) continue;
+			if (pattern && !minimatch(target.slice(root.length + 1), pattern, { dot: true, matchBase: true })) continue;
+			const info = await this.legacyWorkspace.lstat(path);
+			if (info) result.push({ path: target, type: info.type === 'directory' ? 'dir' : 'file' });
+		}
+		return result.slice(options?.offset ?? 0, (options?.offset ?? 0) + (options?.limit ?? result.length));
+	}
+
+	async computerGrep(
+		pattern: string,
+		path: string,
+		options?: {
+			regex?: boolean;
+			ignoreCase?: boolean;
+			context?: number;
+			limit?: number;
+			offset?: number;
+			include?: string;
+			exclude?: string[];
+		},
+	) {
+		const root = computerPath(path);
+		if (this.migration.active) return this.computer.fs.grep(pattern, root, options);
+		const matches: Array<{ path: string; line: number; text: string }> = [];
+		const expression = options?.regex ? new RegExp(pattern, options.ignoreCase ? 'i' : '') : undefined;
+		for (const entry of await this.computerFind(root)) {
+			if (entry.type !== 'file') continue;
+			const relative = entry.path.slice(root.length + 1);
+			if (options?.include && !minimatch(relative, options.include, { matchBase: true })) continue;
+			if (options?.exclude?.some((excluded) => minimatch(relative, excluded, { dot: true }))) continue;
+			const content = await this.legacyWorkspace.readFile(projectPath(entry.path));
+			if (typeof content !== 'string') continue;
+			for (const [index, text] of content.split('\n').entries()) {
+				const included = expression
+					? expression.test(text)
+					: options?.ignoreCase
+						? text.toLowerCase().includes(pattern.toLowerCase())
+						: text.includes(pattern);
+				if (included) matches.push({ path: entry.path, line: index + 1, text });
+			}
+		}
+		return matches.slice(options?.offset ?? 0, (options?.offset ?? 0) + (options?.limit ?? 100));
+	}
+
+	async computerApplyTool(name: 'write' | 'edit' | 'delete', input: unknown, sessionId: string): Promise<unknown> {
+		this.assertWritable(sessionId);
+		return this.mutate('computerApplyTool', [name, input, sessionId], async () => {
+			this.assertWritable(sessionId);
+			for (const path of await this.destination._getAllPaths()) await this.captureBaseline(sessionId, path);
+			const parameters = toolInputSchemas[name].parse(input);
+			const definition = createAITools({ workspace: this.computer, assets: false })[name];
+			if (!definition.execute) throw new Error(`Computer tool ${name} is unavailable`);
+			const result: unknown = await definition.execute(
+				{ ...parameters, path: computerPath(parameters.path) },
+				{ toolCallId: crypto.randomUUID(), messages: [] },
+			);
+			for (const path of await this.destination._getAllPaths()) this.markTouched(sessionId, path);
+			return result;
+		});
+	}
+
+	private get changes(): ComputerChanges {
+		return (this.changesInstance ??= new ComputerChanges(this.ctx.storage, () => this.workspace));
+	}
+
+	private async captureBaseline(writerId: string, path: string): Promise<void> {
+		let target = projectPath(computerPath(path));
+		await this.changes.capture(writerId, target);
+		while (target.includes('/') && target !== '/') {
+			target = target.slice(0, target.lastIndexOf('/')) || '/';
+			await this.changes.capture(writerId, target);
+		}
+	}
+
+	private async captureTree(writerId: string, path: string): Promise<void> {
+		await this.captureBaseline(writerId, path);
+		const entry = await this.workspace.lstat(path);
+		if (entry?.type !== 'directory') return;
+		for (const child of await this.workspace.readDir(path)) await this.captureTree(writerId, child.path);
+	}
+
+	private async touchTree(writerId: string, path: string): Promise<void> {
+		this.markTouched(writerId, path);
+		const entry = await this.workspace.lstat(path);
+		if (entry?.type !== 'directory') return;
+		for (const child of await this.workspace.readDir(path)) await this.touchTree(writerId, child.path);
+	}
+
+	private markTouched(writerId: string, path: string): void {
+		let target = projectPath(computerPath(path));
+		this.changes.touch(writerId, target);
+		while (target !== '/') {
+			target = target.slice(0, target.lastIndexOf('/')) || '/';
+			this.changes.touch(writerId, target);
+		}
+	}
+
+	async drainWorkspaceChanges(writerId?: string) {
+		if (writerId === undefined) return [];
+		return this.changes.drain(writerId);
 	}
 
 	private git(): GitService {
@@ -188,59 +557,106 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 		return this.workspace.readFileBytes(path);
 	}
 	async wsWriteFile(path: string, content: string, writerId?: string): Promise<void> {
-		if (writerId !== undefined) await this.captureBaseline(writerId, path);
-		await this.workspace.writeFile(path, content);
-		if (writerId !== undefined) this.markTouched(writerId, path);
+		this.assertWritable(writerId);
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['wsWriteFile']>>>('wsWriteFile', [path, content, writerId], async () => {
+			this.assertWritable(writerId);
+			const target = await this.changes.resolveWritePath(path);
+			if (writerId !== undefined) await this.captureBaseline(writerId, target);
+			await this.workspace.writeFile(target, content);
+			if (writerId !== undefined) this.markTouched(writerId, target);
+		});
 	}
 	async wsWriteFileBytes(path: string, data: Uint8Array, writerId?: string): Promise<void> {
-		if (writerId !== undefined) await this.captureBaseline(writerId, path);
-		await this.workspace.writeFileBytes(path, data);
-		if (writerId !== undefined) this.markTouched(writerId, path);
+		this.assertWritable(writerId);
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['wsWriteFileBytes']>>>('wsWriteFileBytes', [path, data, writerId], async () => {
+			this.assertWritable(writerId);
+			const target = await this.changes.resolveWritePath(path);
+			if (writerId !== undefined) await this.captureBaseline(writerId, target);
+			await this.workspace.writeFileBytes(target, data);
+			if (writerId !== undefined) this.markTouched(writerId, target);
+		});
 	}
 	async wsAppendFile(path: string, content: string, writerId?: string): Promise<void> {
-		if (writerId !== undefined) await this.captureBaseline(writerId, path);
-		await this.workspace.appendFile(path, content);
-		if (writerId !== undefined) this.markTouched(writerId, path);
+		this.assertWritable(writerId);
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['wsAppendFile']>>>('wsAppendFile', [path, content, writerId], async () => {
+			this.assertWritable(writerId);
+			const target = await this.changes.resolveWritePath(path);
+			if (writerId !== undefined) await this.captureBaseline(writerId, target);
+			await this.workspace.appendFile(target, content);
+			if (writerId !== undefined) this.markTouched(writerId, target);
+		});
 	}
 	async wsExists(path: string): Promise<boolean> {
 		return this.workspace.exists(path);
 	}
-	async wsStat(path: string): Promise<FileStat | null> {
+	async wsStat(path: string): Promise<(FileStat & { mode?: number }) | null> {
 		return this.workspace.stat(path);
 	}
-	async wsLstat(path: string): Promise<FileStat | null> {
+	async wsLstat(path: string): Promise<(FileStat & { mode?: number }) | null> {
 		return this.workspace.lstat(path);
 	}
-	async wsMkdir(path: string, recursive: boolean): Promise<void> {
-		await this.workspace.mkdir(path, { recursive });
+	async wsMkdir(path: string, recursive: boolean, writerId?: string): Promise<void> {
+		this.assertWritable(writerId);
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['wsMkdir']>>>('wsMkdir', [path, recursive, writerId], async () => {
+			this.assertWritable(writerId);
+			if (writerId !== undefined) await this.captureBaseline(writerId, path);
+			await this.workspace.mkdir(path, { recursive });
+			if (writerId !== undefined) this.markTouched(writerId, path);
+		});
 	}
 	async wsReadDir(path: string): Promise<FileInfo[]> {
 		return this.workspace.readDir(path);
 	}
 	async wsRm(path: string, recursive: boolean, force: boolean, writerId?: string): Promise<void> {
-		if (writerId !== undefined) await this.captureBaseline(writerId, path);
-		await this.workspace.rm(path, { recursive, force });
-		if (writerId !== undefined) this.markTouched(writerId, path);
+		this.assertWritable(writerId);
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['wsRm']>>>('wsRm', [path, recursive, force, writerId], async () => {
+			this.assertWritable(writerId);
+			if (writerId !== undefined) await this.captureTree(writerId, path);
+			await this.workspace.rm(path, { recursive, force });
+			if (writerId !== undefined) this.markTouched(writerId, path);
+		});
 	}
 	async wsCp(source: string, destination: string, recursive: boolean, writerId?: string): Promise<void> {
-		if (writerId !== undefined) await this.captureBaseline(writerId, destination);
-		await this.workspace.cp(source, destination, { recursive });
-		if (writerId !== undefined) this.markTouched(writerId, destination);
+		this.assertWritable(writerId);
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['wsCp']>>>('wsCp', [source, destination, recursive, writerId], async () => {
+			this.assertWritable(writerId);
+			if (writerId !== undefined) await this.captureTree(writerId, destination);
+			await this.workspace.cp(source, destination, { recursive });
+			if (writerId !== undefined) await this.touchTree(writerId, destination);
+		});
 	}
 	async wsMv(source: string, destination: string, writerId?: string): Promise<void> {
-		if (writerId !== undefined) {
-			await this.captureBaseline(writerId, source);
-			await this.captureBaseline(writerId, destination);
-		}
-		await this.workspace.mv(source, destination);
-		if (writerId !== undefined) {
-			this.markTouched(writerId, source);
-			this.markTouched(writerId, destination);
-		}
+		this.assertWritable(writerId);
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['wsMv']>>>('wsMv', [source, destination, writerId], async () => {
+			this.assertWritable(writerId);
+			if (writerId !== undefined) {
+				await this.captureTree(writerId, source);
+				await this.captureTree(writerId, destination);
+			}
+			await this.workspace.mv(source, destination);
+			if (writerId !== undefined) {
+				await this.touchTree(writerId, source);
+				await this.touchTree(writerId, destination);
+			}
+		});
 	}
-	async wsSymlink(target: string, linkPath: string): Promise<void> {
-		await this.workspace.symlink(target, linkPath);
+	async wsSymlink(target: string, linkPath: string, writerId?: string): Promise<void> {
+		this.assertWritable(writerId);
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['wsSymlink']>>>('wsSymlink', [target, linkPath, writerId], async () => {
+			if (writerId) await this.captureBaseline(writerId, linkPath);
+			await this.workspace.symlink(target, linkPath);
+			if (writerId) this.markTouched(writerId, linkPath);
+		});
 	}
+	async wsChmod(path: string, mode: number, writerId?: string): Promise<void> {
+		this.assertWritable(writerId);
+		await this.mutate('wsChmod', [path, mode, writerId], async () => {
+			this.assertWritable(writerId);
+			if (!this.migration.active) throw new Error('Permissions require a verified Computer workspace');
+			await this.destination.chmod(path, mode);
+		});
+	}
+
 	async wsReadlink(path: string): Promise<string> {
 		return this.workspace.readlink(path);
 	}
@@ -330,21 +746,45 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 	}
 
 	async writeFileContent(path: string, content: string): Promise<void> {
-		await this.workspace.writeFile(path, content);
-		this.ctx.storage.kv.put('initialized', true);
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['writeFileContent']>>>('writeFileContent', [path, content], async () => {
+			await this.workspace.writeFile(path, content);
+			this.ctx.storage.kv.put('initialized', true);
+		});
 	}
 
 	async writeFiles(files: ReadonlyArray<SeedFile>): Promise<void> {
-		for (const file of files) {
-			await this.workspace.writeFile(file.path, file.content);
-		}
-		this.ctx.storage.kv.put('initialized', true);
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['writeFiles']>>>('writeFiles', [files], async () => {
+			for (const file of files) {
+				await this.workspace.writeFile(file.path, file.content);
+			}
+			this.ctx.storage.kv.put('initialized', true);
+		});
 	}
 
 	async destroyStorage(): Promise<void> {
-		await this.ctx.storage.deleteAlarm();
-		await this.ctx.storage.deleteAll();
-		this.workspaceInstance = undefined;
+		await this.queue.run('destroyStorage', [], async () => {
+			if (this.ctx.container?.running) await this.ctx.container.destroy();
+			for (const { name } of this.ctx.storage.sql.exec<{ name: string }>(
+				"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('computer_mutation_queue', 'computer_mutation_payload')",
+			)) {
+				this.ctx.storage.sql.exec(`DROP TABLE "${name.replaceAll('"', '""')}"`);
+			}
+			for (const [key] of this.ctx.storage.kv.list()) this.ctx.storage.kv.delete(key);
+			this.workspaceInstance = undefined;
+			this.computerInstance = undefined;
+			this.computerAdapter = undefined;
+			this.containerInstance = undefined;
+			this.migrationInstance = undefined;
+			this.changesInstance = undefined;
+		});
+	}
+
+	async restoreSnapshots(selections: Array<{ snapshotId: string; path?: string }>) {
+		return this.mutate('restoreSnapshots', [selections], () => restoreComputerSnapshots(this.workspace, selections));
+	}
+
+	async resolveWorkspaceReview(options: ComputerReviewOptions): Promise<boolean> {
+		return this.mutate('resolveWorkspaceReview', [options], () => resolveComputerReview(this.workspace, options));
 	}
 
 	/** Export the working tree (excluding `.git`) for cloning into another project. */
@@ -367,10 +807,12 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 
 	/** Import a working tree exported by {@link exportTree}. */
 	async importTree(files: ReadonlyArray<{ path: string; content: Uint8Array }>): Promise<void> {
-		for (const file of files) {
-			await this.workspace.writeFileBytes(file.path, file.content);
-		}
-		this.ctx.storage.kv.put('initialized', true);
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['importTree']>>>('importTree', [files], async () => {
+			for (const file of files) {
+				await this.workspace.writeFileBytes(file.path, file.content);
+			}
+			this.ctx.storage.kv.put('initialized', true);
+		});
 	}
 
 	// =========================================================================
@@ -380,32 +822,50 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 		return this.git().status();
 	}
 	async gitInitialCommit(author: GitAuthor): Promise<void> {
-		await this.git().initAndCommit('Initial commit', author);
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['gitInitialCommit']>>>('gitInitialCommit', [author], async () => {
+			await this.git().initAndCommit('Initial commit', author);
+		});
 	}
 	async gitInit(author: GitAuthor): Promise<{ success: true }> {
-		await this.git().initAndCommit('Initial commit', author);
-		return { success: true };
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['gitInit']>>>('gitInit', [author], async () => {
+			await this.git().initAndCommit('Initial commit', author);
+			return { success: true };
+		});
 	}
 	async gitStage(paths: string[]): Promise<{ success: true; gitStatus: GitStatusResponse }> {
-		return { success: true, gitStatus: await this.git().stage(paths) };
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['gitStage']>>>('gitStage', [paths], async () => {
+			return { success: true, gitStatus: await this.git().stage(paths) };
+		});
 	}
 	async gitUnstage(paths: string[]): Promise<{ success: true; gitStatus: GitStatusResponse }> {
-		return { success: true, gitStatus: await this.git().unstage(paths) };
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['gitUnstage']>>>('gitUnstage', [paths], async () => {
+			return { success: true, gitStatus: await this.git().unstage(paths) };
+		});
 	}
 	async gitStageAll(): Promise<{ success: true; gitStatus: GitStatusResponse }> {
-		return { success: true, gitStatus: await this.git().stageAll() };
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['gitStageAll']>>>('gitStageAll', [], async () => {
+			return { success: true, gitStatus: await this.git().stageAll() };
+		});
 	}
 	async gitUnstageAll(): Promise<{ success: true; gitStatus: GitStatusResponse }> {
-		return { success: true, gitStatus: await this.git().unstageAll() };
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['gitUnstageAll']>>>('gitUnstageAll', [], async () => {
+			return { success: true, gitStatus: await this.git().unstageAll() };
+		});
 	}
 	async gitDiscard(path: string): Promise<{ success: true; gitStatus: GitStatusResponse }> {
-		return { success: true, gitStatus: await this.git().discard(path) };
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['gitDiscard']>>>('gitDiscard', [path], async () => {
+			return { success: true, gitStatus: await this.git().discard(path) };
+		});
 	}
 	async gitDiscardAll(): Promise<{ success: true; gitStatus: GitStatusResponse }> {
-		return { success: true, gitStatus: await this.git().discardAll() };
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['gitDiscardAll']>>>('gitDiscardAll', [], async () => {
+			return { success: true, gitStatus: await this.git().discardAll() };
+		});
 	}
 	async gitCommit(message: string, author: GitAuthor): Promise<{ objectId: string; gitStatus: GitStatusResponse }> {
-		return this.git().commit(message, author);
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['gitCommit']>>>('gitCommit', [message, author], async () => {
+			return this.git().commit(message, author);
+		});
 	}
 	async gitLog(reference: string, depth: number): Promise<{ commits: GitCommitEntry[] }> {
 		return { commits: await this.git().log(reference, depth) };
@@ -414,33 +874,47 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 		return this.git().branches();
 	}
 	async gitCreateBranch(name: string, checkout: boolean): Promise<{ success: true }> {
-		await this.git().createBranch(name, checkout);
-		return { success: true };
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['gitCreateBranch']>>>('gitCreateBranch', [name, checkout], async () => {
+			await this.git().createBranch(name, checkout);
+			return { success: true };
+		});
 	}
 	async gitDeleteBranch(name: string): Promise<{ success: true }> {
-		await this.git().deleteBranch(name);
-		return { success: true };
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['gitDeleteBranch']>>>('gitDeleteBranch', [name], async () => {
+			await this.git().deleteBranch(name);
+			return { success: true };
+		});
 	}
 	async gitRenameBranch(oldName: string, newName: string): Promise<{ success: true }> {
-		await this.git().renameBranch(oldName, newName);
-		return { success: true };
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['gitRenameBranch']>>>('gitRenameBranch', [oldName, newName], async () => {
+			await this.git().renameBranch(oldName, newName);
+			return { success: true };
+		});
 	}
 	async gitCheckout(reference: string): Promise<{ success: true; gitStatus: GitStatusResponse }> {
-		return { success: true, gitStatus: await this.git().checkout(reference) };
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['gitCheckout']>>>('gitCheckout', [reference], async () => {
+			return { success: true, gitStatus: await this.git().checkout(reference) };
+		});
 	}
 	async gitMerge(branch: string): Promise<GitMergeResult & { gitStatus: GitStatusResponse }> {
-		return this.git().merge(branch);
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['gitMerge']>>>('gitMerge', [branch], async () => {
+			return this.git().merge(branch);
+		});
 	}
 	async gitTags(): Promise<{ tags: string[] }> {
 		return { tags: await this.git().tags() };
 	}
 	async gitCreateTag(name: string, reference?: string): Promise<{ success: true }> {
-		await this.git().createTag(name, reference);
-		return { success: true };
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['gitCreateTag']>>>('gitCreateTag', [name, reference], async () => {
+			await this.git().createTag(name, reference);
+			return { success: true };
+		});
 	}
 	async gitDeleteTag(name: string): Promise<{ success: true }> {
-		await this.git().deleteTag(name);
-		return { success: true };
+		return this.mutate<Awaited<ReturnType<ProjectFilesystem['gitDeleteTag']>>>('gitDeleteTag', [name], async () => {
+			await this.git().deleteTag(name);
+			return { success: true };
+		});
 	}
 	async gitDiff(path: string): Promise<{ diff: GitFileDiff }> {
 		return { diff: await this.git().diffWorkingFile(path) };

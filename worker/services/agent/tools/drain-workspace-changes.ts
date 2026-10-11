@@ -1,3 +1,5 @@
+import { Buffer } from 'node:buffer';
+
 import { createHmrUpdateForFile } from '@shared/types';
 import { coordinatorNamespace } from '@worker/lib/durable-object-namespaces';
 import { isHiddenPath } from '@worker/lib/path-utilities';
@@ -55,7 +57,12 @@ export async function drainWorkspaceChanges(
 		// The DO provides after-content; fall back to a live read only when it
 		// could not (e.g. an unattributed legacy drain returning no content).
 		let afterContent = change.afterContent;
-		if (afterContent === undefined && action !== 'delete') {
+		if (
+			afterContent === undefined &&
+			action !== 'delete' &&
+			!change.isBinary &&
+			(change.entryType === undefined || change.entryType === 'file')
+		) {
 			try {
 				afterContent = await fs.readFile(`${PROJECT_ROOT}${path}`, 'utf8');
 			} catch {
@@ -69,12 +76,30 @@ export async function drainWorkspaceChanges(
 		// path a tool already touched must not be dropped (it would leave the review
 		// diff stale, showing changes that are already on disk).
 		if (!emittedChangePaths.has(path)) {
-			sendEvent('file_changed', { path, action, beforeContent: change.beforeContent, afterContent });
+			sendEvent('file_changed', {
+				path,
+				action,
+				beforeContent: change.beforeContent,
+				afterContent,
+				beforeBytes: change.beforeBytes,
+				afterBytes: change.afterBytes,
+				isBinary: change.isBinary,
+				entryType: change.entryType,
+				beforeEntryType: change.beforeEntryType,
+			});
 		}
 		// Skip the record only when the tool already pushed this path itself
 		// (no-loader fallback); the UI event and HMR above still fire.
 		if (!alreadyRecordedPaths.has(path)) {
-			queryChanges.push({ path, action, beforeContent: change.beforeContent, afterContent, isBinary: false });
+			queryChanges.push({
+				path,
+				action,
+				beforeContent: change.beforeBytes === undefined ? change.beforeContent : new Uint8Array(Buffer.from(change.beforeBytes, 'base64')),
+				afterContent: change.afterBytes === undefined ? afterContent : new Uint8Array(Buffer.from(change.afterBytes, 'base64')),
+				isBinary: change.isBinary ?? false,
+				entryType: change.entryType,
+				beforeEntryType: change.beforeEntryType,
+			});
 		}
 		hmrPaths.push(path);
 	}

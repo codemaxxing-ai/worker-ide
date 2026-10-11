@@ -142,6 +142,11 @@ export interface FileChangedEvent {
 	beforeContent: string | undefined;
 	afterContent: string | undefined;
 	toolCallId: string | undefined;
+	isBinary?: boolean;
+	beforeBytes?: string;
+	afterBytes?: string;
+	entryType?: 'file' | 'directory' | 'symlink';
+	beforeEntryType?: 'file' | 'directory' | 'symlink';
 }
 export interface SnapshotCreatedEvent {
 	type: 'snapshot-created';

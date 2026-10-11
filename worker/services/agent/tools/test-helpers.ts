@@ -197,7 +197,7 @@ export function createMemoryFs(): MemoryFs {
 }
 
 export function createMockContext(overrides?: Partial<ToolExecutorContext>): ToolExecutorContext {
-	return {
+	const context: ToolExecutorContext = {
 		projectRoot: '/project',
 		projectId: 'test-project',
 		mode: 'code',
@@ -207,6 +207,24 @@ export function createMockContext(overrides?: Partial<ToolExecutorContext>): Too
 		model: DEFAULT_AI_MODEL,
 		...overrides,
 	};
+	if (!overrides?.fsStub) {
+		Reflect.set(context.fsStub, 'registerComputerSession', async () => {});
+		Reflect.set(context.fsStub, 'writeAgentDocument', async (kind: 'plan' | 'todos', sessionId: string, content: string) => {
+			const { fs } = await import('@worker/lib/project-fs');
+			const path = kind === 'plan' ? `/.agent/plans/${sessionId}.md` : `/.agent/todo/${sessionId}.json`;
+			const absolute = `${overrides?.projectRoot ?? '/project'}${path}`;
+			let previousContent: string | undefined;
+			try {
+				previousContent = await fs.readFile(absolute, 'utf8');
+			} catch {
+				/* new document */
+			}
+			await fs.mkdir(absolute.slice(0, absolute.lastIndexOf('/')), { recursive: true });
+			await fs.writeFile(absolute, content);
+			return { path, previousContent };
+		});
+	}
+	return context;
 }
 
 export function createMockSendEvent(): SendEventFunction & { calls: Array<[string, Record<string, unknown>]> } {

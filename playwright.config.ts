@@ -28,7 +28,7 @@ export default defineConfig({
 		: {
 				command: `bun run db:migrate:local && bun run build:worker-types && bunx vite --port ${testPort} --strictPort`,
 				url: testBaseUrl,
-				reuseExistingServer: false,
+				reuseExistingServer: true,
 				timeout: 120_000,
 			},
 });

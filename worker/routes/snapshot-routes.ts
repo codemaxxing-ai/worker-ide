@@ -7,8 +7,9 @@ import { HttpErrorCode } from '@shared/http-errors';
 import { snapshotIdSchema, revertFileSchema, revertCascadeSchema, filePathSchema, pendingChangesFileSchema } from '@shared/validation';
 import { fs } from '@worker/lib/project-fs';
 
-import { agentRunnerNamespace, coordinatorNamespace } from '../lib/durable-object-namespaces';
+import { agentRunnerNamespace, coordinatorNamespace, filesystemNamespace } from '../lib/durable-object-namespaces';
 import { httpError } from '../lib/http-error';
+import { toDurableObjectId } from '../lib/project-id';
 
 import type { AppEnvironment } from '../types';
 interface SnapshotMetadata {
@@ -16,12 +17,13 @@ interface SnapshotMetadata {
 	timestamp: number;
 	label: string;
 	sessionId?: string;
-	changes: Array<{ path: string; action: 'create' | 'edit' | 'delete' }>;
-}
-
-function isBinaryFilePath(path: string): boolean {
-	const extension = path.match(/\.[^.]+$/)?.[0]?.toLowerCase() || '';
-	return BINARY_EXTENSIONS.has(extension);
+	changes: Array<{
+		path: string;
+		action: 'create' | 'edit' | 'delete';
+		isBinary?: boolean;
+		entryType?: 'file' | 'directory' | 'symlink';
+		beforeEntryType?: 'file' | 'directory' | 'symlink';
+	}>;
 }
 export const snapshotRoutes = new Hono<AppEnvironment>()
 	// GET /api/snapshots - List all snapshots
@@ -164,7 +166,7 @@ export const snapshotRoutes = new Hono<AppEnvironment>()
 			}
 
 			try {
-				const isBinary = isBinaryFilePath(path);
+				const isBinary = change.isBinary ?? BINARY_EXTENSIONS.has(path.match(/\.[^.]+$/)?.[0]?.toLowerCase() ?? '');
 				if (isBinary) {
 					// For binary files, just indicate it exists
 					return c.json({ path, content: undefined, action: change.action, isBinary: true });
@@ -214,95 +216,44 @@ async function getSnapshotMetadata(projectRoot: string, snapshotId: string): Pro
 		return undefined;
 	}
 }
-async function revertSingleFile(
-	projectRoot: string,
-	path: string,
-	action: 'create' | 'edit' | 'delete',
-	snapshotDirectory: string,
-	projectId: string,
-): Promise<void> {
-	const isBinary = isBinaryFilePath(path);
-
-	if (action === 'create') {
-		// File was created by the agent, delete it to revert
+async function triggerRestoredFiles(projectId: string, paths: string[]) {
+	const coordinator = coordinatorNamespace.getByName(`project:${projectId}`);
+	for (const path of paths) {
 		try {
-			await fs.unlink(`${projectRoot}${path}`);
+			await coordinator.triggerUpdate({ type: 'full-reload', path, timestamp: Date.now(), targets: [] });
 		} catch {
-			// File may already be deleted
+			/* Preview refresh is independent of durable restoration. */
 		}
-	} else {
-		// File was edited or deleted, restore from snapshot
-		const snapshotFilePath = `${snapshotDirectory}${path}`;
-		try {
-			const beforeContent = isBinary ? await fs.readFile(snapshotFilePath) : await fs.readFile(snapshotFilePath, 'utf8');
-
-			// Ensure directory exists
-			const directory = path.slice(0, path.lastIndexOf('/'));
-			if (directory) {
-				await fs.mkdir(`${projectRoot}${directory}`, { recursive: true });
-			}
-
-			await fs.writeFile(`${projectRoot}${path}`, beforeContent);
-		} catch (error) {
-			console.error(`Failed to restore file ${path} from snapshot:`, error);
-		}
-	}
-
-	// Trigger HMR for the reverted file
-	try {
-		const coordinatorStub = coordinatorNamespace.getByName(`project:${projectId}`);
-		await coordinatorStub.triggerUpdate({
-			type: 'full-reload',
-			path,
-			timestamp: Date.now(),
-			targets: [],
-		});
-	} catch {
-		// HMR trigger failure is non-fatal
 	}
 }
 async function revertSnapshot(
-	projectRoot: string,
+	_projectRoot: string,
 	snapshotId: string,
 	projectId: string,
 ): Promise<{ success: true } | { success: false; reason: 'not_found' | 'error' }> {
-	const snapshotDirectory = `${projectRoot}/.agent/snapshots/${snapshotId}`;
-
-	try {
-		const metadata = await getSnapshotMetadata(projectRoot, snapshotId);
-		if (!metadata) return { success: false, reason: 'not_found' };
-
-		for (const change of metadata.changes) {
-			await revertSingleFile(projectRoot, change.path, change.action, snapshotDirectory, projectId);
-		}
-
-		return { success: true };
-	} catch (error) {
-		console.error('Failed to revert snapshot:', error);
-		return { success: false, reason: 'error' };
-	}
+	const result = await filesystemNamespace.get(toDurableObjectId(filesystemNamespace, projectId)).restoreSnapshots([{ snapshotId }]);
+	await triggerRestoredFiles(
+		projectId,
+		result.reverted.map((change) => change.path),
+	);
+	if (result.missingSnapshots.length > 0) return { success: false, reason: 'not_found' };
+	if (result.failed.length > 0) return { success: false, reason: 'error' };
+	return { success: true };
 }
 async function revertFileFromSnapshot(
-	projectRoot: string,
+	_projectRoot: string,
 	path: string,
 	snapshotId: string,
 	projectId: string,
 ): Promise<{ success: true } | { success: false; reason: 'not_found' | 'error' }> {
-	const snapshotDirectory = `${projectRoot}/.agent/snapshots/${snapshotId}`;
-
-	try {
-		const metadata = await getSnapshotMetadata(projectRoot, snapshotId);
-		if (!metadata) return { success: false, reason: 'not_found' };
-
-		const change = metadata.changes.find((ch) => ch.path === path);
-		if (!change) return { success: false, reason: 'not_found' };
-
-		await revertSingleFile(projectRoot, path, change.action, snapshotDirectory, projectId);
-		return { success: true };
-	} catch (error) {
-		console.error('Failed to revert file from snapshot:', error);
-		return { success: false, reason: 'error' };
-	}
+	const result = await filesystemNamespace.get(toDurableObjectId(filesystemNamespace, projectId)).restoreSnapshots([{ snapshotId, path }]);
+	await triggerRestoredFiles(
+		projectId,
+		result.reverted.map((change) => change.path),
+	);
+	if (result.failed.length > 0) return { success: false, reason: 'error' };
+	if (result.reverted.length === 0) return { success: false, reason: 'not_found' };
+	return { success: true };
 }
 interface CascadeRevertFileResult {
 	path: string;
@@ -325,43 +276,14 @@ interface CascadeRevertResult {
  * Snapshots whose metadata cannot be found are reported in `missingSnapshots`
  * but do not cause the entire operation to fail.
  */
-async function revertCascade(projectRoot: string, snapshotIds: string[], projectId: string): Promise<CascadeRevertResult> {
-	const result: CascadeRevertResult = { reverted: [], failed: [], missingSnapshots: [] };
-
-	// Load all snapshot metadata first. Track which files appear and in which
-	// snapshot, keeping only the EARLIEST (last in the array since IDs arrive
-	// newest-first) so we restore from the true pre-sequence state.
-	const fileToSnapshot = new Map<string, { snapshotId: string; action: 'create' | 'edit' | 'delete'; snapshotDirectory: string }>();
-
-	// Process in reverse (oldest first) so the earliest snapshot wins per file
-	for (const snapshotId of [...snapshotIds].toReversed()) {
-		const metadata = await getSnapshotMetadata(projectRoot, snapshotId);
-		if (!metadata) {
-			result.missingSnapshots.push(snapshotId);
-			continue;
-		}
-
-		const snapshotDirectory = `${projectRoot}/.agent/snapshots/${snapshotId}`;
-		for (const change of metadata.changes) {
-			// Earliest snapshot wins — its backup has the true original content.
-			// Later snapshots' backups have intermediate states we don't want.
-			if (!fileToSnapshot.has(change.path)) {
-				fileToSnapshot.set(change.path, { snapshotId, action: change.action, snapshotDirectory });
-			}
-		}
-	}
-
-	// Revert each unique file using the earliest snapshot's backup
-	for (const [path, { snapshotId, action, snapshotDirectory }] of fileToSnapshot) {
-		try {
-			await revertSingleFile(projectRoot, path, action, snapshotDirectory, projectId);
-			result.reverted.push({ path, snapshotId, action });
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Unknown error';
-			result.failed.push({ path, snapshotId, action, error: message });
-		}
-	}
-
+async function revertCascade(_projectRoot: string, snapshotIds: string[], projectId: string): Promise<CascadeRevertResult> {
+	const result = await filesystemNamespace
+		.get(toDurableObjectId(filesystemNamespace, projectId))
+		.restoreSnapshots(snapshotIds.map((snapshotId) => ({ snapshotId })));
+	await triggerRestoredFiles(
+		projectId,
+		result.reverted.map((change) => change.path),
+	);
 	return result;
 }
 

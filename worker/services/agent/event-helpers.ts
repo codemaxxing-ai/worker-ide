@@ -54,6 +54,9 @@ function isRecordObject(value: unknown): value is Record<string, unknown> {
 }
 
 const FILE_ACTIONS = new Set(['create', 'edit', 'delete', 'move']);
+function entryType(value: unknown): 'file' | 'directory' | 'symlink' | undefined {
+	return value === 'file' || value === 'directory' || value === 'symlink' ? value : undefined;
+}
 function isFileAction(value: unknown): value is 'create' | 'edit' | 'delete' | 'move' {
 	return typeof value === 'string' && FILE_ACTIONS.has(value);
 }
@@ -82,15 +85,20 @@ export function createSendEventFunction(
 			}
 			case 'file_changed': {
 				const action = isFileAction(data.action) ? data.action : 'edit';
-				queue.push(
-					fileChangedEvent(
+				queue.push({
+					...fileChangedEvent(
 						String(data.path ?? ''),
 						action,
 						typeof data.beforeContent === 'string' ? data.beforeContent : undefined,
 						typeof data.afterContent === 'string' ? data.afterContent : undefined,
 						typeof data.tool_use_id === 'string' ? data.tool_use_id : toolCallId,
 					),
-				);
+					isBinary: data.isBinary === true,
+					beforeBytes: typeof data.beforeBytes === 'string' ? data.beforeBytes : undefined,
+					afterBytes: typeof data.afterBytes === 'string' ? data.afterBytes : undefined,
+					entryType: entryType(data.entryType),
+					beforeEntryType: entryType(data.beforeEntryType),
+				});
 				break;
 			}
 			case 'user_question': {

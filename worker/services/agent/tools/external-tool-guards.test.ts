@@ -89,10 +89,11 @@ describe('createServerTools external guards', () => {
 		mockBrowserMarkdown.mockClear();
 	});
 
-	it('exposes a single codemode tool with no-network sandbox, ctx, and state', async () => {
+	it('exposes Computer tools and Code Mode with no-network sandbox, ctx, and state', async () => {
 		const tools = await createServerTools(createMockSendEvent(), contextOverrides(), [], 'code');
 
 		expect(tools).toHaveProperty('codemode');
+		for (const name of ['read', 'ls', 'find', 'grep', 'write', 'edit', 'delete', 'exec']) expect(tools).toHaveProperty(name);
 		// Domain tools live inside Code Mode's tools.*, never at the top level.
 		expect(tools).not.toHaveProperty('web_fetch');
 		expect(tools).not.toHaveProperty('lint_fix');
@@ -129,7 +130,9 @@ describe('createServerTools external guards', () => {
 	});
 
 	it('exposes quick action tools and omits browser_execute outside code mode', async () => {
-		await createServerTools(createMockSendEvent(), contextOverrides(), [], 'plan');
+		const tools = await createServerTools(createMockSendEvent(), contextOverrides(), [], 'plan');
+		for (const name of ['read', 'ls', 'find', 'grep']) expect(tools).toHaveProperty(name);
+		for (const name of ['write', 'edit', 'delete', 'exec']) expect(tools).not.toHaveProperty(name);
 
 		const codeModeTools = lastCodeModeTools();
 		expect(codeModeTools).not.toHaveProperty('browser_execute');

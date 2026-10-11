@@ -126,6 +126,36 @@ export const bashInputSchema = z.object({
 });
 
 export const toolInputSchemas = {
+	read: z.object({ path: z.string(), offset: z.number().optional(), byteOffset: z.number().optional(), limit: z.number().optional() }),
+	ls: z.object({ path: z.string(), limit: z.number().optional(), offset: z.number().optional() }),
+	find: z.object({
+		path: z.string().default('/workspace'),
+		pattern: z.string(),
+		exclude: z.array(z.string()).optional(),
+		limit: z.number().optional(),
+		offset: z.number().optional(),
+	}),
+	grep: z.object({
+		path: z.string().default('/workspace'),
+		query: z.string(),
+		include: z.string().optional(),
+		exclude: z.array(z.string()).optional(),
+		regex: z.boolean().optional(),
+		ignoreCase: z.boolean().optional(),
+		context: z.number().optional(),
+		limit: z.number().optional(),
+		offset: z.number().optional(),
+	}),
+	write: z.object({ path: z.string(), content: z.string() }),
+	edit: z.object({ path: z.string(), edits: z.array(z.object({ oldText: z.string(), newText: z.string() })) }),
+	delete: z.object({ path: z.string(), recursive: z.boolean().optional() }),
+	exec: z.object({
+		command: z.string().min(1),
+		cwd: z.string().optional(),
+		backend: z.enum(['shell', 'container']).optional(),
+		env: z.record(z.string(), z.string()).optional(),
+		input: z.json().optional(),
+	}),
 	user_question: questionInputSchema,
 	web_fetch: webfetchInputSchema,
 	docs_search: searchCloudflareDocumentationInputSchema,

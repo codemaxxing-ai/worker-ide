@@ -58,4 +58,14 @@ describe('review queue persistence model', () => {
 	it('preserves mixed hunk decisions when resolving a review entry', () => {
 		expect(resolveDecisionFromHunks(['approved', 'rejected'])).toBe('mixed');
 	});
+	it('keeps binary, directory and symlink reviews when text reconciliation cannot describe their bytes', () => {
+		for (const change of [
+			{ ...pendingChange, isBinary: true },
+			{ ...pendingChange, entryType: 'symlink' },
+			{ ...pendingChange, entryType: 'directory' },
+		]) {
+			const parsed = parsePendingChangesRecord(JSON.stringify({ [change.path]: change }));
+			expect(derivePendingChangeFromWorkspace(parsed[change.path])).toMatchObject(change);
+		}
+	});
 });

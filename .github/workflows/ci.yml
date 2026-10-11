@@ -6,6 +6,8 @@ on:
     paths:
       - 'scripts/**'
       - 'wrangler.jsonc'
+      - 'Dockerfile.computer'
+      - '.dockerignore'
       - '.nvmrc'
       - 'index.html'
       - '.prettier*'
@@ -28,6 +30,8 @@ on:
     paths:
       - 'scripts/**'
       - 'wrangler.jsonc'
+      - 'Dockerfile.computer'
+      - '.dockerignore'
       - '.nvmrc'
       - 'index.html'
       - '.prettier*'
@@ -295,6 +299,12 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Verify Docker runtime
+        run: docker info
+
+      - name: Build pinned Computer image
+        run: docker build --platform linux/amd64 -f Dockerfile.computer -t worker-ide-computer:0.4.1 .
+
       - name: Apply D1 migrations
         run: bun run db:migrate:local
 
@@ -392,6 +402,12 @@ jobs:
       - name: Install Playwright system dependencies
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: bunx playwright install-deps chromium
+
+      - name: Verify Docker runtime
+        run: docker info
+
+      - name: Build pinned Computer image
+        run: docker build --platform linux/amd64 -f Dockerfile.computer -t worker-ide-computer:0.4.1 .
 
       - name: Apply D1 migrations
         run: bun run db:migrate:local

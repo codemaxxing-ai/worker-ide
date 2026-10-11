@@ -14,6 +14,9 @@ export const sessionTitleSchema = z
 	.min(1, 'Title is required')
 	.max(LIMITS.TITLE_MAX_LENGTH, `Title must be at most ${LIMITS.TITLE_MAX_LENGTH} characters`);
 export const pendingFileChangeSchema = z.object({
+	isBinary: z.boolean().optional(),
+	entryType: z.enum(['file', 'directory', 'symlink']).optional(),
+	beforeEntryType: z.enum(['file', 'directory', 'symlink']).optional(),
 	path: z.string(),
 	action: z.enum(['create', 'edit', 'delete', 'move']),
 	beforeContent: z

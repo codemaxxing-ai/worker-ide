@@ -1,0 +1,10 @@
+node_modules
+.git
+.wrangler
+.turbo
+dist
+coverage
+playwright-report
+test-results
+.dev.vars*
+.env*
