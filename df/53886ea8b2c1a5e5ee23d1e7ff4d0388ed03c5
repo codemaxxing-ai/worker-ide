@@ -1,0 +1,28 @@
+test/e2e/content-isolation.test.ts
+  s_a40ec9c4c83a30::t_1024d67a20ce61 282-286
+  s_04430c0ea26d4d::t_049db08f8eaeda 273,277-278
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "df53886ea8b2c1a5e5ee23d1e7ff4d0388ed03c5",
+  "prompts": {},
+  "sessions": {
+    "s_04430c0ea26d4d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12cbc-51fc-7361-be7f-ebcd04d0ba3d",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    },
+    "s_a40ec9c4c83a30": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12d58-bb1a-7f12-bb19-be12cfa4a58c",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
