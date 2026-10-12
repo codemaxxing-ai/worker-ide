@@ -1,0 +1,19 @@
+test/e2e/content-isolation.test.ts
+  s_04430c0ea26d4d::t_3293af1c41ecfd 139-142
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b50169e2401fcbb42c57fe492238b4a6bc1bff49",
+  "prompts": {},
+  "sessions": {
+    "s_04430c0ea26d4d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12cbc-51fc-7361-be7f-ebcd04d0ba3d",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
