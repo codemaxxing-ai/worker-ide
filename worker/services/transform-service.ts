@@ -495,18 +495,18 @@ function wrapModuleWithRefreshRegistrations(code: string, moduleId: string): { c
 
 	return {
 		code: [
-			`var __prevRefreshReg = window.$RefreshReg$;`,
-			`var __prevRefreshSig = window.$RefreshSig$;`,
-			`window.$RefreshReg$ = function(type, id) {`,
-			`  window.__RefreshRuntime && window.__RefreshRuntime.register(type, ${fileId} + " " + id);`,
+			`var __prevRefreshReg = globalThis.$RefreshReg$;`,
+			`var __prevRefreshSig = globalThis.$RefreshSig$;`,
+			`globalThis.$RefreshReg$ = function(type, id) {`,
+			`  globalThis.__RefreshRuntime && globalThis.__RefreshRuntime.register(type, ${fileId} + " " + id);`,
 			`};`,
-			`window.$RefreshSig$ = window.__RefreshRuntime ? window.__RefreshRuntime.createSignatureFunctionForTransform() : function() { return function(type) { return type; }; };`,
+			`globalThis.$RefreshSig$ = globalThis.__RefreshRuntime ? globalThis.__RefreshRuntime.createSignatureFunctionForTransform() : function() { return function(type) { return type; }; };`,
 			code,
-			`if (window.__RefreshRuntime) {`,
+			`if (globalThis.__RefreshRuntime) {`,
 			registrations,
 			`}`,
-			`window.$RefreshReg$ = __prevRefreshReg;`,
-			`window.$RefreshSig$ = __prevRefreshSig;`,
+			`globalThis.$RefreshReg$ = __prevRefreshReg;`,
+			`globalThis.$RefreshSig$ = __prevRefreshSig;`,
 		].join('\n'),
 		isBoundary,
 	};
@@ -523,7 +523,7 @@ function wrapJavaScriptModule(code: string, moduleId: string, importedModuleIds:
 
 	return [
 		`const __preview_module_id__ = ${JSON.stringify(moduleId)};`,
-		`const __preview_runtime__ = window.__PREVIEW_RUNTIME__;`,
+		`const __preview_runtime__ = globalThis.__PREVIEW_RUNTIME__;`,
 		`const __preview_hot__ = __preview_runtime__ ? __preview_runtime__.createHotContext(__preview_module_id__) : undefined;`,
 		`if (__preview_runtime__) {`,
 		`  __preview_runtime__.registerModule(__preview_module_id__, ${JSON.stringify(importedModuleIds)});`,
@@ -577,7 +577,7 @@ export async function transformModule(
 		const code = [
 			`const css = ${cssContent};`,
 			`const __preview_module_id__ = ${JSON.stringify(moduleId)};`,
-			`const __preview_runtime__ = window.__PREVIEW_RUNTIME__;`,
+			`const __preview_runtime__ = globalThis.__PREVIEW_RUNTIME__;`,
 			`const __preview_hot__ = __preview_runtime__ ? __preview_runtime__.createHotContext(__preview_module_id__) : undefined;`,
 			`if (__preview_runtime__) {`,
 			`  __preview_runtime__.registerModule(__preview_module_id__, []);`,
@@ -592,7 +592,7 @@ export async function transformModule(
 	if (isPreviewModuleWrappedPath(normalizedPath)) {
 		const code = [
 			`const __preview_module_id__ = ${JSON.stringify(moduleId)};`,
-			`const __preview_runtime__ = window.__PREVIEW_RUNTIME__;`,
+			`const __preview_runtime__ = globalThis.__PREVIEW_RUNTIME__;`,
 			`__preview_runtime__ && __preview_runtime__.createHotContext(__preview_module_id__);`,
 			`if (__preview_runtime__) { __preview_runtime__.registerModule(__preview_module_id__, []); }`,
 			`export default ${content};`,
@@ -604,7 +604,7 @@ export async function transformModule(
 		const assetUrl = requestTimestamp ? buildPreviewRequest(normalizedPath, { timestamp: requestTimestamp }) : normalizedPath;
 		const code = [
 			`const __preview_module_id__ = ${JSON.stringify(moduleId)};`,
-			`const __preview_runtime__ = window.__PREVIEW_RUNTIME__;`,
+			`const __preview_runtime__ = globalThis.__PREVIEW_RUNTIME__;`,
 			`__preview_runtime__ && __preview_runtime__.createHotContext(__preview_module_id__);`,
 			`if (__preview_runtime__) { __preview_runtime__.registerModule(__preview_module_id__, []); }`,
 			`export default ${JSON.stringify(assetUrl)};`,

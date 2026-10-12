@@ -2,8 +2,6 @@ import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
-import { buildAppOrigin, parseHost } from '@shared/domain';
-
 import { registerAuthRoutes } from './auth';
 import { registerDevelopmentAuthRoutes, registerDevelopmentTestRoutes } from './development';
 import { registerPreviewAccessRoutes } from './preview-access';
@@ -11,6 +9,7 @@ import { projectApp } from './project-app';
 import { requireSameOriginUnsafeMethods } from './security';
 import { analyticsMiddleware } from '../lib/analytics-middleware';
 import { requireAuth } from '../lib/auth-middleware';
+import { getDomainConfiguration } from '../lib/domain-configuration';
 import { requireRateLimit } from '../lib/rate-limit-middleware';
 import { cloudflareOAuthRoutes } from '../routes/cloudflare-oauth-routes';
 import { orgRoutes } from '../routes/org-routes';
@@ -44,8 +43,7 @@ app.use(
 	'/api/*',
 	cors({
 		origin: (origin, c) => {
-			const { baseDomain } = parseHost(new URL(c.req.url).host);
-			const appOrigin = buildAppOrigin(baseDomain, new URL(c.req.url).protocol);
+			const { appOrigin } = getDomainConfiguration(c.env);
 			return origin === appOrigin ? origin : undefined;
 		},
 		credentials: true,
@@ -55,8 +53,7 @@ app.use(
 	'/p/*/api/*',
 	cors({
 		origin: (origin, c) => {
-			const { baseDomain } = parseHost(new URL(c.req.url).host);
-			const appOrigin = buildAppOrigin(baseDomain, new URL(c.req.url).protocol);
+			const { appOrigin } = getDomainConfiguration(c.env);
 			return origin === appOrigin ? origin : undefined;
 		},
 		credentials: true,

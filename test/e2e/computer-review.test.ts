@@ -1,7 +1,7 @@
 import { hc } from 'hono/client';
-import { expect, test } from 'playwright/test';
 
 import { gotoIDE } from './helpers';
+import { expect, test } from './test-fixtures';
 
 import type { ApiRoutes } from '../../worker/routes';
 import type { DevelopmentTestRoutes } from '../../worker/routes/development-test-routes';

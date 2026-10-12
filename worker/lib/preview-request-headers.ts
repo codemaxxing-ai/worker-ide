@@ -1,11 +1,11 @@
 /**
  * Shared request-header sanitization for preview requests.
  *
- * Preview requests are served on the shared preview domain and their bodies are
+ * Preview requests are served on per-project content origins and their bodies are
  * ultimately handled by untrusted, generated application code (the React-SPA
  * worker isolate or the vinext server isolate). Any credential the browser
  * attaches to a preview request — most importantly the signed
- * `worker-ide-preview-access` grant cookie that authorizes access to a private
+ * `__Host-worker-ide-preview-access` grant cookie that authorizes access to a private
  * preview — must be removed before the request reaches that code, otherwise a
  * malicious app could read the token and exfiltrate it to bypass private-preview
  * access control.

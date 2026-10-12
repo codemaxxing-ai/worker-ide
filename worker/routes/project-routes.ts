@@ -256,7 +256,8 @@ export const projectRoutes = new Hono<AppEnvironment>()
 			headers: {
 				'Content-Type': 'application/zip',
 				'Content-Disposition': `attachment; filename="${safeName}.zip"`,
-				'Access-Control-Allow-Origin': '*',
+				'X-Content-Type-Options': 'nosniff',
+				'Cache-Control': 'no-store',
 			},
 		});
 	});

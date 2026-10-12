@@ -2,13 +2,14 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
-import { buildAppOrigin, parseHost } from '@shared/domain';
+import { classifyOrigin } from '@shared/domain';
 import { validatePreviewToken } from '@shared/preview-token';
 import { isValidProjectId } from '@shared/project-id';
 
 import { applyPreviewRobotsHeader } from './security';
 import { resolveSessionFromRequest } from './session';
 import * as authSchema from '../db/auth-schema';
+import { getDomainConfiguration } from '../lib/domain-configuration';
 import { errorPage } from '../lib/error-page';
 import { buildPreviewAccessLoginUrl, buildPreviewRedeemUrl, createPreviewAccessGrant, getRedirectPath } from '../lib/preview-access';
 import { DEV_PREVIEW_SECRET } from '../lib/preview-secret';
@@ -19,6 +20,8 @@ export function registerPreviewAccessRoutes(app: Hono<AuthedEnvironment>): void 
 	app.use('/p/:projectId/__preview-auth/*', async (c, next) => {
 		await next();
 		c.res = applyPreviewRobotsHeader(c.res);
+		c.header('Cache-Control', 'no-store');
+		c.header('Referrer-Policy', 'no-referrer');
 	});
 
 	app.get('/p/:projectId/__preview-auth/bootstrap', async (c) => {
@@ -28,7 +31,8 @@ export function registerPreviewAccessRoutes(app: Hono<AuthedEnvironment>): void 
 		}
 
 		const currentUrl = new URL(c.req.url);
-		const appOrigin = buildAppOrigin(parseHost(currentUrl.host).baseDomain, currentUrl.protocol);
+		const configuration = getDomainConfiguration(c.env);
+		const { appOrigin } = configuration;
 		const returnTo = c.req.query('returnTo');
 		if (!returnTo) {
 			return errorPage({
@@ -51,11 +55,12 @@ export function registerPreviewAccessRoutes(app: Hono<AuthedEnvironment>): void 
 			});
 		}
 
-		const parsedReturnHost = parseHost(returnToUrl.host);
+		const parsedReturnHost = classifyOrigin(returnToUrl.origin, configuration);
 		if (
 			parsedReturnHost.type !== 'preview' ||
 			parsedReturnHost.projectId !== projectId ||
-			parsedReturnHost.baseDomain !== parseHost(currentUrl.host).baseDomain
+			returnToUrl.username !== '' ||
+			returnToUrl.password !== ''
 		) {
 			return errorPage({
 				heading: 'Invalid preview link',
@@ -136,6 +141,7 @@ export function registerPreviewAccessRoutes(app: Hono<AuthedEnvironment>): void 
 			{
 				projectId,
 				previewToken: parsedReturnHost.token,
+				previewOrigin: returnToUrl.origin,
 				organizationId: previewProjectRow[0].organizationId,
 				userId: session.userId,
 				redirectPath: getRedirectPath(returnToUrl),

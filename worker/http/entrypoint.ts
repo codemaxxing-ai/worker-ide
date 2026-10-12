@@ -2,15 +2,18 @@ import { and, eq, isNotNull, isNull, lte } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import { PROJECT_INACTIVITY_DAYS, SOFT_DELETE_RETENTION_DAYS } from '@shared/constants';
-import { parseHost } from '@shared/domain';
+import { classifyOrigin } from '@shared/domain';
 import { validatePreviewToken } from '@shared/preview-token';
 
 import { app } from './app';
-import { isHotlinkRequest, handlePreviewRequest } from './preview';
-import { composeResponseMiddleware, previewRobotsHeadersMiddleware, appSecurityHeadersMiddleware } from './security';
+import { handlePreviewRequest } from './preview';
+import { composeResponseMiddleware, appSecurityHeadersMiddleware } from './security';
 import * as authSchema from '../db/auth-schema';
+import { getDomainConfiguration } from '../lib/domain-configuration';
 import { coordinatorNamespace } from '../lib/durable-object-namespaces';
 import { errorPage, previewExpiredPage } from '../lib/error-page';
+import { isForbiddenPreviewRequest } from '../lib/preview-request-policy';
+import { finalizePreviewResponse } from '../lib/preview-response-headers';
 import { DEV_PREVIEW_SECRET } from '../lib/preview-secret';
 import { handleGitProxy } from '../services/git-proxy';
 import { PROJECT_DELETED_VIA_PROJECT, hardDeleteProjectById, hardDeleteOrganizationById } from '../services/projects/retention';
@@ -56,7 +59,8 @@ export default {
 			}
 		}
 
-		const parsed = parseHost(url.host);
+		const configuration = getDomainConfiguration(environment);
+		const parsed = classifyOrigin(url.origin, configuration);
 
 		switch (parsed.type) {
 			case 'preview': {
@@ -64,13 +68,13 @@ export default {
 					const secret = import.meta.env.DEV ? environment.PREVIEW_SECRET || DEV_PREVIEW_SECRET : environment.PREVIEW_SECRET;
 					const isValidToken = await validatePreviewToken(parsed.projectId, parsed.token, secret);
 					if (!isValidToken) {
-						return previewExpiredPage({ baseDomain: parsed.baseDomain, protocol: url.protocol });
+						return previewExpiredPage(configuration.appOrigin);
 					}
 
 					// Block cross-site subresource requests (hotlinking).
 					// Must run after token validation so we don't leak timing info
 					// about whether a token is valid to cross-site probes.
-					if (isHotlinkRequest(request)) {
+					if (isForbiddenPreviewRequest(request, configuration.appOrigin)) {
 						return new Response('Forbidden', { status: 403 });
 					}
 
@@ -82,8 +86,24 @@ export default {
 						}
 					}
 
-					return handlePreviewRequest(request, parsed.projectId, parsed.token);
-				}, [previewRobotsHeadersMiddleware]);
+					try {
+						return await handlePreviewRequest(request, parsed.projectId, parsed.token);
+					} catch (error) {
+						console.error('Preview request failed', error);
+						return errorPage({
+							heading: 'Preview unavailable',
+							message: 'Unable to serve this preview.',
+							homeUrl: configuration.appOrigin,
+							status: 500,
+						});
+					}
+				}, [
+					async (_request, next) =>
+						finalizePreviewResponse(await next(), {
+							ideOrigin: configuration.appOrigin,
+							allowPlatformCookies: url.pathname === '/__preview-auth/redeem',
+						}),
+				]);
 			}
 
 			case 'git': {
@@ -100,8 +120,13 @@ export default {
 				]);
 			}
 
+			case 'content': {
+				return new Response('Codemaxxing user content hosting. Projects run on separate signed hosts.', {
+					headers: { 'Content-Type': 'text/plain;charset=UTF-8', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' },
+				});
+			}
 			case 'unknown': {
-				const homeUrl = `${url.protocol}//${parsed.baseDomain}/`;
+				const homeUrl = `${configuration.appOrigin}/`;
 				return errorPage({
 					heading: 'Page not found',
 					message: "The page you're looking for doesn't exist.",

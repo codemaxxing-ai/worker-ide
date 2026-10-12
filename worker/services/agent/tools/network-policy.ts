@@ -79,9 +79,11 @@ function isSameDeploymentHost(url: URL, requestOriginContext?: RequestOriginCont
 		return false;
 	}
 
-	const baseHostname = normalizeHostname(requestOriginContext.baseDomain.split(':')[0] ?? requestOriginContext.baseDomain);
 	const hostname = normalizeHostname(url.hostname);
-	return hostname === baseHostname || hostname.endsWith(`.${baseHostname}`);
+	return [requestOriginContext.appOrigin, requestOriginContext.contentOrigin].some((origin) => {
+		const baseHostname = new URL(origin).hostname;
+		return hostname === baseHostname || hostname.endsWith(`.${baseHostname}`);
+	});
 }
 
 function isTextContentType(contentType: string): boolean {
@@ -205,7 +207,5 @@ export async function buildAllowedPreviewOrigins(
 		generatePreviewTokenForBucket(projectId, secret, bucket - 1),
 	]);
 
-	return [...new Set(tokens)].map((token) =>
-		buildPreviewOrigin(projectId, token, requestOriginContext.baseDomain, requestOriginContext.protocol),
-	);
+	return [...new Set(tokens)].map((token) => buildPreviewOrigin(projectId, token, requestOriginContext.contentOrigin));
 }

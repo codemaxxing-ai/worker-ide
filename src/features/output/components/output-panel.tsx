@@ -33,7 +33,7 @@ function normalizeFilePath(raw: string): string | undefined {
 	}
 
 	// Extract project-relative path from full preview URLs
-	// e.g. "https://<encoded>.preview.example.app/src/main.tsx" → "/src/main.tsx"
+	// e.g. "https://<project-id>-<token>.codemaxxing.net/src/main.tsx" → "/src/main.tsx"
 	if (path.startsWith('http://') || path.startsWith('https://')) {
 		try {
 			const url = new URL(path);

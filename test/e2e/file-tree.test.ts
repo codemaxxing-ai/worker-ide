@@ -1,6 +1,5 @@
-import { expect, test } from 'playwright/test';
-
 import { gotoIDE, waitForFileTree } from './helpers';
+import { expect, test } from './test-fixtures';
 
 test.describe('File Tree', () => {
 	test('displays files from the example project', async ({ page }) => {

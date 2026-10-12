@@ -1,8 +1,25 @@
-import type { Page } from 'playwright/test';
+import { hc } from 'hono/client';
 
-const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:3000';
+import { localFetch as fetch } from '../local-https';
+
+import type { ApiRoutes, OrgRoutes } from '../../worker/routes';
+import type { BrowserContext, Page } from 'playwright/test';
+
+const BASE_URL = process.env.TEST_BASE_URL || 'https://localhost:3000';
 let sessionCookie: string | undefined;
 let testOrganizationId: string | undefined;
+const createdProjects = new WeakMap<BrowserContext, Set<string>>();
+
+export async function cleanupProjects(context: BrowserContext): Promise<void> {
+	const projectIds = createdProjects.get(context);
+	if (!projectIds || !sessionCookie || !testOrganizationId) return;
+	const api = hc<OrgRoutes>(`${BASE_URL}/api`, { fetch, headers: { Cookie: sessionCookie } });
+	for (const projectId of projectIds) {
+		const response = await api.org[':orgId'].project[':projectId'].$delete({ param: { orgId: testOrganizationId, projectId } });
+		if (!response.ok && response.status !== 404) throw new Error(`Failed to clean up test project: ${response.status}`);
+	}
+	createdProjects.delete(context);
+}
 
 /**
  * Ensure a test session exists and return the session cookie.
@@ -57,8 +74,7 @@ async function createProject(template = 'request-inspector'): Promise<{ projectI
 		throw new Error(`Failed to create project: ${response.status} ${response.statusText} — ${body}`);
 	}
 
-	const text = await response.text();
-	const data: { projectId: string; url: string } = JSON.parse(text);
+	const data: { projectId: string; url: string } = await response.json();
 	return data;
 }
 
@@ -69,9 +85,13 @@ async function createProject(template = 'request-inspector'): Promise<{ projectI
  * AuthGate passes, then clears localStorage to reset persisted Zustand
  * state (sidebar/terminal visibility, etc.) before the page loads.
  */
-export async function gotoIDE(page: Page, options: { template?: string } = {}): Promise<string> {
+export async function gotoIDE(page: Page, options: { template?: string; files?: Record<string, string> } = {}): Promise<string> {
 	const cookie = await ensureTestSession();
 	const { url, projectId } = await createProject(options.template);
+	const context = page.context();
+	const projectIds = createdProjects.get(context) ?? new Set<string>();
+	projectIds.add(projectId);
+	createdProjects.set(context, projectIds);
 
 	// Inject the session cookie into the browser context
 	const separatorIndex = cookie.indexOf('=');
@@ -82,10 +102,20 @@ export async function gotoIDE(page: Page, options: { template?: string } = {}): 
 		{
 			name: cookieName,
 			value: cookieValue,
-			domain: parsedUrl.hostname,
-			path: '/',
+			url: parsedUrl.origin,
+			secure: true,
+			httpOnly: true,
+			sameSite: 'Lax',
 		},
 	]);
+
+	if (options.files) {
+		const api = hc<ApiRoutes>(`${BASE_URL}/p/${projectId}/api`, { fetch, headers: { Cookie: cookie } });
+		for (const [path, content] of Object.entries(options.files)) {
+			const response = await api.file.$put({ json: { path, content } });
+			if (!response.ok) throw new Error(`Failed to populate ${path}: ${response.status}`);
+		}
+	}
 
 	// Clear localStorage before the app boots to reset persisted UI state
 	await page.addInitScript(() => {
@@ -100,7 +130,13 @@ export async function gotoIDE(page: Page, options: { template?: string } = {}): 
 
 	// Give the project WebSocket a short grace period to connect so follow-up
 	// file-tree and mutation assertions don't race the initial socket setup.
-	await Promise.race([page.getByText('Connected', { exact: true }).waitFor({ timeout: 5000 }), page.waitForTimeout(5000)]);
+	await Promise.race([
+		page
+			.getByText('Connected', { exact: true })
+			.waitFor({ timeout: 5000 })
+			.catch(() => {}),
+		page.waitForTimeout(5000),
+	]);
 
 	return projectId;
 }

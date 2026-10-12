@@ -60,10 +60,11 @@ function lastCodeModeTools(): Record<string, { execute?: unknown }> {
 
 function contextOverrides(overrides?: Parameters<typeof createMockContext>[0]) {
 	return createMockContext({
+		projectId: 'project123',
 		ctx: createMockDurableObjectState(),
 		loader: createLoader(),
 		browser: createBrowserFetcher(),
-		requestOriginContext: { baseDomain: 'example.com', protocol: 'https:' },
+		requestOriginContext: { appOrigin: 'https://example.com', contentOrigin: 'https://content.example.net' },
 		...overrides,
 	});
 }

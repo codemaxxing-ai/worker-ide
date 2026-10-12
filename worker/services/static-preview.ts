@@ -21,13 +21,7 @@ import { parseDependencyErrorsFromMessage } from './dependency-error-parser';
 import { processHTML, toEsbuildTsconfigRaw, transformModule, type FileSystem } from './transform-service';
 import { coordinatorNamespace } from '../lib/durable-object-namespaces';
 import { stripPreviewRequestCredentials } from '../lib/preview-request-headers';
-import {
-	applyAssetSecurityHeaders,
-	applyPreviewResponseMiddlewares,
-	applyPreviewRobotsHeader,
-	PREVIEW_ROBOTS_HEADER_VALUE,
-	previewResponseMiddlewares,
-} from '../lib/preview-response-headers';
+import { finalizePreviewResponse, PREVIEW_ROBOTS_HEADER_VALUE } from '../lib/preview-response-headers';
 import { source as chobitsuInitSource, hash as chobitsuInitHash } from '../lib/preview-scripts/chobitsu-init.js?raw-minified';
 import { source as elementPickerSource, hash as elementPickerHash } from '../lib/preview-scripts/element-picker.js?raw-minified';
 import { source as errorOverlaySource, hash as errorOverlayHash } from '../lib/preview-scripts/error-overlay.js?raw-minified';
@@ -49,28 +43,6 @@ const PREVIEW_API_WORKER_VERSION = 'preview-api-v2';
 const PREVIEW_API_WRAPPER_MODULE = 'worker.js';
 const PREVIEW_API_USER_MODULE = 'user-worker.js';
 const PREVIEW_RUNTIME_ERROR_HEADER = 'X-Worker-Ide-Preview-Runtime-Error';
-
-/**
- * Build the CSP header for preview HTML responses.
- *
- * The preview runs on a separate origin from the IDE, so `frame-ancestors`
- * is set to the IDE origin to prevent embedding by arbitrary sites.
- */
-function buildPreviewCsp(ideOrigin: string): string {
-	return [
-		"script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-		"style-src 'self' 'unsafe-inline'",
-		'img-src * data: blob:',
-		'media-src * data: blob:',
-		'font-src * data:',
-		"connect-src 'self' ws: wss:",
-		"frame-src 'none'",
-		`frame-ancestors ${ideOrigin}`,
-		"object-src 'none'",
-		"form-action 'self'",
-		"base-uri 'self'",
-	].join('; ');
-}
 
 function createPreviewApiWrapperModule(): string {
 	return `export default {
@@ -119,15 +91,6 @@ export class StaticReactPreview {
 		private projectId: string,
 	) {}
 
-	withPreviewRobotsHeader(response: Response): Response {
-		return applyPreviewResponseMiddlewares(response, { ideOrigin: '' }, [applyPreviewRobotsHeader]);
-	}
-	withAssetSecurityHeaders(response: Response, ideOrigin: string): Response {
-		return applyPreviewResponseMiddlewares(response, { ideOrigin }, [applyAssetSecurityHeaders]);
-	}
-	finalizePreviewResponse(response: Response, ideOrigin: string): Response {
-		return applyPreviewResponseMiddlewares(response, { ideOrigin }, previewResponseMiddlewares);
-	}
 	async loadAssetSettings(): Promise<ResolvedAssetSettings> {
 		try {
 			const raw = await fs.readFile(`${this.projectRoot}/wrangler.jsonc`, 'utf8');
@@ -168,19 +131,19 @@ export class StaticReactPreview {
 		const url = new URL(request.url);
 
 		if (this.matchesRunWorkerFirst(url.pathname, assetSettings.run_worker_first)) {
-			return this.finalizePreviewResponse(await this.handlePreviewAPI(request, url.pathname), ideOrigin);
+			return finalizePreviewResponse(await this.handlePreviewAPI(request, url.pathname), { ideOrigin });
 		}
 
 		const assetResponse = await withSpan('static.serveFile', () => this.serveFile(request, ideOrigin, assetSettings));
 		if (assetResponse.status !== 404 || assetSettings.not_found_handling !== 'none') {
-			return this.finalizePreviewResponse(assetResponse, ideOrigin);
+			return finalizePreviewResponse(assetResponse, { ideOrigin });
 		}
 
 		if (!(await this.hasWorkerEntrypoint())) {
-			return this.finalizePreviewResponse(assetResponse, ideOrigin);
+			return finalizePreviewResponse(assetResponse, { ideOrigin });
 		}
 
-		return this.finalizePreviewResponse(await this.handlePreviewAPI(request, url.pathname), ideOrigin);
+		return finalizePreviewResponse(await this.handlePreviewAPI(request, url.pathname), { ideOrigin });
 	}
 	async hasWorkerEntrypoint(): Promise<boolean> {
 		const workerEntrypoints = ['worker/index.ts', 'worker/index.js'];
@@ -500,7 +463,7 @@ export class StaticReactPreview {
 			headers: {
 				'Content-Type': 'text/html',
 				'Cache-Control': 'no-cache',
-				'Content-Security-Policy': buildPreviewCsp(ideOrigin),
+
 				'Referrer-Policy': 'no-referrer',
 				'X-Robots-Tag': PREVIEW_ROBOTS_HEADER_VALUE,
 			},
@@ -551,7 +514,7 @@ export class StaticReactPreview {
 						headers: {
 							'Content-Type': 'text/html',
 							'Cache-Control': 'no-cache',
-							'Content-Security-Policy': buildPreviewCsp(ideOrigin),
+
 							'Referrer-Policy': 'no-referrer',
 							'X-Robots-Tag': PREVIEW_ROBOTS_HEADER_VALUE,
 						},

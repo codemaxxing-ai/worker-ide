@@ -261,7 +261,7 @@ jobs:
         id: playwright-cache
         with:
           path: '~/.cache/ms-playwright'
-          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.PLAYWRIGHT_VERSION }}
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright-version.outputs.PLAYWRIGHT_VERSION }}
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -348,7 +348,7 @@ jobs:
                 echo "Dev server process exited unexpectedly"
                 break
               fi
-              if sudo -E nsenter --target "$COMPUTER_DOCKER_PID" --net --mount --wd="$GITHUB_WORKSPACE" --setuid "$(id -u)" --setgid "$(id -g)" env "PATH=$PATH" curl -sf --max-time 5 http://localhost:3000/api/templates > /dev/null 2>&1; then
+              if sudo -E nsenter --target "$COMPUTER_DOCKER_PID" --net --mount --wd="$GITHUB_WORKSPACE" --setuid "$(id -u)" --setgid "$(id -g)" env "PATH=$PATH" curl --cacert .local-certificates/_cert.pem -sf --max-time 5 https://localhost:3000/api/templates > /dev/null 2>&1; then
                 ready=true
                 break
               fi
@@ -377,7 +377,7 @@ jobs:
       - name: Run integration tests
         run: sudo -E nsenter --target "$COMPUTER_DOCKER_PID" --net --mount --wd="$GITHUB_WORKSPACE" --setuid "$(id -u)" --setgid "$(id -g)" env "PATH=$PATH" bun run test:integration
         env:
-          TEST_BASE_URL: 'http://localhost:3000'
+          TEST_BASE_URL: 'https://localhost:3000'
 
       - name: Show runtime diagnostics
         if: failure()
@@ -429,15 +429,15 @@ jobs:
         id: playwright-cache
         with:
           path: '~/.cache/ms-playwright'
-          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.PLAYWRIGHT_VERSION }}
+          key: playwright-all-browsers-${{ runner.os }}-${{ steps.playwright-version.outputs.PLAYWRIGHT_VERSION }}
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: bunx playwright install --with-deps chromium
+        run: bunx playwright install --with-deps chromium firefox webkit
 
       - name: Install Playwright system dependencies
         if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: bunx playwright install-deps chromium
+        run: bunx playwright install-deps chromium firefox webkit
 
       - name: Enable FUSE
         run: |
@@ -477,6 +477,9 @@ jobs:
       - name: Apply D1 migrations
         run: bun run db:migrate:local
 
+      - name: Build editor for browser tests
+        run: bun run build
+
       - name: Start dev server
         run: |
           for attempt in 1 2 3; do
@@ -491,7 +494,7 @@ jobs:
                 echo "Dev server process exited unexpectedly"
                 break
               fi
-              if sudo -E nsenter --target "$COMPUTER_DOCKER_PID" --net --mount --wd="$GITHUB_WORKSPACE" --setuid "$(id -u)" --setgid "$(id -g)" env "PATH=$PATH" curl -sf --max-time 5 http://localhost:3000/api/templates > /dev/null 2>&1; then
+              if sudo -E nsenter --target "$COMPUTER_DOCKER_PID" --net --mount --wd="$GITHUB_WORKSPACE" --setuid "$(id -u)" --setgid "$(id -g)" env "PATH=$PATH" curl --cacert .local-certificates/_cert.pem -sf --max-time 5 https://localhost:3000/api/templates > /dev/null 2>&1; then
                 ready=true
                 break
               fi

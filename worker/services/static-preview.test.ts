@@ -85,6 +85,7 @@ vi.mock('./bundle-service', () => ({
 }));
 
 import { StaticReactPreview } from './static-preview';
+import { finalizePreviewResponse } from '../lib/preview-response-headers';
 
 function createResponseWithUrl(body: string, url: string, contentType = 'application/javascript'): Response {
 	const response = new Response(body, { headers: { 'Content-Type': contentType } });
@@ -380,7 +381,7 @@ describe('PreviewService external module proxy', () => {
 		expect(await response.text()).toBe('worker response');
 	});
 
-	it('preserves multiple Set-Cookie headers when adding no-index headers', async () => {
+	it('strips generated Set-Cookie headers at the preview boundary', async () => {
 		const previewService = new StaticReactPreview('/project', 'project-1');
 		const headers = new Headers();
 		headers.append('Set-Cookie', 'preview_access=one; Path=/; HttpOnly');
@@ -395,16 +396,15 @@ describe('PreviewService external module proxy', () => {
 		});
 
 		expect(response.headers.get('X-Robots-Tag')).toBe('noindex, nofollow');
-		expect(response.headers.getSetCookie()).toEqual(['preview_access=one; Path=/; HttpOnly', 'preview_metadata=two; Path=/; HttpOnly']);
+		expect(response.headers.getSetCookie()).toEqual([]);
 		expect(await response.text()).toBe('worker response');
 	});
 
 	it('does not rewrap WebSocket upgrade responses when adding no-index headers', () => {
-		const previewService = new StaticReactPreview('/project', 'project-1');
 		const response = new Response(undefined, { headers: { Upgrade: 'websocket' } });
 		Object.defineProperty(response, 'status', { value: 101 });
 
-		const nextResponse = previewService.withPreviewRobotsHeader(response);
+		const nextResponse = finalizePreviewResponse(response, { ideOrigin: 'https://codemaxxing.app' });
 
 		expect(nextResponse).toBe(response);
 		expect(nextResponse.headers.get('X-Robots-Tag')).toBeNull();

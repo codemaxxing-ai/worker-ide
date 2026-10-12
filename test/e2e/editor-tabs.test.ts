@@ -1,6 +1,5 @@
-import { expect, test } from 'playwright/test';
-
 import { gotoIDE, waitForFileTree } from './helpers';
+import { expect, test } from './test-fixtures';
 
 test.describe('Editor Tabs', () => {
 	test('opening a file creates a tab', async ({ page }) => {

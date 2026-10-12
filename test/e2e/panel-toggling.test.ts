@@ -1,6 +1,5 @@
-import { expect, test } from 'playwright/test';
-
 import { gotoIDE } from './helpers';
+import { expect, test } from './test-fixtures';
 
 test.describe('Panel Toggling', () => {
 	test('sidebar with file tree is visible', async ({ page }) => {

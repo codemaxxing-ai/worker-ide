@@ -26,6 +26,9 @@ vi.mock('../../preview-service', () => ({
 // Mock cloudflare:workers env
 vi.mock('cloudflare:workers', () => ({
 	env: {
+		APP_ORIGIN: 'https://codemaxxing.app',
+		CONTENT_ORIGIN: 'https://codemaxxing.net',
+		PREVIEW_SECRET: 'test-secret',
 		AI: {
 			toMarkdown: async (_files: Array<{ name: string; blob: Blob }>) => {
 				return [{ data: '# Converted\n\nHello heading content', format: 'markdown' }];
@@ -76,7 +79,7 @@ describe('preview_fetch', () => {
 	it('routes non-worker-first /api/* paths to serveFile', async () => {
 		mockServeFile.mockResolvedValue(makeResponse('{"users":[]}', { contentType: 'application/json' }));
 
-		const result = await execute({ path: '/api/users' }, createMockSendEvent(), createMockContext());
+		const result = await execute({ path: '/api/users' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
 
 		expect(mockServeFile).toHaveBeenCalledOnce();
 		expect(mockHandlePreviewAPI).not.toHaveBeenCalled();
@@ -87,7 +90,7 @@ describe('preview_fetch', () => {
 	it('routes non-API paths to serveFile', async () => {
 		mockServeFile.mockResolvedValue(makeResponse('<html><body>Hello</body></html>'));
 
-		const result = await execute({ path: '/' }, createMockSendEvent(), createMockContext());
+		const result = await execute({ path: '/' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
 
 		expect(mockServeFile).toHaveBeenCalledOnce();
 		expect(mockHandlePreviewAPI).not.toHaveBeenCalled();
@@ -98,7 +101,7 @@ describe('preview_fetch', () => {
 		mockMatchesRunWorkerFirst.mockReturnValue(true);
 		mockHandlePreviewAPI.mockResolvedValue(makeResponse('Worker response'));
 
-		const result = await execute({ path: '/custom-route' }, createMockSendEvent(), createMockContext());
+		const result = await execute({ path: '/custom-route' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
 
 		expect(mockHandlePreviewAPI).toHaveBeenCalledOnce();
 		expect(mockServeFile).not.toHaveBeenCalled();
@@ -108,7 +111,7 @@ describe('preview_fetch', () => {
 	it('normalizes paths without leading slash', async () => {
 		mockServeFile.mockResolvedValue(makeResponse('OK', { contentType: 'text/plain' }));
 
-		await execute({ path: 'about' }, createMockSendEvent(), createMockContext());
+		await execute({ path: 'about' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
 
 		// The request should have been made with /about
 		const requestArgument = mockServeFile.mock.calls[0][0];
@@ -120,7 +123,7 @@ describe('preview_fetch', () => {
 	it('defaults to GET method', async () => {
 		mockServeFile.mockResolvedValue(makeResponse('OK', { contentType: 'text/plain' }));
 
-		await execute({ path: '/' }, createMockSendEvent(), createMockContext());
+		await execute({ path: '/' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
 
 		const requestArgument = mockServeFile.mock.calls[0][0];
 		expect(requestArgument.method).toBe('GET');
@@ -140,7 +143,7 @@ describe('preview_fetch', () => {
 				headers: '{"Content-Type": "application/json"}',
 			},
 			createMockSendEvent(),
-			createMockContext(),
+			createMockContext({ projectId: 'project123' }),
 		);
 
 		const requestArgument = mockHandlePreviewAPI.mock.calls[0][0];
@@ -152,7 +155,11 @@ describe('preview_fetch', () => {
 		mockMatchesRunWorkerFirst.mockReturnValue(true);
 		mockHandlePreviewAPI.mockResolvedValue(makeResponse('updated', { contentType: 'text/plain' }));
 
-		await execute({ path: '/api/users/1', method: 'PUT', body: '{"name":"Bob"}' }, createMockSendEvent(), createMockContext());
+		await execute(
+			{ path: '/api/users/1', method: 'PUT', body: '{"name":"Bob"}' },
+			createMockSendEvent(),
+			createMockContext({ projectId: 'project123' }),
+		);
 
 		const requestArgument = mockHandlePreviewAPI.mock.calls[0][0];
 		expect(requestArgument.method).toBe('PUT');
@@ -162,7 +169,11 @@ describe('preview_fetch', () => {
 		mockMatchesRunWorkerFirst.mockReturnValue(true);
 		mockHandlePreviewAPI.mockResolvedValue(makeResponse('', { status: 204, statusText: 'No Content' }));
 
-		const result = await execute({ path: '/api/users/1', method: 'DELETE' }, createMockSendEvent(), createMockContext());
+		const result = await execute(
+			{ path: '/api/users/1', method: 'DELETE' },
+			createMockSendEvent(),
+			createMockContext({ projectId: 'project123' }),
+		);
 
 		const requestArgument = mockHandlePreviewAPI.mock.calls[0][0];
 		expect(requestArgument.method).toBe('DELETE');
@@ -170,9 +181,9 @@ describe('preview_fetch', () => {
 	});
 
 	it('rejects body on GET requests', async () => {
-		await expect(execute({ path: '/', method: 'GET', body: 'some body' }, createMockSendEvent(), createMockContext())).rejects.toThrow(
-			'not supported for GET',
-		);
+		await expect(
+			execute({ path: '/', method: 'GET', body: 'some body' }, createMockSendEvent(), createMockContext({ projectId: 'project123' })),
+		).rejects.toThrow('not supported for GET');
 	});
 
 	// ── Headers ──────────────────────────────────────────────────────────
@@ -184,7 +195,7 @@ describe('preview_fetch', () => {
 		await execute(
 			{ path: '/api/data', headers: '{"Authorization": "Bearer abc123", "Accept": "application/json"}' },
 			createMockSendEvent(),
-			createMockContext(),
+			createMockContext({ projectId: 'project123' }),
 		);
 
 		const requestArgument = mockHandlePreviewAPI.mock.calls[0][0];
@@ -193,15 +204,15 @@ describe('preview_fetch', () => {
 	});
 
 	it('rejects invalid headers JSON', async () => {
-		await expect(execute({ path: '/', headers: 'not-json' }, createMockSendEvent(), createMockContext())).rejects.toThrow(
-			'Invalid headers',
-		);
+		await expect(
+			execute({ path: '/', headers: 'not-json' }, createMockSendEvent(), createMockContext({ projectId: 'project123' })),
+		).rejects.toThrow('Invalid headers');
 	});
 
 	it('rejects array headers', async () => {
-		await expect(execute({ path: '/', headers: '["a", "b"]' }, createMockSendEvent(), createMockContext())).rejects.toThrow(
-			'must be a JSON object',
-		);
+		await expect(
+			execute({ path: '/', headers: '["a", "b"]' }, createMockSendEvent(), createMockContext({ projectId: 'project123' })),
+		).rejects.toThrow('must be a JSON object');
 	});
 
 	// ── Format: raw ──────────────────────────────────────────────────────
@@ -210,7 +221,7 @@ describe('preview_fetch', () => {
 		const html = '<html><body><h1>Hello</h1></body></html>';
 		mockServeFile.mockResolvedValue(makeResponse(html));
 
-		const result = await execute({ path: '/' }, createMockSendEvent(), createMockContext());
+		const result = await execute({ path: '/' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
 
 		expect(result.output).toContain(html);
 	});
@@ -221,7 +232,7 @@ describe('preview_fetch', () => {
 		const html = '<html><body><h1>Hello</h1></body></html>';
 		mockServeFile.mockResolvedValue(makeResponse(html));
 
-		const result = await execute({ path: '/', format: 'markdown' }, createMockSendEvent(), createMockContext());
+		const result = await execute({ path: '/', format: 'markdown' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
 
 		expect(result.output).toContain('# Converted');
 		expect(result.output).not.toContain('<html>');
@@ -232,7 +243,11 @@ describe('preview_fetch', () => {
 		mockMatchesRunWorkerFirst.mockReturnValue(true);
 		mockHandlePreviewAPI.mockResolvedValue(makeResponse(json, { contentType: 'application/json' }));
 
-		const result = await execute({ path: '/api/data', format: 'markdown' }, createMockSendEvent(), createMockContext());
+		const result = await execute(
+			{ path: '/api/data', format: 'markdown' },
+			createMockSendEvent(),
+			createMockContext({ projectId: 'project123' }),
+		);
 
 		// Should still contain raw JSON since content-type is not HTML
 		expect(result.output).toContain(json);
@@ -249,7 +264,7 @@ describe('preview_fetch', () => {
 			}),
 		);
 
-		const result = await execute({ path: '/missing' }, createMockSendEvent(), createMockContext());
+		const result = await execute({ path: '/missing' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
 
 		expect(result.output).toContain('404 Not Found');
 		expect(result.output).toContain('content-type: text/plain');
@@ -260,7 +275,7 @@ describe('preview_fetch', () => {
 	it('returns structured metadata', async () => {
 		mockServeFile.mockResolvedValue(makeResponse('OK', { contentType: 'text/plain' }));
 
-		const result = await execute({ path: '/' }, createMockSendEvent(), createMockContext());
+		const result = await execute({ path: '/' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
 
 		expect(result.metadata).toHaveProperty('path', '/');
 		expect(result.metadata).toHaveProperty('method', 'GET');
@@ -274,7 +289,7 @@ describe('preview_fetch', () => {
 		const largeBody = 'x'.repeat(60_000);
 		mockServeFile.mockResolvedValue(makeResponse(largeBody, { contentType: 'text/plain' }));
 
-		const result = await execute({ path: '/' }, createMockSendEvent(), createMockContext());
+		const result = await execute({ path: '/' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
 
 		expect(result.output).toContain('(truncated)');
 		expect(result.metadata).toHaveProperty('truncated', true);
@@ -285,7 +300,7 @@ describe('preview_fetch', () => {
 	it('returns preview errors as results (not thrown)', async () => {
 		mockServeFile.mockRejectedValue(new Error('Bundle failed: syntax error in src/main.tsx'));
 
-		const result = await execute({ path: '/' }, createMockSendEvent(), createMockContext());
+		const result = await execute({ path: '/' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
 
 		expect(result.output).toContain('Request failed');
 		expect(result.output).toContain('Bundle failed');
@@ -296,7 +311,7 @@ describe('preview_fetch', () => {
 	// ── Missing path ─────────────────────────────────────────────────────
 
 	it('throws error when path is empty', async () => {
-		await expect(execute({ path: '' }, createMockSendEvent(), createMockContext())).rejects.toThrow('required');
+		await expect(execute({ path: '' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }))).rejects.toThrow('required');
 	});
 
 	// ── Status events ────────────────────────────────────────────────────
@@ -305,7 +320,7 @@ describe('preview_fetch', () => {
 		mockServeFile.mockResolvedValue(makeResponse('OK', { contentType: 'text/plain' }));
 		const sendEvent = createMockSendEvent();
 
-		await execute({ path: '/' }, sendEvent, createMockContext());
+		await execute({ path: '/' }, sendEvent, createMockContext({ projectId: 'project123' }));
 
 		const statusEvents = sendEvent.calls.filter(([type]) => type === 'status');
 		expect(statusEvents.length).toBeGreaterThanOrEqual(1);
@@ -315,7 +330,7 @@ describe('preview_fetch', () => {
 		mockServeFile.mockResolvedValue(makeResponse('<html><body>Hello</body></html>'));
 		const sendEvent = createMockSendEvent();
 
-		await execute({ path: '/', format: 'markdown' }, sendEvent, createMockContext());
+		await execute({ path: '/', format: 'markdown' }, sendEvent, createMockContext({ projectId: 'project123' }));
 
 		const statusMessages = sendEvent.calls.filter(([type]) => type === 'status').map(([, data]) => data.message);
 		expect(statusMessages.some((message) => typeof message === 'string' && message.includes('markdown'))).toBe(true);

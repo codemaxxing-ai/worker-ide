@@ -1,13 +1,10 @@
 import { createMiddleware } from 'hono/factory';
 
-import { buildAppOrigin, parseHost } from '@shared/domain';
-
 import { createAuth } from './auth';
+import { getDomainConfiguration } from './domain-configuration';
 
 import type { AuthedEnvironment } from '../types';
 export const requireAuth = createMiddleware<AuthedEnvironment>(async (context, next) => {
-	const url = new URL(context.req.url);
-
 	// ---------------------------------------------------------------------------
 	// Dev-only fast path: validate the session token directly via D1.
 	// This avoids better-auth's internal loopback HTTP call which crashes
@@ -36,7 +33,7 @@ export const requireAuth = createMiddleware<AuthedEnvironment>(async (context, n
 	// ---------------------------------------------------------------------------
 	// Production path: use better-auth's full session validation.
 	// ---------------------------------------------------------------------------
-	const baseUrl = buildAppOrigin(parseHost(url.host).baseDomain, url.protocol);
+	const baseUrl = getDomainConfiguration(context.env).appOrigin;
 
 	const auth = createAuth(
 		{

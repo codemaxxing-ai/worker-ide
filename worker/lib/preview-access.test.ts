@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	buildPreviewAccessBootstrapUrl,
@@ -6,7 +6,6 @@ import {
 	buildPreviewRedeemUrl,
 	createPreviewAccessCookieToken,
 	createPreviewAccessGrant,
-	clearPreviewAccessCookie,
 	getRedirectPath,
 	isNavigationRequest,
 	readPreviewAccessCookie,
@@ -15,97 +14,94 @@ import {
 } from './preview-access';
 
 const secret = 'preview-secret';
+const identity = {
+	projectId: 'project123',
+	previewToken: 'abcdef123456',
+	previewOrigin: 'https://project123-abcdef123456.codemaxxing.net',
+	organizationId: 'org-1',
+	userId: 'user-1',
+};
+afterEach(() => vi.restoreAllMocks());
 
-describe('preview access helpers', () => {
-	it('round-trips a preview access grant', async () => {
-		const grant = await createPreviewAccessGrant(
-			{
-				projectId: 'project123',
-				previewToken: 'abcdef123456',
-				organizationId: 'org-1',
-				userId: 'user-1',
-				redirectPath: '/nested/path?query=1',
-			},
-			secret,
-		);
-
-		const payload = await readPreviewAccessGrant(grant, secret);
-		expect(payload).toMatchObject({
-			projectId: 'project123',
-			previewToken: 'abcdef123456',
-			organizationId: 'org-1',
-			userId: 'user-1',
+describe('preview access', () => {
+	it('binds a grant to an exact origin, project and organization and keeps the 60-second lifetime', async () => {
+		const now = Date.now();
+		vi.spyOn(Date, 'now').mockReturnValue(now);
+		const grant = await createPreviewAccessGrant({ ...identity, redirectPath: '/nested/path?query=1' }, secret);
+		expect(await readPreviewAccessGrant(grant, secret)).toEqual({
+			...identity,
 			redirectPath: '/nested/path?query=1',
+			expiresAt: now + 60_000,
 		});
-		expect(payload?.expiresAt).toBeGreaterThan(Date.now());
+		expect(await readPreviewAccessGrant(grant, 'wrong-secret')).toBeUndefined();
+		vi.spyOn(Date, 'now').mockReturnValue(now + 60_000);
+		expect(await readPreviewAccessGrant(grant, secret)).toBeUndefined();
 	});
 
-	it('only accepts preview cookies for the expected project and token', async () => {
-		const cookieToken = await createPreviewAccessCookieToken(
-			{
-				projectId: 'project123',
-				previewToken: 'abcdef123456',
-				organizationId: 'org-1',
-				userId: 'user-1',
-			},
-			secret,
-		);
-		const securePreviewUrl = new URL('https://project123-abcdef123456.preview.example.app/');
-		const headers = new Headers({ Cookie: `__Host-worker-ide-preview-access=${encodeURIComponent(cookieToken)}` });
-
-		await expect(readPreviewAccessCookie(headers, secret, 'project123', 'abcdef123456', securePreviewUrl)).resolves.toMatchObject({
-			projectId: 'project123',
-			previewToken: 'abcdef123456',
-			organizationId: 'org-1',
-			userId: 'user-1',
-		});
-		await expect(readPreviewAccessCookie(headers, secret, 'project123', 'differenttoken', securePreviewUrl)).resolves.toBeUndefined();
+	it('rejects cookies from another project, token, origin, organization or purpose', async () => {
+		const cookie = await createPreviewAccessCookieToken(identity, secret);
+		const headers = new Headers({ Cookie: `__Host-worker-ide-preview-access=${cookie}` });
+		const origin = new URL(identity.previewOrigin);
+		expect(
+			await readPreviewAccessCookie(headers, secret, identity.projectId, identity.previewToken, origin, identity.organizationId),
+		).toMatchObject(identity);
+		for (const [projectId, token, url, organizationId] of [
+			['other', identity.previewToken, identity.previewOrigin, identity.organizationId],
+			[identity.projectId, 'other', identity.previewOrigin, identity.organizationId],
+			[identity.projectId, identity.previewToken, 'https://sibling.codemaxxing.net', identity.organizationId],
+			[identity.projectId, identity.previewToken, identity.previewOrigin, 'other'],
+		]) {
+			expect(await readPreviewAccessCookie(headers, secret, projectId, token, new URL(url), organizationId)).toBeUndefined();
+		}
+		const grant = await createPreviewAccessGrant({ ...identity, redirectPath: '/' }, secret);
+		expect(
+			await readPreviewAccessCookie(
+				new Headers({ Cookie: `__Host-worker-ide-preview-access=${grant}` }),
+				secret,
+				identity.projectId,
+				identity.previewToken,
+				origin,
+				identity.organizationId,
+			),
+		).toBeUndefined();
+		expect(await readPreviewAccessGrant(cookie, secret)).toBeUndefined();
 	});
 
-	it('uses a non-secure host-only cookie for local http previews', async () => {
-		const localPreviewUrl = new URL('http://project123-abcdef123456.preview.localhost:3000/');
-		const serializedCookies = serializePreviewAccessCookie('cookie-token', localPreviewUrl);
-		expect(serializedCookies[0]).toContain('worker-ide-preview-access=cookie-token');
-		expect(serializedCookies[0]).not.toContain('__Host-');
-		expect(serializedCookies[0]).not.toContain('Secure');
-		expect(serializedCookies[0]).toContain('SameSite=Lax');
-		expect(serializedCookies[1]).toContain('worker-ide-preview-access-partitioned=cookie-token');
-		expect(serializedCookies[1]).toContain('Secure');
-		expect(serializedCookies[1]).toContain('SameSite=None');
-		expect(serializedCookies[1]).toContain('Partitioned');
-
-		const clearedCookies = clearPreviewAccessCookie(localPreviewUrl);
-		expect(clearedCookies[0]).toContain('worker-ide-preview-access=');
-		expect(clearedCookies[0]).toContain('Max-Age=0');
-		expect(clearedCookies[1]).toContain('worker-ide-preview-access-partitioned=');
-		expect(clearedCookies[1]).toContain('Partitioned');
+	it('expires cookies after 55 minutes and rejects malformed input', async () => {
+		const now = Date.now();
+		vi.spyOn(Date, 'now').mockReturnValue(now);
+		const cookie = await createPreviewAccessCookieToken(identity, secret);
+		vi.spyOn(Date, 'now').mockReturnValue(now + 55 * 60_000);
+		for (const value of [cookie, '%invalid', 'invalid.signature']) {
+			expect(
+				await readPreviewAccessCookie(
+					new Headers({ Cookie: `__Host-worker-ide-preview-access=${value}` }),
+					secret,
+					identity.projectId,
+					identity.previewToken,
+					new URL(identity.previewOrigin),
+					identity.organizationId,
+				),
+			).toBeUndefined();
+		}
 	});
 
-	it('keeps the secure __Host- cookie on https previews', () => {
-		const securePreviewUrl = new URL('https://project123-abcdef123456.preview.example.app/');
-		const serializedCookies = serializePreviewAccessCookie('cookie-token', securePreviewUrl);
-		expect(serializedCookies).toHaveLength(1);
-		expect(serializedCookies[0]).toContain('__Host-worker-ide-preview-access=cookie-token');
-		expect(serializedCookies[0]).toContain('Secure');
-		expect(serializedCookies[0]).toContain('SameSite=Strict');
+	it('issues one host-only CHIPS cookie', () => {
+		const cookie = serializePreviewAccessCookie('token');
+		expect(cookie).toContain('__Host-worker-ide-preview-access=token');
+		for (const attribute of ['Secure', 'HttpOnly', 'Path=/', 'SameSite=None', 'Partitioned', 'Max-Age=3300'])
+			expect(cookie).toContain(attribute);
+		expect(cookie).not.toContain('Domain=');
 	});
 
-	it('builds bootstrap, login, and redeem URLs', () => {
-		expect(buildPreviewAccessBootstrapUrl('https://example.app', 'project123', 'https://project123.preview.example.app/')).toBe(
-			'https://example.app/p/project123/__preview-auth/bootstrap?returnTo=https%3A%2F%2Fproject123.preview.example.app%2F',
-		);
-		expect(buildPreviewAccessLoginUrl('https://example.app', 'https://example.app/p/project123/__preview-auth/bootstrap')).toBe(
-			'https://example.app/?next=https%3A%2F%2Fexample.app%2Fp%2Fproject123%2F__preview-auth%2Fbootstrap',
-		);
-		expect(buildPreviewRedeemUrl('https://project123.preview.example.app', 'grant-token')).toBe(
-			'https://project123.preview.example.app/__preview_auth?grant=grant-token',
-		);
-	});
-
-	it('detects navigation requests and safe redirect paths', () => {
-		expect(isNavigationRequest(new Request('https://preview.example.app/', { headers: { 'Sec-Fetch-Mode': 'navigate' } }))).toBe(true);
-		expect(isNavigationRequest(new Request('https://preview.example.app/data.json'))).toBe(false);
-		expect(getRedirectPath(new URL('https://preview.example.app/path?query=1'))).toBe('/path?query=1');
-		expect(getRedirectPath(new URL('https://preview.example.app/__preview_auth?grant=test'))).toBe('/');
+	it('reserves authentication paths and builds explicit bootstrap and redemption URLs', () => {
+		const bootstrap = new URL(buildPreviewAccessBootstrapUrl('https://codemaxxing.app', identity.projectId, identity.previewOrigin));
+		expect(bootstrap.pathname).toBe(`/p/${identity.projectId}/__preview-auth/bootstrap`);
+		expect(new URL(buildPreviewAccessLoginUrl('https://codemaxxing.app', bootstrap.href)).searchParams.get('next')).toBe(bootstrap.href);
+		expect(new URL(buildPreviewRedeemUrl(identity.previewOrigin, 'grant')).pathname).toBe('/__preview-auth/redeem');
+		expect(getRedirectPath(new URL('/__preview-auth/check?path=/api', identity.previewOrigin))).toBe('/');
+		expect(getRedirectPath(new URL('/path?query=1', identity.previewOrigin))).toBe('/path?query=1');
+		expect(isNavigationRequest(new Request(identity.previewOrigin, { headers: { 'Sec-Fetch-Dest': 'iframe' } }))).toBe(true);
+		expect(isNavigationRequest(new Request(identity.previewOrigin, { method: 'POST' }))).toBe(false);
 	});
 });

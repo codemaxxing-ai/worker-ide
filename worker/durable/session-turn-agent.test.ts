@@ -36,7 +36,7 @@ describe('session turn lifecycle', () => {
 					mode: 'plan',
 					model,
 					initiatorUserId: 'user-1',
-					requestOriginContext: { baseDomain: 'example.com', protocol: 'https:' },
+					requestOriginContext: { appOrigin: 'https://example.com', contentOrigin: 'https://content.example.net' },
 				},
 				'submission-1',
 			),
@@ -45,7 +45,7 @@ describe('session turn lifecycle', () => {
 			mode: 'plan',
 			model,
 			initiatorUserId: 'user-1',
-			requestOriginContext: { baseDomain: 'example.com', protocol: 'https:' },
+			requestOriginContext: { appOrigin: 'https://example.com', contentOrigin: 'https://content.example.net' },
 		});
 	});
 

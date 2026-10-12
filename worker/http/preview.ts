@@ -2,20 +2,20 @@ import { env } from 'cloudflare:workers';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
-import { buildAppOrigin, parseHost } from '@shared/domain';
-
 import { PROJECT_ROOT } from './project-context';
 import { hasValidWebSocketOrigin } from './security';
 import * as authSchema from '../db/auth-schema';
 import { trackPreviewRequest } from '../lib/analytics';
+import { getDomainConfiguration } from '../lib/domain-configuration';
 import { coordinatorNamespace, filesystemNamespace } from '../lib/durable-object-namespaces';
-import { errorPage } from '../lib/error-page';
+import { errorPage, previewAccessPage } from '../lib/error-page';
 import {
 	buildPreviewAccessBootstrapUrl,
-	clearPreviewAccessCookie,
 	createPreviewAccessCookieToken,
 	isNavigationRequest,
 	PREVIEW_ACCESS_REDEEM_PATH,
+	PREVIEW_ACCESS_CHECK_PATH,
+	PREVIEW_ACCESS_PREFIX,
 	readPreviewAccessCookie,
 	readPreviewAccessGrant,
 	serializePreviewAccessCookie,
@@ -26,60 +26,13 @@ import { runWithProjectStub } from '../lib/project-fs';
 import { toDurableObjectId } from '../lib/project-id';
 
 /**
- * Detect cross-site hotlink requests using Sec-Fetch metadata headers.
- *
- * Blocks requests where `Sec-Fetch-Site` is `cross-site` and
- * `Sec-Fetch-Dest` is NOT a navigation destination. This prevents
- * external pages from hotlinking preview JS, CSS, images, etc. while
- * still allowing:
- *
- * - IDE `<iframe>` navigation (cross-site + dest=iframe → allowed)
- * - Top-level navigation / bookmark (cross-site + dest=document → allowed)
- * - Typed URL / bookmark (Sec-Fetch-Site=none → allowed)
- * - Same-origin requests within the preview (same-origin → allowed)
- * - Non-browser clients that don't send Sec-Fetch headers (allowed,
- *   since these headers are browser-only and cannot be spoofed by JS)
- */
-export function isHotlinkRequest(request: Request): boolean {
-	const fetchSite = request.headers.get('Sec-Fetch-Site');
-	const fetchDestination = request.headers.get('Sec-Fetch-Dest');
-
-	// Only act when the browser explicitly tells us the request is cross-site.
-	// Absence of the header (non-browser clients, older browsers) is allowed.
-	if (fetchSite !== 'cross-site') return false;
-
-	// Cross-site navigations are legitimate. `document` is used for top-level
-	// navigations, `iframe` for <iframe> navigations (the IDE embeds the
-	// preview in an iframe). Everything else (script, style, image, empty,
-	// etc.) is a subresource fetch and treated as hotlinking.
-	return fetchDestination !== 'document' && fetchDestination !== 'iframe';
-}
-
-/**
- * Paths that belong to the IDE's dev infrastructure (Vite, PWA, etc.)
- * rather than user project files. When these are requested on a preview
- * subdomain (due to the browser's service worker, favicon probe, etc.)
- * we delegate to the asset pipeline instead of the preview filesystem.
- */
-const DEV_INFRASTRUCTURE_PREFIXES = ['/@vite/', '/@vite-plugin-', '/@fs/', '/@id/', '/.well-known/', '/workbox-'];
-const DEV_INFRASTRUCTURE_EXACT = new Set(['/@react-refresh', '/dev-sw.js', '/sw.js', '/sw.js.map']);
-
-function isDevelopmentInfrastructurePath(pathname: string): boolean {
-	if (DEV_INFRASTRUCTURE_EXACT.has(pathname)) return true;
-	return DEV_INFRASTRUCTURE_PREFIXES.some((prefix) => pathname.startsWith(prefix));
-}
-
-/**
- * Handle all requests on `<projectId>.preview.<baseDomain>`.
+ * Handle all requests on flat signed project hosts under CONTENT_ORIGIN.
  * The request path maps directly to the user's project filesystem.
  */
 export async function handlePreviewRequest(request: Request, projectId: string, previewToken: string): Promise<Response> {
 	const previewStart = Date.now();
 	const url = new URL(request.url);
 
-	if (isDevelopmentInfrastructurePath(url.pathname)) {
-		return env.ASSETS.fetch(request);
-	}
 	function trackAndReturn(response: Response, visibility = ''): Response {
 		trackPreviewRequest({
 			projectId,
@@ -94,7 +47,7 @@ export async function handlePreviewRequest(request: Request, projectId: string, 
 		return response;
 	}
 
-	const appOrigin = buildAppOrigin(parseHost(url.host).baseDomain, url.protocol);
+	const { appOrigin } = getDomainConfiguration(env);
 
 	const homeUrl = `${appOrigin}/`;
 
@@ -124,6 +77,7 @@ export async function handlePreviewRequest(request: Request, projectId: string, 
 		previewDatabase
 			.select({
 				deletedAt: authSchema.project.deletedAt,
+				organizationDeletedAt: authSchema.organization.deletedAt,
 				projectBannedAt: authSchema.project.bannedAt,
 				orgBannedAt: authSchema.organization.bannedAt,
 				previewVisibility: authSchema.project.previewVisibility,
@@ -158,7 +112,7 @@ export async function handlePreviewRequest(request: Request, projectId: string, 
 		);
 	}
 
-	if (previewProjectRow[0].deletedAt) {
+	if (previewProjectRow[0].deletedAt || previewProjectRow[0].organizationDeletedAt) {
 		return trackAndReturn(
 			errorPage({
 				heading: 'Project deleted',
@@ -183,10 +137,21 @@ export async function handlePreviewRequest(request: Request, projectId: string, 
 	const previewVisibility = previewProjectRow[0].previewVisibility ?? 'public';
 	const previewSecret = import.meta.env.DEV ? env.PREVIEW_SECRET || DEV_PREVIEW_SECRET : env.PREVIEW_SECRET;
 
+	if (url.pathname.startsWith(PREVIEW_ACCESS_PREFIX) && request.method !== 'GET' && request.method !== 'HEAD')
+		return new Response('Method not allowed', { status: 405 });
+
 	if (url.pathname === PREVIEW_ACCESS_REDEEM_PATH) {
 		const grantToken = url.searchParams.get('grant');
 		const grantPayload = grantToken ? await readPreviewAccessGrant(grantToken, previewSecret) : undefined;
-		if (!grantPayload || grantPayload.projectId !== projectId || grantPayload.previewToken !== previewToken) {
+		if (
+			!grantPayload ||
+			grantPayload.projectId !== projectId ||
+			grantPayload.previewToken !== previewToken ||
+			grantPayload.previewOrigin !== url.origin ||
+			grantPayload.organizationId !== previewProjectRow[0].organizationId
+		) {
+			if (request.headers.get('Sec-Fetch-Dest') === 'iframe')
+				return trackAndReturn(previewAccessPage(appOrigin, 'required'), previewVisibility);
 			return trackAndReturn(
 				errorPage({
 					heading: 'Preview access expired',
@@ -202,46 +167,62 @@ export async function handlePreviewRequest(request: Request, projectId: string, 
 			{
 				projectId,
 				previewToken,
+				previewOrigin: url.origin,
 				organizationId: grantPayload.organizationId,
 				userId: grantPayload.userId,
 			},
 			previewSecret,
 		);
 		const headers = new Headers();
-		headers.set('Location', new URL(grantPayload.redirectPath, url.origin).toString());
-		for (const cookie of serializePreviewAccessCookie(cookieToken, url)) {
-			headers.append('Set-Cookie', cookie);
-		}
+		const checkUrl = new URL(PREVIEW_ACCESS_CHECK_PATH, url.origin);
+		checkUrl.searchParams.set('path', grantPayload.redirectPath);
+		headers.set('Location', checkUrl.toString());
+		headers.set('Set-Cookie', serializePreviewAccessCookie(cookieToken));
+		headers.set('Cache-Control', 'no-store');
 		return trackAndReturn(new Response(undefined, { status: 302, headers }), previewVisibility);
 	}
 
+	let accessExpiresAt: number | undefined;
 	// Enforce preview visibility with a preview-only host cookie. The preview host
 	// never receives app session cookies; it only sees its own scoped access grant.
 	if (previewProjectRow[0].previewVisibility === 'private') {
-		const previewAccess = await readPreviewAccessCookie(request.headers, previewSecret, projectId, previewToken, url);
+		const previewAccess = await readPreviewAccessCookie(
+			request.headers,
+			previewSecret,
+			projectId,
+			previewToken,
+			url,
+			previewProjectRow[0].organizationId,
+		);
 		if (!previewAccess) {
+			if (url.pathname === PREVIEW_ACCESS_CHECK_PATH) return trackAndReturn(previewAccessPage(appOrigin, 'blocked'), previewVisibility);
 			if (isNavigationRequest(request)) {
+				if (request.headers.get('Sec-Fetch-Dest') === 'iframe')
+					return trackAndReturn(previewAccessPage(appOrigin, 'required'), previewVisibility);
 				return trackAndReturn(
 					Response.redirect(buildPreviewAccessBootstrapUrl(appOrigin, projectId, url.toString()), 302),
 					previewVisibility,
 				);
 			}
-
-			return trackAndReturn(
-				new Response('Forbidden', {
-					status: 403,
-					headers: (() => {
-						const headers = new Headers({ 'Cache-Control': 'no-cache' });
-						for (const cookie of clearPreviewAccessCookie(url)) {
-							headers.append('Set-Cookie', cookie);
-						}
-						return headers;
-					})(),
-				}),
-				previewVisibility,
-			);
+			return trackAndReturn(new Response('Forbidden', { status: 403, headers: { 'Cache-Control': 'no-store' } }), previewVisibility);
 		}
+		accessExpiresAt = previewAccess.expiresAt;
 	}
+	if (url.pathname === PREVIEW_ACCESS_CHECK_PATH) {
+		let target: URL;
+		try {
+			target = new URL(url.searchParams.get('path') || '/', url.origin);
+		} catch {
+			return new Response('Invalid preview path', { status: 400 });
+		}
+		if (target.origin !== url.origin || target.username || target.password || target.pathname.startsWith(PREVIEW_ACCESS_PREFIX))
+			return new Response('Invalid preview path', { status: 400 });
+		return trackAndReturn(
+			new Response(undefined, { status: 302, headers: { Location: target.toString(), 'Cache-Control': 'no-store' } }),
+			previewVisibility,
+		);
+	}
+	if (url.pathname.startsWith(PREVIEW_ACCESS_PREFIX)) return new Response('Not found', { status: 404 });
 
 	const response = await runWithProjectStub(fsStub, async () => {
 		if (url.pathname === '/__ws' || url.pathname.startsWith('/__ws')) {
@@ -266,5 +247,20 @@ export async function handlePreviewRequest(request: Request, projectId: string, 
 		return previewService.routePreviewRequest(request, appOrigin, assetSettings, previewBootstrap.snapshotHash, previewBootstrap);
 	});
 
+	if (accessExpiresAt !== undefined && response.headers.get('Content-Type')?.includes('text/html')) {
+		const refreshDelay = Math.max(0, accessExpiresAt - Date.now() - 1000);
+		const bootstrapUrl = buildPreviewAccessBootstrapUrl(appOrigin, projectId, url.toString());
+		const script = `<script>setTimeout(function(){if(window.parent!==window){window.parent.postMessage({type:'__preview-access-required'},${JSON.stringify(appOrigin)});}else{window.location.replace(${JSON.stringify(bootstrapUrl)});}},${refreshDelay});</script>`;
+		return trackAndReturn(
+			new HTMLRewriter()
+				.on('head', {
+					element(element) {
+						element.append(script, { html: true });
+					},
+				})
+				.transform(response),
+			previewVisibility,
+		);
+	}
 	return trackAndReturn(response, previewVisibility);
 }

@@ -19,7 +19,7 @@ See [architecture and ownership](docs/architecture.md) for the request path, sta
 - User backend code runs in isolated V8 isolates via Cloudflare's [Dynamic Worker Loader](https://developers.cloudflare.com/workers/runtime-apis/bindings/worker-loader/) API.
 - vinext (App Router) projects use [vinext](https://github.com/cloudflare/vinext) built by an in-worker Vite/esbuild host (no Vite dev server, since workerd forbids code-gen-from-strings). React Server Components render in a Worker Loader isolate; the browser gets module-level HMR with React Fast Refresh and state-preserving RSC + CSS updates. Deploys produce a standalone Worker (bundled server module set + static client assets).
 - AI coding assistant powered by the Cloudflare Agents SDK and Vercel AI SDK. A project-scoped `AgentRunner` coordinates per-session `SessionTurnAgent` Think facets, retained sub-agents, automatic change snapshots, real-time WebSocket state, and a durable Code Mode runtime with configured MCP servers exposed as typed connector namespaces.
-- Private previews use a preview-only host cookie minted through an app-origin bootstrap flow, so app auth cookies never leave the main app origin.
+- Hosted project content runs on signed, isolated `codemaxxing.net` origins; the editor and management API stay on `codemaxxing.app`. Private iframes use a host-only partitioned access cookie. See [hosting security and rollout](docs/content-isolation.md).
 
 ### Shared (`shared/`)
 
@@ -42,7 +42,7 @@ mise exec -- bun install --frozen-lockfile
 Before starting the dev server, configure the required secrets (see below), then:
 
 ```bash
-mise exec -- bun run dev        # Vite dev server + worker at localhost:3000
+mise exec -- bun run dev        # HTTPS editor at https://localhost:3000
 ```
 
 ## Secrets & Environment Variables
@@ -75,7 +75,7 @@ Apply the additive auth migration `worker/migrations/d1-auth/0024_session-authen
 | `test:unit`        | Unit tests (Node env)                                                  |
 | `test:worker`      | Worker tests (workerd env via `@cloudflare/vitest-pool-workers`)       |
 | `test:react`       | React component tests (jsdom env)                                      |
-| `test:e2e`         | End-to-end tests (Playwright, Chromium)                                |
+| `test:e2e`         | Build editor and run Playwright tests in Chromium, Firefox and WebKit  |
 | `test:integration` | Integration tests against a live server (`TEST_BASE_URL`)              |
 | `test:storybook`   | Storybook component tests                                              |
 | `knip`             | Check for unused dependencies and files                                |
@@ -110,6 +110,6 @@ To build the image independently:
 docker build --platform linux/amd64 -f Dockerfile.computer -t worker-ide-computer:0.4.1 .
 ```
 
-Ordinary Worker tests never start Docker. Full `test:worker --run` runs in fresh batches, with the large preview-runtime integrations and D1 fixture suites isolated in separate processes to stay within workerd's heap limit. Targeted Worker runs and watch mode still use Vitest directly. Live integration and E2E suites require the Docker-aware development server; Playwright reuses an existing local server. Plan/todo tools save only their constrained session documents through a typed RPC while source writes remain blocked in Plan/Ask. The container startup trusts Cloudflare's injected gateway CA, including Node/Bun package-manager requests.
+Ordinary Worker tests never start Docker. Full `test:worker --run` runs in fresh batches, with the large preview-runtime integrations and D1 fixture suites isolated in separate processes to stay within workerd's heap limit. Targeted Worker runs and watch mode still use Vitest directly. Live integration and E2E suites require the Docker-aware HTTPS development server; Playwright reuses an existing local server and runs Chromium, Firefox and WebKit. E2E builds the editor and serves those frontend files through a browser fixture that preserves the live Worker's response policy; APIs, authentication and hosted project runtimes remain live. Vite caches local certificates in `.local-certificates/`; accept the local certificate for manual development. Signed previews use `*.content.localhost:3000`. Plan/todo tools save only their constrained session documents through a typed RPC while source writes remain blocked in Plan/Ask. The container startup trusts Cloudflare's injected gateway CA, including Node/Bun package-manager requests.
 
 See [Computer migration validation](docs/computer-migration-validation.md) for the recorded checks and recovery coverage.

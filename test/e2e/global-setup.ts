@@ -1,4 +1,5 @@
-const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:3000';
+import { localFetch as fetch } from '../local-https';
+const BASE_URL = process.env.TEST_BASE_URL || 'https://localhost:3000';
 
 async function cleanupServer(): Promise<void> {
 	try {

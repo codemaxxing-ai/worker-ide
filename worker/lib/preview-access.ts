@@ -2,11 +2,12 @@ import { serialize } from 'hono/utils/cookie';
 
 import { constantTimeEqual } from '@shared/preview-token';
 
-const PREVIEW_ACCESS_COOKIE_NAME = 'worker-ide-preview-access';
-const PARTITIONED_PREVIEW_ACCESS_COOKIE_NAME = 'worker-ide-preview-access-partitioned';
+const PREVIEW_ACCESS_COOKIE_NAME = '__Host-worker-ide-preview-access';
 const PREVIEW_ACCESS_COOKIE_MAX_AGE_SECONDS = 55 * 60;
 const PREVIEW_ACCESS_GRANT_MAX_AGE_SECONDS = 60;
-export const PREVIEW_ACCESS_REDEEM_PATH = '/__preview_auth';
+export const PREVIEW_ACCESS_PREFIX = '/__preview-auth';
+export const PREVIEW_ACCESS_REDEEM_PATH = `${PREVIEW_ACCESS_PREFIX}/redeem`;
+export const PREVIEW_ACCESS_CHECK_PATH = `${PREVIEW_ACCESS_PREFIX}/check`;
 
 interface PreviewAccessEnvelope {
 	payload: string;
@@ -16,6 +17,7 @@ interface PreviewAccessEnvelope {
 export interface PreviewAccessGrantPayload {
 	projectId: string;
 	previewToken: string;
+	previewOrigin: string;
 	organizationId: string;
 	userId: string;
 	redirectPath: string;
@@ -25,6 +27,7 @@ export interface PreviewAccessGrantPayload {
 export interface PreviewAccessCookiePayload {
 	projectId: string;
 	previewToken: string;
+	previewOrigin: string;
 	organizationId: string;
 	userId: string;
 	expiresAt: number;
@@ -71,6 +74,7 @@ function isPreviewAccessGrantPayload(value: unknown): value is PreviewAccessGran
 		isRecord(value) &&
 		typeof value.projectId === 'string' &&
 		typeof value.previewToken === 'string' &&
+		typeof value.previewOrigin === 'string' &&
 		typeof value.organizationId === 'string' &&
 		typeof value.userId === 'string' &&
 		typeof value.redirectPath === 'string' &&
@@ -83,6 +87,7 @@ function isPreviewAccessCookiePayload(value: unknown): value is PreviewAccessCoo
 		isRecord(value) &&
 		typeof value.projectId === 'string' &&
 		typeof value.previewToken === 'string' &&
+		typeof value.previewOrigin === 'string' &&
 		typeof value.organizationId === 'string' &&
 		typeof value.userId === 'string' &&
 		typeof value.expiresAt === 'number'
@@ -138,7 +143,11 @@ function readCookie(headers: Headers, name: string): string | undefined {
 			continue;
 		}
 		const value = rest.join('=');
-		return value.length > 0 ? decodeURIComponent(value) : undefined;
+		try {
+			return value.length > 0 ? decodeURIComponent(value) : undefined;
+		} catch {
+			return undefined;
+		}
 	}
 
 	return undefined;
@@ -146,35 +155,6 @@ function readCookie(headers: Headers, name: string): string | undefined {
 
 function isNotExpired(expiresAt: number): boolean {
 	return Number.isFinite(expiresAt) && expiresAt > Date.now();
-}
-
-function isSecurePreviewOrigin(previewUrl: URL): boolean {
-	return previewUrl.protocol === 'https:';
-}
-
-function isLocalPreviewOrigin(previewUrl: URL): boolean {
-	return previewUrl.hostname === 'localhost' || previewUrl.hostname.endsWith('.localhost');
-}
-
-function getPreviewAccessCookieName(previewUrl: URL): string {
-	return isSecurePreviewOrigin(previewUrl) ? `__Host-${PREVIEW_ACCESS_COOKIE_NAME}` : PREVIEW_ACCESS_COOKIE_NAME;
-}
-
-function getPreviewAccessCookieSameSite(previewUrl: URL): 'Strict' | 'Lax' {
-	return isSecurePreviewOrigin(previewUrl) ? 'Strict' : 'Lax';
-}
-
-function getPartitionedPreviewAccessCookieName(previewUrl: URL): string | undefined {
-	return isLocalPreviewOrigin(previewUrl) ? PARTITIONED_PREVIEW_ACCESS_COOKIE_NAME : undefined;
-}
-
-function getPreviewAccessCookieNames(previewUrl: URL): string[] {
-	const cookieNames = [getPreviewAccessCookieName(previewUrl)];
-	const partitionedCookieName = getPartitionedPreviewAccessCookieName(previewUrl);
-	if (partitionedCookieName) {
-		cookieNames.push(partitionedCookieName);
-	}
-	return cookieNames;
 }
 
 export function buildPreviewAccessBootstrapUrl(appOrigin: string, projectId: string, returnTo: string): string {
@@ -197,7 +177,7 @@ export function buildPreviewRedeemUrl(previewOrigin: string, grantToken: string)
 
 export function getRedirectPath(url: URL): string {
 	const redirectPath = `${url.pathname}${url.search}`;
-	if (redirectPath === PREVIEW_ACCESS_REDEEM_PATH || redirectPath.startsWith(`${PREVIEW_ACCESS_REDEEM_PATH}?`)) {
+	if (url.pathname.startsWith(PREVIEW_ACCESS_PREFIX)) {
 		return '/';
 	}
 	return redirectPath || '/';
@@ -222,60 +202,15 @@ export function isNavigationRequest(request: Request): boolean {
 	return accept.includes('text/html');
 }
 
-export function serializePreviewAccessCookie(token: string, previewUrl: URL): string[] {
-	const cookies = [
-		serialize(getPreviewAccessCookieName(previewUrl), token, {
-			path: '/',
-			httpOnly: true,
-			secure: isSecurePreviewOrigin(previewUrl),
-			sameSite: getPreviewAccessCookieSameSite(previewUrl),
-			maxAge: PREVIEW_ACCESS_COOKIE_MAX_AGE_SECONDS,
-		}),
-	];
-
-	const partitionedCookieName = getPartitionedPreviewAccessCookieName(previewUrl);
-	if (partitionedCookieName) {
-		cookies.push(
-			serialize(partitionedCookieName, token, {
-				path: '/',
-				httpOnly: true,
-				secure: true,
-				sameSite: 'None',
-				partitioned: true,
-				maxAge: PREVIEW_ACCESS_COOKIE_MAX_AGE_SECONDS,
-			}),
-		);
-	}
-
-	return cookies;
-}
-
-export function clearPreviewAccessCookie(previewUrl: URL): string[] {
-	const cookies = [
-		serialize(getPreviewAccessCookieName(previewUrl), '', {
-			path: '/',
-			httpOnly: true,
-			secure: isSecurePreviewOrigin(previewUrl),
-			sameSite: getPreviewAccessCookieSameSite(previewUrl),
-			maxAge: 0,
-		}),
-	];
-
-	const partitionedCookieName = getPartitionedPreviewAccessCookieName(previewUrl);
-	if (partitionedCookieName) {
-		cookies.push(
-			serialize(partitionedCookieName, '', {
-				path: '/',
-				httpOnly: true,
-				secure: true,
-				sameSite: 'None',
-				partitioned: true,
-				maxAge: 0,
-			}),
-		);
-	}
-
-	return cookies;
+export function serializePreviewAccessCookie(token: string): string {
+	return serialize(PREVIEW_ACCESS_COOKIE_NAME, token, {
+		path: '/',
+		httpOnly: true,
+		secure: true,
+		sameSite: 'None',
+		partitioned: true,
+		maxAge: PREVIEW_ACCESS_COOKIE_MAX_AGE_SECONDS,
+	});
 }
 
 export async function createPreviewAccessGrant(payload: Omit<PreviewAccessGrantPayload, 'expiresAt'>, secret: string): Promise<string> {
@@ -317,10 +252,9 @@ export async function readPreviewAccessCookie(
 	expectedProjectId: string,
 	expectedPreviewToken: string,
 	previewUrl: URL,
+	expectedOrganizationId: string,
 ): Promise<PreviewAccessCookiePayload | undefined> {
-	const token = getPreviewAccessCookieNames(previewUrl)
-		.map((name) => readCookie(headers, name))
-		.find((value) => value !== undefined);
+	const token = readCookie(headers, PREVIEW_ACCESS_COOKIE_NAME);
 	if (!token) {
 		return undefined;
 	}
@@ -329,7 +263,12 @@ export async function readPreviewAccessCookie(
 	if (!isPreviewAccessCookiePayload(payload) || !isNotExpired(payload.expiresAt)) {
 		return undefined;
 	}
-	if (payload.projectId !== expectedProjectId || payload.previewToken !== expectedPreviewToken) {
+	if (
+		payload.projectId !== expectedProjectId ||
+		payload.previewToken !== expectedPreviewToken ||
+		payload.previewOrigin !== previewUrl.origin ||
+		payload.organizationId !== expectedOrganizationId
+	) {
 		return undefined;
 	}
 	return payload;

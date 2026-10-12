@@ -1,8 +1,8 @@
+import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import { deleteCookie, getSignedCookie, setSignedCookie } from 'hono/cookie';
 
 import { CLOUDFLARE_OAUTH_CALLBACK_PATH, CLOUDFLARE_OAUTH_STATE_COOKIE, CLOUDFLARE_OAUTH_STATE_TTL_SECONDS } from '@shared/constants';
-import { buildAppOrigin, parseHost } from '@shared/domain';
 import { HttpErrorCode } from '@shared/http-errors';
 
 import {
@@ -20,6 +20,7 @@ import {
 	storeConnection,
 } from '../lib/cloudflare-oauth';
 import { decryptToken } from '../lib/cloudflare-oauth-crypto';
+import { getDomainConfiguration } from '../lib/domain-configuration';
 import { httpError } from '../lib/http-error';
 
 import type { CloudflareOAuthEnvironment } from '../lib/cloudflare-oauth';
@@ -44,9 +45,8 @@ function getOAuthEnvironment(c: { env: Env }): CloudflareOAuthEnvironment {
 	};
 }
 
-function getRedirectUri(requestUrl: string): string {
-	const url = new URL(requestUrl);
-	const appOrigin = buildAppOrigin(parseHost(url.host).baseDomain, url.protocol);
+function getRedirectUri(): string {
+	const appOrigin = getDomainConfiguration(env).appOrigin;
 	return `${appOrigin}${CLOUDFLARE_OAUTH_CALLBACK_PATH}`;
 }
 
@@ -100,7 +100,7 @@ export const cloudflareOAuthRoutes = new Hono<AuthedEnvironment>()
 
 		const authorizationUrl = buildAuthorizationUrl({
 			clientId: environment.CLOUDFLARE_OAUTH_CLIENT_ID,
-			redirectUri: getRedirectUri(c.req.url),
+			redirectUri: getRedirectUri(),
 			state,
 			codeChallenge,
 		});
@@ -151,7 +151,7 @@ export const cloudflareOAuthRoutes = new Hono<AuthedEnvironment>()
 			const tokenResponse = await exchangeCodeForTokens(environment, {
 				code,
 				codeVerifier: statePayload.codeVerifier,
-				redirectUri: getRedirectUri(c.req.url),
+				redirectUri: getRedirectUri(),
 			});
 			const email = await fetchCloudflareEmail(tokenResponse.access_token);
 			await storeConnection(environment, c.get('session').userId, tokenResponse, { email });

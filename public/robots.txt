@@ -6,4 +6,3 @@ Disallow: /p/*/__agent/
 Disallow: /p/*/__ws
 Disallow: /p/*/__ws/
 Disallow: /p/*/__preview-auth/
-Disallow: /__preview_auth

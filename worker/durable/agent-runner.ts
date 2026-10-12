@@ -268,8 +268,8 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 	async onConnect(connection: AgentConnection, context: import('agents').ConnectionContext): Promise<void> {
 		await super.onConnect(connection, context);
 		const userId = context.request?.headers.get('x-worker-ide-user-id');
-		const baseDomain = context.request?.headers.get('x-worker-ide-base-domain');
-		const protocol = context.request?.headers.get('x-worker-ide-protocol');
+		const appOrigin = context.request?.headers.get('x-worker-ide-app-origin');
+		const contentOrigin = context.request?.headers.get('x-worker-ide-content-origin');
 		if (userId) {
 			const identity = await this.loadConnectionIdentity(userId);
 			connection.serializeAttachment(identity);
@@ -278,8 +278,8 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 				[identity.userId]: getParticipantProfile(identity),
 			});
 		}
-		if (baseDomain && protocol) {
-			this.persistRequestOriginContext({ baseDomain, protocol });
+		if (appOrigin && contentOrigin) {
+			this.persistRequestOriginContext({ appOrigin, contentOrigin });
 		}
 		if (this.state.currentSession) {
 			await this.syncStateSessionParticipants(this.state.currentSession.messages);

@@ -1,6 +1,7 @@
-import { expect, test, type Page } from 'playwright/test';
-
 import { gotoIDE, waitForFileTree } from './helpers';
+import { expect, test } from './test-fixtures';
+
+import type { Page } from 'playwright/test';
 
 interface FileResponse {
 	content: string;
