@@ -1,0 +1,21 @@
+test/e2e/built-editor.ts
+  s_04430c0ea26d4d::t_9e93a1942a8b1e 11,13-17
+test/e2e/test-fixtures.ts
+  s_04430c0ea26d4d::t_2b2dc0079866e9 10-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "899deb9c8b14f0b2522c0a26aa5387c69e4d2624",
+  "prompts": {},
+  "sessions": {
+    "s_04430c0ea26d4d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12cbc-51fc-7361-be7f-ebcd04d0ba3d",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
