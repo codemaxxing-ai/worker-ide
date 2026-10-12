@@ -7,8 +7,8 @@ export { expect } from 'playwright/test';
 
 export const test = baseTest.extend<{ builtEditor: void }>({
 	builtEditor: [
-		async ({ context }, runTest) => {
-			await serveBuiltEditor(context);
+		async ({ context, browserName }, runTest) => {
+			await serveBuiltEditor(context, browserName);
 			try {
 				await runTest();
 			} finally {

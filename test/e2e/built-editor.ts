@@ -8,8 +8,13 @@ import type { BrowserContext } from 'playwright/test';
 const frontendDirectory = new URL('../../dist/client/', import.meta.url);
 
 /** Test the shipped editor against the live Worker, including its response policy. */
-export async function serveBuiltEditor(context: BrowserContext): Promise<void> {
+export async function serveBuiltEditor(context: BrowserContext, browserName: string): Promise<void> {
 	const editorOrigin = new URL(process.env.TEST_BASE_URL || 'https://localhost:3000').origin;
+	// Fulfilled documents have no loopback address classification in Chromium.
+	// Permit the local editor to connect to its live Worker over HTTPS and WSS.
+	if (browserName === 'chromium' && new URL(editorOrigin).hostname === 'localhost') {
+		await context.grantPermissions(['local-network-access'], { origin: editorOrigin });
+	}
 	await context.route(`${editorOrigin}/**`, async (route) => {
 		const request = route.request();
 		const url = new URL(request.url());
