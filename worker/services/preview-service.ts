@@ -15,7 +15,7 @@ import { resolveAssetSettings } from '@shared/types';
 import { fs } from '@worker/lib/project-fs';
 
 import { buildDetectionProbe } from '../lib/preview-bootstrap';
-import { applyPreviewResponseMiddlewares, previewResponseMiddlewares } from '../lib/preview-response-headers';
+import { finalizePreviewResponse } from '../lib/preview-response-headers';
 import { withSpan } from '../lib/tracing';
 import { selectRuntime } from './vite-host/runtimes/registry';
 import { serveVinextPreview } from './vite-host/runtimes/vinext-preview';
@@ -66,7 +66,7 @@ export class PreviewService {
 
 				if (runtime.hosting === 'artifact') {
 					if (snapshotHash === undefined) throw new Error('Missing snapshot hash for build runtime');
-					return applyPreviewResponseMiddlewares(
+					return finalizePreviewResponse(
 						await serveVinextPreview({
 							request,
 							projectId: this.projectId,
@@ -76,7 +76,6 @@ export class PreviewService {
 							runtime,
 						}),
 						{ ideOrigin },
-						previewResponseMiddlewares,
 					);
 				}
 

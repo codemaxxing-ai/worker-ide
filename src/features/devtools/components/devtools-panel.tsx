@@ -25,7 +25,7 @@ function notifyDevtoolsOfNavigation(devtoolsWindow: Window, previewWindow: Windo
 		JSON.stringify({
 			method: 'Page.frameNavigated',
 			params: {
-				frame: { id: '1', mimeType: 'text/html', securityOrigin: globalThis.location.origin, url },
+				frame: { id: '1', mimeType: 'text/html', securityOrigin: previewOrigin, url },
 				type: 'Navigation',
 			},
 		}),
@@ -43,6 +43,20 @@ function notifyDevtoolsOfNavigation(devtoolsWindow: Window, previewWindow: Windo
  */
 function postThemeToDevtools(devtoolsWindow: Window | null | undefined, theme: 'light' | 'dark'): void {
 	devtoolsWindow?.postMessage({ type: '__worker-ide-theme', theme }, '*');
+}
+
+function isProtocolMessage(value: unknown): value is string {
+	if (typeof value !== 'string') return false;
+	try {
+		const message: unknown = JSON.parse(value);
+		return (
+			!!message &&
+			typeof message === 'object' &&
+			(('method' in message && typeof message.method === 'string') || ('id' in message && typeof message.id === 'number'))
+		);
+	} catch {
+		return false;
+	}
 }
 
 export function DevelopmentToolsPanel({ previewIframeReference, previewOrigin, className }: DevelopmentToolsPanelProperties) {
@@ -101,7 +115,8 @@ export function DevelopmentToolsPanel({ previewIframeReference, previewOrigin, c
 })();
 
 window.addEventListener('message', function (event) {
-  if (!event.data || event.data.type !== '__worker-ide-theme') return;
+  if (event.source !== window.parent || event.origin !== ${JSON.stringify(globalThis.location.origin)}) return;
+  if (!event.data || event.data.type !== '__worker-ide-theme' || !['light', 'dark'].includes(event.data.theme)) return;
   var theme = event.data.theme === 'dark' ? 'dark' : 'light';
   var meta = document.head.querySelector('meta[name="color-scheme"]');
   if (!meta) {
@@ -134,8 +149,8 @@ window.addEventListener('message', function (event) {
 		const handleMessage = (event: MessageEvent) => {
 			const previewWindow = previewIframeReference.current?.contentWindow;
 			const devtoolsWindow = devtoolsIframeReference.current?.contentWindow;
-			const isFromPreview = event.source === previewWindow;
-			const isFromDevtools = event.source === devtoolsWindow;
+			const isFromPreview = !!previewWindow && !!previewOrigin && event.source === previewWindow && event.origin === previewOrigin;
+			const isFromDevtools = !!devtoolsWindow && event.source === devtoolsWindow && event.origin === 'null';
 
 			// Chobitsu ready — preview (re)loaded and chobitsu initialized.
 			// Send LOADED to trigger the CDP init sequence, and notify the
@@ -149,13 +164,13 @@ window.addEventListener('message', function (event) {
 			}
 
 			// From preview → devtools: only forward raw CDP strings (not object messages)
-			if (isFromPreview && typeof event.data === 'string') {
+			if (isFromPreview && isProtocolMessage(event.data)) {
 				devtoolsWindow?.postMessage(event.data, '*');
 				return;
 			}
 
 			// From devtools → preview: wrap as { event: 'DEV', data }
-			if (isFromDevtools && previewOrigin) {
+			if (isFromDevtools && previewOrigin && isProtocolMessage(event.data)) {
 				previewWindow?.postMessage({ event: 'DEV', data: event.data }, previewOrigin);
 				return;
 			}
@@ -190,6 +205,7 @@ window.addEventListener('message', function (event) {
 				onLoad={handleDevtoolsLoad}
 				className="size-full border-0"
 				sandbox="allow-scripts"
+				referrerPolicy="no-referrer"
 				title="DevTools"
 			/>
 		</div>

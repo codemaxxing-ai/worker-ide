@@ -19,6 +19,7 @@ export function AgentRuntimeProvider({ projectId, children }: { projectId: strin
 	const [imageAttachments, setImageAttachments] = useState<ImageAttachment[]>([]);
 	const rawAgent = useAgent<AgentRunnerClient, AgentState>({
 		agent: 'AgentRunner',
+		protocol: 'wss',
 		// basePath connects to /p/{projectId}/__agent which the worker
 		// entry point forwards to the AgentRunner DO.
 		// Note: partysocket prepends a "/" when building the URL, so basePath

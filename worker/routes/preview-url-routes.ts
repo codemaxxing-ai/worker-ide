@@ -3,11 +3,12 @@ import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
-import { buildPreviewOrigin, getBaseDomain } from '@shared/domain';
+import { buildPreviewOrigin } from '@shared/domain';
 import { HttpErrorCode } from '@shared/http-errors';
 import { generatePreviewToken } from '@shared/preview-token';
 
 import * as schema from '../db/auth-schema';
+import { getDomainConfiguration } from '../lib/domain-configuration';
 import { httpError } from '../lib/http-error';
 import { buildPreviewRedeemUrl, createPreviewAccessGrant } from '../lib/preview-access';
 import { DEV_PREVIEW_SECRET } from '../lib/preview-secret';
@@ -40,11 +41,7 @@ export const previewUrlRoutes = new Hono<AppEnvironment>()
 
 		const token = await generatePreviewToken(projectId, secret);
 
-		const requestUrl = new URL(c.req.url);
-		const baseDomain = getBaseDomain(requestUrl.host);
-		const protocol = requestUrl.protocol;
-
-		const previewOrigin = buildPreviewOrigin(projectId, token, baseDomain, protocol);
+		const previewOrigin = buildPreviewOrigin(projectId, token, getDomainConfiguration(c.env).contentOrigin);
 		const directPreviewUrl = `${previewOrigin}/`;
 
 		const database = drizzle(c.env.DB, { schema });
@@ -64,6 +61,7 @@ export const previewUrlRoutes = new Hono<AppEnvironment>()
 							{
 								projectId,
 								previewToken: token,
+								previewOrigin,
 								organizationId: previewProject.organizationId,
 								userId,
 								redirectPath: '/',

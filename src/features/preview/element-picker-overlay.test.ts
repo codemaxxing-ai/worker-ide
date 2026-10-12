@@ -32,7 +32,9 @@ function overrideProperty(target: object, key: string, descriptor: PropertyDescr
 }
 
 function startPicker() {
-	globalThis.dispatchEvent(new MessageEvent('message', { origin: ideOrigin, data: { type: '__preview-element-picker-start' } }));
+	globalThis.dispatchEvent(
+		new MessageEvent('message', { source: globalThis.parent, origin: ideOrigin, data: { type: '__preview-element-picker-start' } }),
+	);
 }
 
 function movePickerToTarget() {
@@ -147,6 +149,21 @@ describe('element picker overlay', () => {
 		expect(backdropElement.style.opacity).toBe('1');
 		expect(frameElement.style.opacity).toBe('0');
 		expect(labelElement.style.opacity).toBe('0');
+	});
+
+	it('ignores picker commands from other windows, other origins and malformed messages', () => {
+		startPicker();
+		globalThis.dispatchEvent(
+			new MessageEvent('message', { source: globalThis.parent, origin: ideOrigin, data: { type: '__preview-element-picker-cancel' } }),
+		);
+		for (const message of [
+			{ source: globalThis.window, origin: ideOrigin, data: { type: '__preview-element-picker-start' } },
+			{ source: globalThis.parent, origin: 'https://sibling.example', data: { type: '__preview-element-picker-start' } },
+			{ source: globalThis.parent, origin: ideOrigin, data: { type: 123 } },
+		]) {
+			globalThis.dispatchEvent(new MessageEvent<unknown>('message', message));
+		}
+		expect(getBackdropElement().style.opacity).toBe('0');
 	});
 
 	it('matches overflowing element bounds instead of clamping the selection frame', () => {

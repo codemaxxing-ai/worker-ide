@@ -1,6 +1,6 @@
 import { defineConfig, devices } from 'playwright/test';
 
-const testBaseUrl = process.env.TEST_BASE_URL || 'http://localhost:3000';
+const testBaseUrl = process.env.TEST_BASE_URL || 'https://localhost:3000';
 const testPort = new URL(testBaseUrl).port || '3000';
 
 export default defineConfig({
@@ -14,6 +14,7 @@ export default defineConfig({
 	reporter: [['html', { open: 'never' }]],
 	use: {
 		baseURL: testBaseUrl,
+		ignoreHTTPSErrors: new URL(testBaseUrl).hostname === 'localhost',
 		trace: 'on-first-retry',
 		screenshot: 'only-on-failure',
 	},
@@ -22,6 +23,8 @@ export default defineConfig({
 			name: 'chromium',
 			use: { ...devices['Desktop Chrome'] },
 		},
+		{ name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+		{ name: 'webkit', use: { ...devices['Desktop Safari'] } },
 	],
 	webServer: process.env.CI
 		? undefined
@@ -29,6 +32,7 @@ export default defineConfig({
 				command: `bun run db:migrate:local && bun run build:worker-types && bunx vite --port ${testPort} --strictPort`,
 				url: testBaseUrl,
 				reuseExistingServer: true,
+				ignoreHTTPSErrors: new URL(testBaseUrl).hostname === 'localhost',
 				timeout: 120_000,
 			},
 });

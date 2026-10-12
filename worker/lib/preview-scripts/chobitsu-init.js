@@ -19,7 +19,8 @@
 		return;
 	}
 
-	var ideOrigin = (window.__PREVIEW_CONFIG && window.__PREVIEW_CONFIG.ideOrigin) || '*';
+	var ideOrigin = window.__PREVIEW_CONFIG && window.__PREVIEW_CONFIG.ideOrigin;
+	if (typeof ideOrigin !== 'string' || ideOrigin === '*') return;
 	var id = 0;
 
 	var isEmbedded = window.parent !== window;
@@ -199,10 +200,11 @@
 	});
 
 	window.addEventListener('message', function (event) {
+		if (event.source !== window.parent || event.origin !== ideOrigin) return;
 		try {
 			var data = event.data;
 			if (!data || !data.event) return;
-			if (data.event === 'DEV') {
+			if (data.event === 'DEV' && typeof data.data === 'string') {
 				chobitsu.sendRawMessage(data.data);
 			} else if (data.event === 'LOADED') {
 				handleInit();

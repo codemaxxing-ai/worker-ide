@@ -1,7 +1,7 @@
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Check, ClipboardCopy } from 'lucide-react';
 import { motion } from 'motion/react';
-import { Suspense, use, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, use, useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, Outlet, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router';
 
 import { AppDocumentMetadata } from '@/components/app-document-metadata';
@@ -30,7 +30,6 @@ import { checkProjectAccess } from '@/lib/project-access';
 import { selectOptimisticUserName, useStore } from '@/lib/store';
 import { isNetworkError } from '@/lib/utils';
 import { getAuthErrorInfo } from '@shared/auth-errors';
-import { parseHost } from '@shared/domain';
 import { clearProjectDeepLinkSearchParameters, parseProjectDeepLink, type ProjectDeepLinkTarget } from '@shared/project-deep-link';
 import { PROJECT_ID_PATTERN } from '@shared/project-id';
 
@@ -408,8 +407,6 @@ function AppContent({
 	user: UserInfo;
 	activeOrganizationId?: string;
 }) {
-	const hostType = useMemo(() => parseHost(globalThis.location.host).type, []);
-
 	// Sync user preferences from server → store → localStorage
 	useUserPreferences();
 
@@ -417,10 +414,6 @@ function AppContent({
 
 	// Sync editor font CSS variable with user preference
 	useEditorFont();
-
-	if (hostType !== 'app') {
-		return <NotFoundPage />;
-	}
 
 	// 0 orgs — force user to create an org before doing anything else.
 	// Only the /create-org and /p/:projectId routes are accessible.

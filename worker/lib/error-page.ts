@@ -90,9 +90,8 @@ export function errorPage({ title, heading, message, homeUrl, status }: ErrorPag
  *   Shows a full styled card matching the app's error page pattern
  *   (`NotFoundPage` / `ProjectNotFound`) with a "Back to Home" button.
  */
-export function previewExpiredPage({ baseDomain, protocol }: { baseDomain: string; protocol: string }): Response {
-	const appOrigin = `${protocol}//${baseDomain}`;
-	const homeUrl = escapeHtml(`${protocol}//${baseDomain}/`);
+export function previewExpiredPage(appOrigin: string): Response {
+	const homeUrl = escapeHtml(`${appOrigin}/`);
 
 	// Lucide TimerOff icon
 	const timerOffSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6v6l4 2"/><path d="M22 13a10 10 0 1 1-5.16-8.75"/><path d="m2 2 20 20"/></svg>`;
@@ -185,4 +184,17 @@ export function previewExpiredPage({ baseDomain, protocol }: { baseDomain: strin
 		status: 403,
 		headers: { 'Content-Type': 'text/html;charset=UTF-8', 'Referrer-Policy': 'no-referrer' },
 	});
+}
+
+/** Platform-owned page: never render the editor login inside an untrusted frame. */
+export function previewAccessPage(appOrigin: string, reason: 'required' | 'blocked'): Response {
+	const type = reason === 'blocked' ? '__preview-access-blocked' : '__preview-access-required';
+	const targetOrigin = JSON.stringify(appOrigin).replaceAll('<', String.raw`\u003c`);
+	return new Response(
+		`<!doctype html><html><head><meta charset="utf-8"><title>Preview access</title></head><body><p>${reason === 'blocked' ? 'Preview cookies are blocked.' : 'Preview access expired.'}</p><script>if(window.parent!==window)window.parent.postMessage({type:${JSON.stringify(type)}},${targetOrigin});</script></body></html>`,
+		{
+			status: 403,
+			headers: { 'Content-Type': 'text/html;charset=UTF-8', 'Cache-Control': 'no-store' },
+		},
+	);
 }

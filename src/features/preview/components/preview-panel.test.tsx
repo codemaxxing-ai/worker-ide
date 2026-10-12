@@ -1,6 +1,8 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { previewIframeReference } from '@/features/preview/preview-iframe-reference';
 
 import { PreviewPanel } from './preview-panel';
 
@@ -39,11 +41,6 @@ vi.mock('@/lib/store', () => ({
 
 function createIframeReference() {
 	const iframe = document.createElement('iframe');
-	const contentWindow = {} as Window;
-	Object.defineProperty(iframe, 'contentWindow', {
-		configurable: true,
-		value: contentWindow,
-	});
 	return { iframeReference: { current: iframe } };
 }
 
@@ -118,6 +115,16 @@ describe('PreviewPanel', () => {
 		});
 	});
 
+	it('keeps message routing attached to the current iframe after a refresh', async () => {
+		const user = userEvent.setup();
+		renderPreviewPanel();
+		const previousIframe = screen.getByTitle('Project Preview');
+		await user.click(screen.getByRole('button', { name: 'Refresh' }));
+		const currentIframe = screen.getByTitle('Project Preview');
+		expect(currentIframe).not.toBe(previousIframe);
+		expect(previewIframeReference.current).toBe(currentIframe);
+	});
+
 	it('only refreshes when preview-expired comes from the active preview origin', () => {
 		const refreshPreviewUrl = vi.fn(async () => 'https://example.com');
 		const { iframeReference } = createIframeReference();
@@ -150,5 +157,26 @@ describe('PreviewPanel', () => {
 			}),
 		);
 		expect(refreshPreviewUrl).toHaveBeenCalledOnce();
+	});
+	it('bounds authentication refreshes and offers a standalone preview when cookies are rejected', async () => {
+		const refreshPreviewUrl = vi.fn(async () => 'https://example.com');
+		renderPreviewPanel({ refreshPreviewUrl });
+		const iframe = screen.getByTitle('Project Preview');
+		if (!(iframe instanceof HTMLIFrameElement)) throw new Error('Expected preview iframe');
+		const send = (type: string, source = iframe.contentWindow, origin = 'https://example.com') => {
+			void act(() => globalThis.dispatchEvent(new MessageEvent('message', { source, origin, data: { type } })));
+		};
+		send('__preview-access-required', globalThis.window);
+		send('__preview-access-required', iframe.contentWindow, 'https://sibling.example.com');
+		expect(refreshPreviewUrl).not.toHaveBeenCalled();
+		send('__preview-access-required');
+		send('__preview-access-required');
+		expect(refreshPreviewUrl).toHaveBeenCalledOnce();
+		expect(await screen.findByRole('button', { name: 'Open preview' })).toBeVisible();
+		send('__chobitsu-ready');
+		expect(screen.queryByRole('button', { name: 'Open preview' })).not.toBeInTheDocument();
+		send('__preview-access-blocked');
+		expect(screen.getByRole('button', { name: 'Open preview' })).toBeVisible();
+		expect(iframe.getAttribute('referrerpolicy')).toBe('no-referrer');
 	});
 });

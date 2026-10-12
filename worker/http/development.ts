@@ -190,7 +190,7 @@ export function registerDevelopmentTestRoutes(app: Hono<AuthedEnvironment>): voi
 						set: { expiresAt, updatedAt: now },
 					});
 
-				const { sessionToken: sessionCookie } = getCookies({ baseURL: 'http://localhost' });
+				const { sessionToken: sessionCookie } = getCookies({ baseURL: c.env.APP_ORIGIN });
 				c.header('Set-Cookie', serialize(sessionCookie.name, sessionToken, sessionCookie.attributes));
 				return c.json({ userId, organizationId, sessionToken });
 			} catch (error) {

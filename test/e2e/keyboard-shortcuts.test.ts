@@ -1,6 +1,5 @@
-import { expect, test } from 'playwright/test';
-
 import { gotoIDE, waitForFileTree } from './helpers';
+import { expect, test } from './test-fixtures';
 
 test.describe('Keyboard Shortcuts', () => {
 	test('Ctrl+S triggers save (no error when no file is open)', async ({ page }) => {

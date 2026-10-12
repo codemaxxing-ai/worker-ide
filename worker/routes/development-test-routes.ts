@@ -4,8 +4,7 @@ import { zValidator } from '@hono/zod-validator';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-import { parseHost } from '@shared/domain';
-
+import { getDomainConfiguration } from '../lib/domain-configuration';
 import { addFileToSnapshot, initSnapshot } from '../services/agent/snapshot-manager';
 
 import type { FileChange, ModelMessage } from '../services/agent/types';
@@ -73,11 +72,8 @@ export const developmentTestRoutes = new Hono<AppEnvironment>()
 		async (c) => {
 			const input = c.req.valid('json');
 			const project = c.get('fsStub');
-			const url = new URL(c.req.url);
-			await project.registerComputerSession(input.sessionId, 'code', {
-				baseDomain: parseHost(url.host).baseDomain,
-				protocol: url.protocol,
-			});
+
+			await project.registerComputerSession(input.sessionId, 'code', getDomainConfiguration(c.env));
 			using result = await project.computerExec(
 				input.command,
 				{ id: input.id ?? crypto.randomUUID(), backend: input.backend },

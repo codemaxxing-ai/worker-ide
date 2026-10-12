@@ -9,14 +9,21 @@ describe('Computer container gateway', () => {
 	it('blocks private and deployment hosts and forwards public requests with manual redirects', async () => {
 		const identifier = env.DurableObjectFilesystem.idFromName(crypto.randomUUID());
 		await env.DurableObjectFilesystem.get(identifier).registerComputerSession('session', 'code', {
-			baseDomain: 'ide.example.com',
-			protocol: 'https:',
+			appOrigin: 'https://ide.example.com',
+			contentOrigin: 'https://content.example.net',
 		});
 		const context = Object.assign(createExecutionContext(), { props: { projectObjectId: identifier.toString() } });
 		const gateway = new ComputerEgress(context, env);
 		const external = vi.fn(async (_request: Request) => new Response('package', { status: 200 }));
 		vi.stubGlobal('fetch', external);
-		for (const url of ['http://127.0.0.1/', 'http://10.0.0.1/', 'http://localhost/', 'https://ide.example.com/api/']) {
+		for (const url of [
+			'http://127.0.0.1/',
+			'http://10.0.0.1/',
+			'http://localhost/',
+			'https://ide.example.com/api/',
+			'https://content.example.net/',
+			'https://other-project.content.example.net/',
+		]) {
 			const response = await gateway.fetch(new Request(url));
 			expect(response.status).toBe(403);
 		}

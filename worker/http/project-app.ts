@@ -3,11 +3,10 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
-import { buildAppOrigin, parseHost } from '@shared/domain';
-
 import { parseProjectRoute, PROJECT_ROOT } from './project-context';
 import { UNSAFE_METHODS, hasValidAppRequestOrigin, hasValidWebSocketOrigin } from './security';
 import * as authSchema from '../db/auth-schema';
+import { getDomainConfiguration } from '../lib/domain-configuration';
 import { agentRunnerNamespace, coordinatorNamespace, filesystemNamespace } from '../lib/durable-object-namespaces';
 import { runWithProjectStub } from '../lib/project-fs';
 import { toDurableObjectId } from '../lib/project-id';
@@ -27,8 +26,8 @@ projectApp.use('*', async (c, next) => {
 	}
 
 	const { projectId, subPath } = projectRoute;
-	const requestUrl = new URL(c.req.url);
-	const appOrigin = buildAppOrigin(parseHost(requestUrl.host).baseDomain, requestUrl.protocol);
+
+	const appOrigin = getDomainConfiguration(c.env).appOrigin;
 
 	let fsId: DurableObjectId;
 	try {
@@ -144,8 +143,8 @@ projectApp.use('*', async (c, next) => {
 		const agentHeaders = new Headers(c.req.raw.headers);
 		agentHeaders.set('x-partykit-room', `agent:${projectId}`);
 		agentHeaders.set('x-worker-ide-user-id', userId);
-		agentHeaders.set('x-worker-ide-base-domain', parseHost(requestUrl.host).baseDomain);
-		agentHeaders.set('x-worker-ide-protocol', agentUrl.protocol);
+		agentHeaders.set('x-worker-ide-app-origin', appOrigin);
+		agentHeaders.set('x-worker-ide-content-origin', getDomainConfiguration(c.env).contentOrigin);
 		return agentStub.fetch(new Request(agentUrl, { ...c.req.raw, headers: agentHeaders }));
 	}
 

@@ -1,5 +1,6 @@
 (function () {
-	var ideOrigin = (window.__PREVIEW_CONFIG && window.__PREVIEW_CONFIG.ideOrigin) || '*';
+	var ideOrigin = window.__PREVIEW_CONFIG && window.__PREVIEW_CONFIG.ideOrigin;
+	if (typeof ideOrigin !== 'string' || ideOrigin === '*') return;
 	var isEmbedded = window.parent !== window;
 	if (!isEmbedded) {
 		return;
@@ -849,7 +850,7 @@
 	window.addEventListener('resize', renderOverlay);
 
 	window.addEventListener('message', function (event) {
-		if (event.origin !== ideOrigin || !event.data || typeof event.data.type !== 'string') {
+		if (event.source !== window.parent || event.origin !== ideOrigin || !event.data || typeof event.data.type !== 'string') {
 			return;
 		}
 

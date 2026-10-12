@@ -1,6 +1,5 @@
-import { expect, test } from 'playwright/test';
-
 import { gotoIDE } from './helpers';
+import { expect, test } from './test-fixtures';
 
 test.describe('IDE Layout', () => {
 	test('renders the header with project name', async ({ page }) => {

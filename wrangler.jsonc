@@ -26,6 +26,13 @@
 		"default": { "type": "worker", "cache": { "enabled": false } },
 		"BuildArtifact": { "type": "worker", "cache": { "enabled": true } },
 	},
+	"vars": { "APP_ORIGIN": "https://codemaxxing.app", "CONTENT_ORIGIN": "https://codemaxxing.net" },
+	"routes": [
+		{ "pattern": "codemaxxing.app", "custom_domain": true },
+		{ "pattern": "git.codemaxxing.app", "custom_domain": true },
+		{ "pattern": "*.codemaxxing.net/*", "zone_name": "codemaxxing.net" },
+		{ "pattern": "codemaxxing.net/*", "zone_name": "codemaxxing.net" },
+	],
 	"workers_dev": false,
 	"preview_urls": false,
 	"observability": {

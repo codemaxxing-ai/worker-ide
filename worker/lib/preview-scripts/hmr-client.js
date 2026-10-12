@@ -9,7 +9,8 @@
 	if (!config || !config.wsUrl) return;
 
 	var socket = new WebSocket(config.wsUrl);
-	var ideOrigin = config.ideOrigin || '*';
+	var ideOrigin = config.ideOrigin;
+	if (typeof ideOrigin !== 'string' || ideOrigin === '*') return;
 	var version = Number.isFinite(config.bootVersion) ? config.bootVersion : 0;
 
 	var reloadTimer = null;

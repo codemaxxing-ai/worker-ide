@@ -2,7 +2,7 @@
 
 ## Request path
 
-`worker/index.ts` exports the Worker handler and the Durable Object, Workflow, and binding classes named in Wrangler configuration. `worker/http/entrypoint.ts` selects the application or preview host. `worker/http/app.ts` composes application middleware and root routes; `worker/http/project-app.ts` mounts project routes. Keep authentication, origin checks, rate limits, and project filesystem binding in that order when adding routes.
+`worker/index.ts` exports the Worker handler and the Durable Object, Workflow, and binding classes named in Wrangler configuration. `worker/http/entrypoint.ts` classifies exact configured editor/Git origins and signed project origins under the separate content domain. See [hosting boundaries](content-isolation.md). `worker/http/app.ts` composes application middleware and root routes; `worker/http/project-app.ts` mounts project routes. Keep authentication, origin checks, rate limits, and project filesystem binding in that order when adding routes.
 
 Root endpoints are typed in `worker/routes/root-routes.ts`. Project endpoints live in `worker/routes/` and are exposed through Hono RPC. Browser requests use the clients in `src/lib/api/create-client.ts`, with feature request functions in `src/features/*/api/`. Route handlers throw `httpError` for failures, and browser callers use `throwApiError` when status, code, or server messages matter. Preserve existing paths and response shapes when moving handlers.
 

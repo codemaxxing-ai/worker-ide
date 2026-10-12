@@ -1,6 +1,7 @@
-import { buildAppOrigin, parseHost } from '@shared/domain';
+import { env } from 'cloudflare:workers';
 
 import { type ResponseMiddleware } from '../index';
+import { getDomainConfiguration } from '../lib/domain-configuration';
 
 import type { AuthedEnvironment } from '../types';
 import type { MiddlewareHandler } from 'hono';
@@ -24,10 +25,13 @@ function withUpdatedHeaders(response: Response, headers: Record<string, string>)
 	});
 }
 
-function applyAppSecurityHeaders(response: Response): Response {
+function applyAppSecurityHeaders(response: Response, contentOrigin: string): Response {
 	return withUpdatedHeaders(response, {
-		'Content-Security-Policy': "frame-ancestors 'self'",
+		'Content-Security-Policy': `frame-ancestors 'self'; frame-src 'self' blob: https://*.${new URL(contentOrigin).host}`,
 		'X-Frame-Options': 'SAMEORIGIN',
+		'X-Content-Type-Options': 'nosniff',
+		'Origin-Agent-Cluster': '?1',
+		'Permissions-Policy': 'document-domain=()',
 	});
 }
 
@@ -38,11 +42,8 @@ export function applyPreviewRobotsHeader(response: Response): Response {
 }
 
 export async function appSecurityHeadersMiddleware(_request: Request, next: () => Promise<Response>): Promise<Response> {
-	return applyAppSecurityHeaders(await next());
-}
-
-export async function previewRobotsHeadersMiddleware(_request: Request, next: () => Promise<Response>): Promise<Response> {
-	return applyPreviewRobotsHeader(await next());
+	const { contentOrigin } = getDomainConfiguration(env);
+	return applyAppSecurityHeaders(await next(), contentOrigin);
 }
 
 export function composeResponseMiddleware(
@@ -86,8 +87,7 @@ export const requireSameOriginUnsafeMethods: MiddlewareHandler<AuthedEnvironment
 		return;
 	}
 
-	const requestUrl = new URL(c.req.url);
-	const appOrigin = buildAppOrigin(parseHost(requestUrl.host).baseDomain, requestUrl.protocol);
+	const appOrigin = getDomainConfiguration(c.env).appOrigin;
 	if (!hasValidAppRequestOrigin(c.req.raw, appOrigin)) {
 		return c.json({ error: 'Forbidden' }, 403);
 	}

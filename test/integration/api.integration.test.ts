@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { localFetch as fetch } from '../local-https';
 import { authedFetch, BASE_URL, cleanupProjects, createdProjectIds, ensureTestSession, TEST_ORGANIZATION_ID } from './helpers';
 async function createTrackedProject(template = 'request-inspector'): Promise<{ projectId: string; url: string; name: string }> {
 	const response = await authedFetch(`${BASE_URL}/api/new-project`, {

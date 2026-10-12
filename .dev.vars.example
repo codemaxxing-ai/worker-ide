@@ -11,14 +11,14 @@ BETTER_AUTH_SECRET=
 
 # GitHub OAuth App credentials (for social login).
 # Create at: https://github.com/settings/developers → "New OAuth App"
-#   - Homepage URL: http://localhost:3000
-#   - Authorization callback URL: http://localhost:3000/api/auth/callback/github
+#   - Homepage URL: https://localhost:3000
+#   - Authorization callback URL: https://localhost:3000/api/auth/callback/github
 GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
 
 # Google OAuth credentials (for social login).
 # Create at: https://console.cloud.google.com/apis/credentials → "Create OAuth client ID"
-#   - Authorized redirect URI: http://localhost:3000/api/auth/callback/google
+#   - Authorized redirect URI: https://localhost:3000/api/auth/callback/google
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 
@@ -27,7 +27,7 @@ GOOGLE_CLIENT_SECRET=
 # OAuth clients → Create client.
 #   - Grant type: authorization_code; Response type: code
 #   - Token endpoint auth: client_secret_basic
-#   - Redirect URL: http://localhost:3000/api/cloudflare/oauth/callback
+#   - Redirect URL: https://localhost:3000/api/cloudflare/oauth/callback
 #   - Scopes: workers-scripts.write, workers-r2.write, memberships.read, offline_access
 CLOUDFLARE_OAUTH_CLIENT_ID=
 CLOUDFLARE_OAUTH_CLIENT_SECRET=

@@ -39,6 +39,8 @@ export function PreviewPanel({
 	const [isLoading, setIsLoading] = useState(true);
 	const [previewKey, setPreviewKey] = useState(0);
 	const [isPickerActive, setIsPickerActive] = useState(false);
+	const [accessFailed, setAccessFailed] = useState(false);
+	const accessRefreshAttempts = useRef(0);
 	const devtoolsVisible = useStore((state) => state.devtoolsVisible);
 	const toggleDevtools = useStore((state) => state.toggleDevtools);
 	const queuePreviewElementReference = useStore((state) => state.queuePreviewElementReference);
@@ -66,6 +68,8 @@ export function PreviewPanel({
 	}, [deactivatePicker]);
 
 	const handleRefresh = useCallback(async () => {
+		accessRefreshAttempts.current = 0;
+		setAccessFailed(false);
 		deactivatePicker();
 		setIsLoading(true);
 		emitEditorEvent('preview-refresh');
@@ -85,9 +89,9 @@ export function PreviewPanel({
 
 	const handleOpenExternal = useCallback(() => {
 		if (previewUrl) {
-			window.open(previewUrl, '_blank', 'noopener,noreferrer');
+			window.open(previewOrigin ?? previewUrl, '_blank', 'noopener,noreferrer');
 		}
-	}, [previewUrl]);
+	}, [previewOrigin, previewUrl]);
 
 	const handleTogglePicker = useCallback(() => {
 		const didSendMessage = pickerActive ? cancelPreviewElementPicker() : startPreviewElementPicker();
@@ -117,22 +121,30 @@ export function PreviewPanel({
 		};
 	}, [reloadPreview]);
 
-	// Detect token expiry via postMessage from the preview iframe.
-	//
-	// When the HMAC token is invalid the Worker returns a 403 HTML page that
-	// posts `{ type: '__preview-expired' }` to window.parent. We listen here
-	// and silently fetch a fresh signed URL so the iframe reloads automatically.
-	//
-	// This replaces a document.title check, which fails because the 403 page
-	// is served on the (expired) preview subdomain — a different origin from
-	// the IDE app — so cross-origin DOM access is blocked by the browser.
 	useEffect(() => {
 		const handleMessage = (event: MessageEvent) => {
-			if (event.source !== iframeReference.current?.contentWindow) return;
-			if (previewOrigin && event.origin !== previewOrigin) return;
-			if (typeof event.data === 'object' && event.data !== null && event.data.type === '__preview-expired') {
-				void refreshPreviewUrl();
+			const previewWindow = iframeReference.current?.contentWindow;
+			if (!previewWindow || !previewOrigin || event.source !== previewWindow || event.origin !== previewOrigin) return;
+			const message: unknown = event.data;
+			if (!message || typeof message !== 'object' || !('type' in message)) return;
+			if (message.type === '__chobitsu-ready') {
+				accessRefreshAttempts.current = 0;
+				setAccessFailed(false);
+				return;
 			}
+			if (message.type === '__preview-access-blocked') {
+				setAccessFailed(true);
+				setIsLoading(false);
+				return;
+			}
+			if (message.type !== '__preview-expired' && message.type !== '__preview-access-required') return;
+			if (accessRefreshAttempts.current >= 1) {
+				setAccessFailed(true);
+				setIsLoading(false);
+				return;
+			}
+			accessRefreshAttempts.current += 1;
+			void refreshPreviewUrl();
 		};
 
 		globalThis.addEventListener('message', handleMessage);
@@ -146,7 +158,7 @@ export function PreviewPanel({
 			previewIframeReference.current = undefined;
 			previewOriginReference.current = undefined;
 		};
-	}, [iframeReference, previewOrigin]);
+	}, [iframeReference, previewOrigin, previewKey, previewUrl]);
 
 	useEffect(() => {
 		const handleMessage = (event: MessageEvent) => {
@@ -232,7 +244,7 @@ export function PreviewPanel({
 		};
 	}, [iframeReference, pickerActive]);
 
-	const showLoadingOverlay = isLoading || isLoadingUrl;
+	const showLoadingOverlay = !accessFailed && (isLoading || isLoadingUrl);
 
 	return (
 		<div ref={rootReference} className={cn('flex h-full flex-col bg-bg-secondary', className)}>
@@ -302,6 +314,19 @@ export function PreviewPanel({
 			</div>
 
 			<div className="relative flex-1 overflow-hidden">
+				{accessFailed && (
+					<div
+						className="
+							absolute inset-0 z-10 flex flex-col items-center justify-center gap-3
+							bg-bg-secondary
+						"
+					>
+						<p className="text-sm text-text-secondary">Preview access unavailable.</p>
+						<Button id="open-private-preview" onClick={handleOpenExternal}>
+							Open preview
+						</Button>
+					</div>
+				)}
 				{showLoadingOverlay && (
 					<div
 						className="
@@ -324,6 +349,7 @@ export function PreviewPanel({
 						data-preview
 						className={cn('size-full border-0', showLoadingOverlay ? 'invisible' : 'visible')}
 						allow="clipboard-write"
+						referrerPolicy="no-referrer"
 						sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
 						title="Project Preview"
 					/>

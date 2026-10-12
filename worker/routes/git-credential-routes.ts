@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
 
-import { buildGitOrigin, parseHost } from '@shared/domain';
+import { buildGitOrigin } from '@shared/domain';
 import { HttpErrorCode } from '@shared/http-errors';
 
+import { getDomainConfiguration } from '../lib/domain-configuration';
 import { signGitToken } from '../lib/git-token';
 import { httpError } from '../lib/http-error';
 
@@ -13,9 +14,7 @@ const GIT_NAMESPACE = 'ide';
 export const gitCredentialRoutes = new Hono<AppEnvironment>()
 	.get('/git/remote', (c) => {
 		const projectId = c.get('projectId');
-		const url = new URL(c.req.url);
-		const { baseDomain } = parseHost(url.host);
-		const gitOrigin = buildGitOrigin(baseDomain, url.protocol);
+		const gitOrigin = buildGitOrigin(getDomainConfiguration(c.env).appOrigin);
 		const repoId = `${GIT_NAMESPACE}/${projectId}`;
 
 		return c.json({
@@ -33,9 +32,7 @@ export const gitCredentialRoutes = new Hono<AppEnvironment>()
 	 */
 	.post('/git/credentials', async (c) => {
 		const projectId = c.get('projectId');
-		const url = new URL(c.req.url);
-		const { baseDomain } = parseHost(url.host);
-		const gitOrigin = buildGitOrigin(baseDomain, url.protocol);
+		const gitOrigin = buildGitOrigin(getDomainConfiguration(c.env).appOrigin);
 		const repoId = `${GIT_NAMESPACE}/${projectId}`;
 
 		try {

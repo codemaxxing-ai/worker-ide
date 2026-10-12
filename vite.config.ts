@@ -2,10 +2,12 @@ import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { TLSSocket } from 'node:tls';
 import { fileURLToPath } from 'node:url';
 
 import { cloudflare } from '@cloudflare/vite-plugin';
 import tailwindcss from '@tailwindcss/vite';
+import basicSsl from '@vitejs/plugin-basic-ssl';
 import react from '@vitejs/plugin-react';
 import { defineConfig, transformWithEsbuild } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -173,10 +175,24 @@ function justBashWorkerdPlugin(): Plugin {
 	};
 }
 
+/** Cloudflare Vite's upgrade adapter reads forwarded protocol instead of the TLS socket. */
+function httpsWebSocketPlugin(): Plugin {
+	return {
+		name: 'https-websocket',
+		configureServer(server) {
+			server.httpServer?.prependListener('upgrade', (request) => {
+				request.headers['x-forwarded-proto'] = request.socket instanceof TLSSocket && request.socket.encrypted ? 'https' : 'http';
+			});
+		},
+	};
+}
+
 const appManifest: Partial<ManifestOptions> = { ...appManifestMetadata };
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
 	plugins: [
+		httpsWebSocketPlugin(),
+		basicSsl({ domains: ['localhost', 'content.localhost', '*.content.localhost', 'git.localhost'], certDir: '.local-certificates' }),
 		rawMinifiedPlugin(),
 		foucPreventionPlugin(),
 		biomeWasmNoopPlugin(),
@@ -185,6 +201,10 @@ export default defineConfig({
 		react(),
 		cloudflare({
 			configPath: './wrangler.jsonc',
+			config:
+				command === 'serve'
+					? { vars: { APP_ORIGIN: 'https://localhost:3000', CONTENT_ORIGIN: 'https://content.localhost:3000' } }
+					: undefined,
 			auxiliaryWorkers: [
 				{ configPath: './auxiliary/biome/wrangler.jsonc' },
 				{ configPath: './auxiliary/esbuild/wrangler.jsonc' },
@@ -286,8 +306,10 @@ export default defineConfig({
 		},
 	},
 	server: {
+		cors: false,
 		port: 3000,
-		// Allow all localhost subdomains (*.preview.localhost, etc.)
+		host: '0.0.0.0',
+		// Preview hosts use signed flat labels under content.localhost.
 		allowedHosts: ['.localhost'],
 	},
-});
+}));

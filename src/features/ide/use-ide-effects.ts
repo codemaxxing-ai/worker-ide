@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 
 import { getDependencyErrorCount, subscribeDependencyErrors } from '@/features/file-tree/dependency-error-store';
 import { useGitStatusBackgroundLoader } from '@/features/git/index';
+import { isMessageFromPreview } from '@/lib/preview-origin';
 import { useProjectDeepLinkApplier } from '@/lib/project-deep-link';
 import { useStore } from '@/lib/store';
 import { isProjectDeepLinkTarget } from '@shared/project-deep-link';
@@ -42,7 +43,7 @@ export function useIDEEffects({ projectId, previewOrigin, handleSaveReference, c
 	// Listen for canonical deep-link messages from preview surfaces.
 	useEffect(() => {
 		const handleMessage = (event: MessageEvent) => {
-			if (!previewOrigin || event.origin !== previewOrigin) {
+			if (!previewOrigin || !isMessageFromPreview(event)) {
 				return;
 			}
 			if (event.data?.type !== '__deep-link' || !isProjectDeepLinkTarget(event.data.target)) {
@@ -50,19 +51,11 @@ export function useIDEEffects({ projectId, previewOrigin, handleSaveReference, c
 			}
 
 			applyProjectDeepLink(event.data.target);
-			if (typeof event.data.requestId === 'string' && event.source && 'postMessage' in event.source) {
-				event.source.postMessage({ type: '__deep-link-ack', requestId: event.data.requestId }, { targetOrigin: event.origin });
-			}
 		};
 
 		globalThis.addEventListener('message', handleMessage);
 		return () => globalThis.removeEventListener('message', handleMessage);
 	}, [applyProjectDeepLink, previewOrigin]);
-
-	// Set a known window name so full-screen preview can focus this tab via window.open().
-	useEffect(() => {
-		Reflect.set(globalThis, 'name', `worker-ide:${projectId}`);
-	}, [projectId]);
 
 	// Keyboard shortcuts
 	useEffect(() => {

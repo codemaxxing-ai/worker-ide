@@ -9,7 +9,7 @@ import { defineConfig } from 'vitest/config';
  * These tests run against a live server instance (local or remote).
  *
  * Environment Variables:
- * - TEST_BASE_URL: Target server URL (default: http://localhost:3000)
+ * - TEST_BASE_URL: Target server URL (default: https://localhost:3000)
  */
 export default defineConfig(({ mode }) => {
 	const environment = loadEnv(mode, process.cwd(), '');
@@ -27,7 +27,7 @@ export default defineConfig(({ mode }) => {
 			},
 			reporters: ['default'],
 			env: {
-				TEST_BASE_URL: environment.TEST_BASE_URL || 'http://localhost:3000',
+				TEST_BASE_URL: environment.TEST_BASE_URL || 'https://localhost:3000',
 			},
 		},
 		resolve: {

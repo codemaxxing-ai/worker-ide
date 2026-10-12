@@ -26,7 +26,7 @@ describe('sub_agent', () => {
 			toolCallId: 'call-abc',
 			userId: 'user-123',
 			organizationId: 'org-123',
-			requestOriginContext: { baseDomain: 'example.com', protocol: 'https:' },
+			requestOriginContext: { appOrigin: 'https://example.com', contentOrigin: 'https://content.example.net' },
 		});
 		Object.defineProperty(context, 'agentReference', {
 			value: { runAgentTool },
@@ -46,7 +46,7 @@ describe('sub_agent', () => {
 					projectId: 'test-project',
 					organizationId: 'org-123',
 					userId: 'user-123',
-					requestOriginContext: { baseDomain: 'example.com', protocol: 'https:' },
+					requestOriginContext: { appOrigin: 'https://example.com', contentOrigin: 'https://content.example.net' },
 					parentToolCallId: 'call-abc',
 				}),
 			}),

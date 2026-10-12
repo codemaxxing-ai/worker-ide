@@ -10,7 +10,7 @@ export class ComputerEgress extends WorkerEntrypoint<Env, { projectObjectId: str
 			const project = this.env.DurableObjectFilesystem.get(this.env.DurableObjectFilesystem.idFromString(this.ctx.props.projectObjectId));
 			using origin = await project.getComputerRequestOrigin();
 			if (!origin) throw new Error('Register a project request origin before using container networking');
-			const context: RequestOriginContext = { baseDomain: origin.baseDomain, protocol: origin.protocol };
+			const context: RequestOriginContext = { appOrigin: origin.appOrigin, contentOrigin: origin.contentOrigin };
 			assertSafeExternalUrl(new URL(request.url), context);
 			const headers = new Headers(request.headers);
 			for (const name of ['authorization', 'cookie', 'proxy-authorization']) headers.delete(name);

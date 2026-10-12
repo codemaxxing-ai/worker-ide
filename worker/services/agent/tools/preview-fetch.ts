@@ -1,6 +1,11 @@
+import { env } from 'cloudflare:workers';
+
 import { ToolExecutionError } from '@shared/tool-errors';
 
 import { convertHtmlToMarkdown } from './html-to-markdown';
+import { buildAllowedPreviewOrigins } from './network-policy';
+import { getDomainConfiguration } from '../../../lib/domain-configuration';
+import { DEV_PREVIEW_SECRET } from '../../../lib/preview-secret';
 
 import type { SendEventFunction, ToolDefinition, ToolExecutorContext, ToolResult } from '../types';
 
@@ -135,9 +140,19 @@ export async function execute(
 		const previewService = new PreviewService(context.projectRoot, context.projectId);
 		const assetSettings = await previewService.loadAssetSettings();
 
-		// Build a synthetic request URL — the host doesn't matter since PreviewService
-		// only uses the pathname, but we need a valid URL for the Request constructor.
-		const syntheticUrl = new URL(normalizedPath, 'http://localhost');
+		const origins = context.requestOriginContext ?? getDomainConfiguration(env);
+		const secret = import.meta.env.DEV ? env.PREVIEW_SECRET || DEV_PREVIEW_SECRET : env.PREVIEW_SECRET;
+		const [previewOrigin] = await buildAllowedPreviewOrigins(context.projectId, origins, secret);
+		const syntheticUrl = new URL(normalizedPath, previewOrigin);
+		if (
+			syntheticUrl.origin !== previewOrigin ||
+			syntheticUrl.username ||
+			syntheticUrl.password ||
+			syntheticUrl.pathname.startsWith('/__preview-auth')
+		) {
+			throw new ToolExecutionError('NOT_ALLOWED', 'Only this project’s application paths are allowed.');
+		}
+
 		const requestInit: RequestInit = {
 			method,
 			headers: requestHeaders,
@@ -147,7 +162,7 @@ export async function execute(
 		}
 		const request = new Request(syntheticUrl.toString(), requestInit);
 
-		const response = await previewService.routePreviewRequest(request, 'http://localhost', assetSettings);
+		const response = await previewService.routePreviewRequest(request, origins.appOrigin, assetSettings);
 
 		// Read response body
 		const contentType = response.headers.get('content-type') ?? '';

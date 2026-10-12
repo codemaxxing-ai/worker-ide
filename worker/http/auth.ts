@@ -5,10 +5,9 @@ import { Hono } from 'hono';
 import { serialize, serializeSigned } from 'hono/utils/cookie';
 import { z } from 'zod';
 
-import { buildAppOrigin, parseHost } from '@shared/domain';
-
 import * as authSchema from '../db/auth-schema';
 import { createAuth } from '../lib/auth';
+import { getDomainConfiguration } from '../lib/domain-configuration';
 
 import type { AuthedEnvironment } from '../types';
 
@@ -34,8 +33,7 @@ export function registerAuthRoutes(app: Hono<AuthedEnvironment>): void {
 
 		if (!row) return c.redirect('/');
 
-		const url = new URL(c.req.url);
-		const baseUrl = buildAppOrigin(parseHost(url.host).baseDomain, url.protocol);
+		const baseUrl = getDomainConfiguration(c.env).appOrigin;
 		const { sessionToken, sessionData, dontRememberToken } = getCookies({ baseURL: baseUrl, secret: c.env.BETTER_AUTH_SECRET });
 
 		const setSessionCookie = await serializeSigned(sessionToken.name, row.value, c.env.BETTER_AUTH_SECRET, sessionToken.attributes);
@@ -61,8 +59,7 @@ export function registerAuthRoutes(app: Hono<AuthedEnvironment>): void {
 	app.all('/api/auth/admin/*', (c) => c.notFound());
 
 	app.on(['GET', 'POST'], '/api/auth/*', async (c) => {
-		const url = new URL(c.req.url);
-		const baseUrl = buildAppOrigin(parseHost(url.host).baseDomain, url.protocol);
+		const baseUrl = getDomainConfiguration(c.env).appOrigin;
 		const auth = createAuth(
 			{
 				DB: c.env.DB,

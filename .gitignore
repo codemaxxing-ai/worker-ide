@@ -14,9 +14,12 @@ playwright-report
 
 .dev.vars*
 !.dev.vars.example
+.env
 .env.*
 !.env.example
 
 vendor/*.version
 landing/.astro/
 .wrangler-tests.json
+
+.local-certificates/

@@ -1,4 +1,5 @@
-export const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:3000';
+import { localFetch as fetch } from '../local-https';
+export const BASE_URL = process.env.TEST_BASE_URL || 'https://localhost:3000';
 export const TEST_ORGANIZATION_ID = '11111111-1111-4111-8111-111111111111';
 let sessionCookie: string;
 export const createdProjectIds: string[] = [];

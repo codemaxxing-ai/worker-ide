@@ -6,7 +6,7 @@
  * and window.hideErrorOverlay() for the HMR client to call.
  *
  * Clicking the file location sends a canonical project deep-link target
- * to the IDE. When opened full-screen, it opens or focuses the IDE tab
+ * to the IDE. When opened full-screen, it opens the IDE
  * using the same canonical deep-link query format.
  *
  * Reads config from window.__PREVIEW_CONFIG:
@@ -14,7 +14,8 @@
  */
 (function () {
 	var config = window.__PREVIEW_CONFIG || {};
-	var ideOrigin = config.ideOrigin || '*';
+	var ideOrigin = config.ideOrigin;
+	if (typeof ideOrigin !== 'string' || ideOrigin === '*') return;
 	var projectId = config.projectId || null;
 	var lastError = null;
 
@@ -117,44 +118,13 @@
 		return url.toString();
 	}
 
-	function buildDeepLinkRequestId() {
-		return 'deep-link-' + Date.now() + '-' + Math.random().toString(36).slice(2);
-	}
-
 	function openProjectDeepLink(target) {
-		var payload = { type: '__deep-link', target: target };
-
 		if (window.parent !== window) {
-			window.parent.postMessage(payload, ideOrigin);
+			window.parent.postMessage({ type: '__deep-link', target: target }, ideOrigin);
 			return;
 		}
-
 		var deepLinkUrl = buildIdeDeepLinkUrl(target);
-		if (!deepLinkUrl) return;
-
-		var ideWindow = window.open('', 'worker-ide:' + projectId);
-		if (ideWindow) {
-			var requestId = buildDeepLinkRequestId();
-			var acknowledged = false;
-			var handleAck = function (event) {
-				if (event.origin !== ideOrigin) return;
-				if (event.data?.type !== '__deep-link-ack' || event.data.requestId !== requestId) return;
-				acknowledged = true;
-				window.removeEventListener('message', handleAck);
-			};
-			window.addEventListener('message', handleAck);
-			ideWindow.postMessage({ type: '__deep-link', target: target, requestId: requestId }, ideOrigin);
-			ideWindow.focus();
-			window.setTimeout(function () {
-				window.removeEventListener('message', handleAck);
-				if (acknowledged) return;
-				ideWindow.location.href = deepLinkUrl;
-				ideWindow.focus();
-			}, 250);
-			return;
-		}
-
-		window.open(deepLinkUrl, 'worker-ide:' + projectId);
+		if (deepLinkUrl) window.open(deepLinkUrl, '_blank', 'noopener,noreferrer');
 	}
 
 	function getErrorLocation(err) {
