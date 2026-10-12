@@ -527,7 +527,7 @@ jobs:
       - name: Run E2E tests
         id: e2e
         run: |
-          sudo -E nsenter --target "$COMPUTER_DOCKER_PID" --net --mount --wd="$GITHUB_WORKSPACE" --setuid "$(id -u)" --setgid "$(id -g)" env "PATH=$PATH" xvfb-run --auto-servernum -- bunx playwright test --project "${{ matrix.browser }}" --reporter=line,html
+          sudo -E nsenter --target "$COMPUTER_DOCKER_PID" --net --mount --wd="$GITHUB_WORKSPACE" --setuid "$(id -u)" --setgid "$(id -g)" env "PATH=$PATH" xvfb-run --auto-servernum -- bunx playwright test --project "${{ matrix.browser }}" --reporter=line,html --max-failures=1
 
       - name: Show runtime diagnostics
         if: failure()
@@ -553,7 +553,7 @@ jobs:
           name: playwright-e2e-${{ matrix.browser }}
           path: |
             playwright-report/
-            playwright-artifacts/
+            test-results/
           if-no-files-found: error
 
   e2e:
