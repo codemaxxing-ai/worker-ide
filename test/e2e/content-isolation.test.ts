@@ -136,7 +136,10 @@ test('blocks service workers and nested frames while preserving ordinary workers
 		return { serviceWorkerBlocked, ordinaryWorker, nestedFrameBlocked };
 	});
 	expect(workerResults).toEqual({ serviceWorkerBlocked: true, ordinaryWorker: 'worker alive', nestedFrameBlocked: true });
-	if (browserName === 'chromium') await context.grantPermissions(['clipboard-write']);
+	if (browserName === 'chromium') {
+		await context.grantPermissions(['clipboard-write'], { origin: new URL(page.url()).origin });
+		await context.grantPermissions(['clipboard-write'], { origin: new URL(frame.url()).origin });
+	}
 	await page.bringToFront();
 	await frame.getByRole('button', { name: 'Copy', exact: true }).click();
 	await expect(frame.getByRole('button', { name: 'Copied', exact: true })).toBeVisible();
