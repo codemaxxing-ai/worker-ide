@@ -270,15 +270,20 @@ test('preserves DevTools and embedded and standalone error deep links', async ({
 	await standalone.close();
 });
 
-test('rejects framing by an unauthorized site', async ({ page, context }) => {
+test('rejects framing by an unauthorized site', async ({ page, context, browserName }) => {
 	const { frame } = await hostilePreview(page);
 	const attacker = await context.newPage();
 	const origin = new URL(frame.url()).origin;
+	// Reach the live localhost server so this test exercises frame-ancestors.
+	if (browserName === 'chromium') await context.grantPermissions(['local-network-access'], { origin: 'https://attacker.localhost:3000' });
 	await attacker.route('https://attacker.localhost:3000/', (route) =>
 		route.fulfill({ contentType: 'text/html', body: `<!DOCTYPE html><iframe title="Stolen preview" src="${origin}"></iframe>` }),
 	);
-	const framingBlocked = attacker.waitForEvent('console', { predicate: (message) => message.text().includes('frame-ancestors') });
-	const previewRequested = attacker.waitForResponse((response) => response.url() === `${origin}/`);
+	const framingBlocked = attacker.waitForEvent('console', {
+		predicate: (message) => message.text().includes('frame-ancestors'),
+		timeout: 15_000,
+	});
+	const previewRequested = attacker.waitForResponse((response) => response.url() === `${origin}/`, { timeout: 15_000 });
 	await attacker.goto('https://attacker.localhost:3000/');
 	await previewRequested;
 	await framingBlocked;
