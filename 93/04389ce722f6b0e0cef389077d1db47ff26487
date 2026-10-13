@@ -1,0 +1,107 @@
+Dockerfile.computer
+  s_457989c78dafac::t_f16e172a54983c 9-12
+README.md
+  s_457989c78dafac::t_c7960101a82332 17,20,101
+bun.lock
+  s_457989c78dafac::t_b194e3b1cdb344 91
+container/native-runtime.ts
+  s_457989c78dafac::t_7b40ca18ae6206 1-355
+docs/architecture.md
+  s_457989c78dafac::t_4eb1af689eebc2 62-72
+docs/computer-workspace.md
+  s_457989c78dafac::t_5d71e46148c1b1 27-31,35-36
+knip.json
+  s_457989c78dafac::t_3750f950eaf9aa 4,18
+package.json
+  s_457989c78dafac::t_2bcf6ca540aba4 89
+shared/computer.ts
+  s_457989c78dafac::t_14479708655425 7-8
+shared/native-preview.ts
+  s_457989c78dafac::t_4fcaebce194903 1-4
+shared/validation/tools.ts
+  s_457989c78dafac::t_0ddf54e204310e 155
+test/e2e/vinext-preview.test.ts
+  s_457989c78dafac::t_d8c14e3edc1c22 45-46,79
+test/integration/computer.integration.test.ts
+  s_457989c78dafac::t_8a9c921bb39b78 36
+test/integration/content-isolation.integration.test.ts
+  s_457989c78dafac::t_08d8a12089a7c3 84,101
+test/integration/native-build.integration.test.ts
+  s_457989c78dafac::t_3b629abd92cd82 1-60
+tsconfig.scripts.json
+  s_457989c78dafac::t_d629837fc6ee83 18
+vite.config.ts
+  s_457989c78dafac::t_2d9a8a402faaca 185-193
+worker/durable/project-filesystem.ts
+  s_457989c78dafac::t_cdba9d68d3f49f 12-13,17,26-28,119-120,204,213-336,367-369,419-421,425,428-434,448,767,773-775,782-784
+worker/fixtures/vinext/package.json
+  s_457989c78dafac::t_21973d6fdb26d2 17,22
+worker/http/entrypoint.ts
+  s_457989c78dafac::t_8f85a2986bb2c3 36-37,51,56
+worker/http/preview.ts
+  s_457989c78dafac::t_38c2d2f45bcd07 226-227
+worker/lib/computer-backend.test.ts
+  s_457989c78dafac::t_64ebdf0ece0347 1-42
+worker/lib/computer-backend.ts
+  s_457989c78dafac::t_759c3b8003c1cc 1-118
+worker/lib/computer-exec.test.ts
+  s_457989c78dafac::t_ec2f0f0612a0d0 31,79,111,142,232,235
+worker/lib/native-build.test.ts
+  s_457989c78dafac::t_5b240e2fe72148 1-26
+worker/lib/native-build.ts
+  s_457989c78dafac::t_de57602d8c209b 1-32
+worker/lib/native-preview-source.test.ts
+  s_457989c78dafac::t_4621a9923d1657 1-50
+worker/lib/native-preview-source.ts
+  s_457989c78dafac::t_0e0b3ac3ddfb53 1-39
+worker/lib/preview-bootstrap.ts
+  s_457989c78dafac::t_a5333476599cba 20-21,40,62,75,90
+worker/routes/development-test-routes.ts
+  s_457989c78dafac::t_9408291bbe2843 7-8,11,69,109-131
+worker/services/agent/tools/computer-tools.ts
+  s_457989c78dafac::t_fefd3d8f6d095f 63,67-70
+worker/services/preview-service.ts
+  s_457989c78dafac::t_1f02716e603c4f 21,117,120,130
+worker/services/vite-host/runtimes/container-vite.ts
+  s_457989c78dafac::t_e59894fe84d44e 1-61
+worker/services/vite-host/runtimes/registry.test.ts
+  s_457989c78dafac::t_0210c96ac35b68 11-12,25-27
+worker/services/vite-host/runtimes/registry.ts
+  s_457989c78dafac::t_4c3253701c8783 10,21
+worker/services/vite-host/runtimes/runtime-selection.test.ts
+  s_77bd31d60541ee::t_8f747ed421014d 1-27
+worker/services/vite-host/runtimes/runtime-selection.ts
+  s_457989c78dafac::t_4c0865a677f149 1-49
+worker/services/vite-host/runtimes/types.ts
+  s_457989c78dafac::t_26bfde5ad25c9e 92-97
+worker/workflows/deploy-helpers.ts
+  s_457989c78dafac::t_28025bdb7be653 225-226
+worker/workflows/deploy-workflow.ts
+  s_457989c78dafac::t_328526037d5b40 1-2,105-115,118-122,176-227
+wrangler.jsonc
+  s_457989c78dafac::t_5347fe88fb8ac9 142-143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9304389ce722f6b0e0cef389077d1db47ff26487",
+  "prompts": {},
+  "sessions": {
+    "s_457989c78dafac": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12c91-7af0-7ef0-bcfd-17269d020b36",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    },
+    "s_77bd31d60541ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13711-9298-7c31-bdfd-6f8d646319b7",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
