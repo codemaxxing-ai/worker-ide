@@ -1,21 +1,37 @@
-# Strict Knip audit
+# Knip audit guidance
 
-Run `bun run knip:audit` to list unused exports, exported types, and duplicate exports. This uses `knip-audit.json` and reports warnings; it does not change the passing `bun run knip` gate or CI. The compact report is the source of truth for the exact symbols in each file.
+## Gate and strict audit
 
-The September 2026 audit began with 36 files containing unused value exports, 137 containing unused exported types, and 2 containing duplicate exports. After review, the report has 31, 131, and 2 respectively. These counts are **files**, not individual symbols.
+```bash
+mise exec -- bun run knip
+mise exec -- bun run knip:audit
+```
 
-Confirmed dead internals were removed: the pending-change record converter, unused UI-message adapter, unused AI analytics writer, unused event constructors and tool reexport, and local-only lifecycle and analytics type exports. None were called from the repository's static graph, dynamic module registry, or public route surface.
+The regular gate uses [knip.json](../knip.json) to check unused files and dependencies. Export, type, namespace, enum-member, and duplicate-export rules are disabled there.
 
-The remaining findings are classified below. An export in these groups is retained for compatibility, a module contract, or a runtime loader; a warning alone is not grounds for deletion.
+The strict audit uses [knip-audit.json](../knip-audit.json) to enable those rules as warnings and include exports used only within their own file. It is a non-gating review tool. Use the current compact report for exact findings rather than maintaining counts in documentation.
 
-| Findings in the compact report                                                                                                                                            | Disposition                                                                                                                                                                                                                                                                                                        |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `shared/**` values and types, including the `shared/types.ts` and `shared/validation.ts` barrels                                                                          | Preserve cross-layer and compatibility contracts. These exports include barrel aliases and schemas shared with typed routes, tools, and client code; Knip's unused finding alone does not establish that removing an export is safe for compatibility. Review removals with their consumers.                       |
-| `src/lib/api-client.ts`, `src/features/**/api/**`, and `src/features/**/index.ts`                                                                                         | Preserve the frontend compatibility barrel and feature API/type surfaces introduced by the refactor.                                                                                                                                                                                                               |
-| Other `src/**` findings                                                                                                                                                   | Retain exported component properties, hook results, and feature module types. These are declaration-only surfaces with no runtime cost; tightening them can happen alongside a change to the owning component or feature.                                                                                          |
-| `worker/db/auth-schema.ts`, `worker/routes/**`, and `worker/workflows/**`                                                                                                 | Preserve Drizzle schema exports, Hono route types, and workflow payload contracts. They are consumed by tooling or form typed service boundaries.                                                                                                                                                                  |
-| `worker/services/vite-host/**` and `worker/fixtures/vinext/**`                                                                                                            | Preserve loader and shim exports. Vite/vinext resolve several of these by module name or reflect over their named and default exports, which Knip cannot trace. The two duplicate-export findings are the intentional named/default forms of `statSync`/`lstatSync` and `transformWithOxc`/`transformWithEsbuild`. |
-| `worker/services/agent/context-pruner.ts`, `worker/services/agent/event-helpers.ts`, `worker/services/agent/tools/**`, and other `worker/services/agent/**` type findings | Retain algorithm and tool module contracts that may be invoked through registries or need a dedicated behavior review. The clearly unreferenced event helpers were removed; remaining context-pruning functions were left intact because this pass did not establish behavioral equivalence for their removal.     |
-| Remaining `worker/durable/**`, `worker/lib/**`, and `worker/services/**` findings                                                                                         | Retain exported implementation types and test support where a module boundary exists. Local-only declarations identified during this pass were made private. Revisit the rest with the owning module rather than broad deletion.                                                                                   |
+This split preserves a useful CI gate while letting maintainers investigate exports that static analysis cannot prove safe to remove. A warning is evidence to inspect a boundary, not permission to delete its contract.
 
-When updating an affected module, check its strict findings against direct imports, dynamic loaders, API consumers, and tests. Remove a symbol only when those checks establish it is internal and unused. Update this record if a whole finding group changes purpose.
+## Evaluating a finding
+
+1. Check direct imports, reexports, tests, and consumers of the owning API or feature.
+2. Check dynamic registries, module-name resolution, named/default export reflection, and tooling entrypoints. Knip may not trace these consumers.
+3. Determine whether the symbol is an internal declaration, a compatibility entrypoint, or a runtime contract. Make local-only declarations private; remove them when unused. Preserve contracts unless their consumers are updated together.
+4. Run the affected tests, typecheck, and regular Knip gate. Review the strict report again for unintended changes to the module surface.
+
+Avoid broad deletion or new ignore rules just to suppress warnings. Change an ignore or entrypoint only when it describes a real loader or tooling boundary.
+
+## Contracts requiring additional review
+
+| Surface                                                                    | Why it may remain exported                                                                                                                                                              |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shared/**`, including `shared/types.ts` and `shared/validation.ts`        | Cross-layer types, schemas, and compatibility barrels connect frontend, routes, and tools. Review removals with their consumers.                                                        |
+| `src/lib/api-client.ts`, feature API modules, and feature `index.ts` files | Compatibility barrels and feature boundaries expose request functions and types. Update callers together when narrowing these surfaces.                                                 |
+| Component properties, hook results, and feature types                      | Exported types describe module interfaces. Review them with the owning component or hook rather than deleting them solely for having no runtime cost.                                   |
+| `worker/db/auth-schema.ts`, routes, and Workflows                          | Drizzle tooling, Hono RPC inference, and Workflow payloads consume these declarations as service boundaries.                                                                            |
+| `worker/services/vite-host/**` and `worker/fixtures/vinext/**`             | Vite/vinext loaders resolve modules by name and inspect exports. Named/default pairs such as `statSync`/`lstatSync` and `transformWithOxc`/`transformWithEsbuild` serve shim contracts. |
+| Agent tool modules and registries                                          | Tools and algorithm helpers may have dynamic consumers. Confirm registration and behavior before removal.                                                                               |
+| Durable Object, library, and service interfaces                            | Exported implementation types or test support may form an intentional module boundary. Keep that boundary explicit or update its consumers in the same change.                          |
+
+These are review considerations, not blanket exemptions. A symbol in one of these groups can still be removed when it is demonstrably internal and unused.

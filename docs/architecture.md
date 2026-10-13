@@ -1,31 +1,81 @@
 # Architecture and ownership
 
-## Request path
+## Request routing and isolation
 
-`worker/index.ts` exports the Worker handler and the Durable Object, Workflow, and binding classes named in Wrangler configuration. `worker/http/entrypoint.ts` classifies exact configured editor/Git origins and signed project origins under the separate content domain. See [hosting boundaries](content-isolation.md). `worker/http/app.ts` composes application middleware and root routes; `worker/http/project-app.ts` mounts project routes. Keep authentication, origin checks, rate limits, and project filesystem binding in that order when adding routes.
+[worker/index.ts](../worker/index.ts) exports the Worker handler and the Durable Object, Workflow, and binding classes named in Wrangler configuration. [The HTTP entrypoint](../worker/http/entrypoint.ts) classifies exact configured editor/Git origins and signed project origins under the separate content domain; see [hosting boundaries](content-isolation.md). [app.ts](../worker/http/app.ts) composes application middleware and root routes; [project-app.ts](../worker/http/project-app.ts) mounts project routes once so Hono compiles the route tree at startup.
 
-Root endpoints are typed in `worker/routes/root-routes.ts`. Project endpoints live in `worker/routes/` and are exposed through Hono RPC. Browser requests use the clients in `src/lib/api/create-client.ts`, with feature request functions in `src/features/*/api/`. Route handlers throw `httpError` for failures, and browser callers use `throwApiError` when status, code, or server messages matter. Preserve existing paths and response shapes when moving handlers.
+Preserve middleware ordering when adding endpoints. Unsafe application API methods pass same-origin checks before protected-route authentication; analytics runs after authentication, followed by rate limits. Project middleware checks project existence and membership before binding the filesystem. Agent and coordinator WebSocket paths also validate their origins.
 
-`src/` may import Worker route types for Hono RPC but must not import Worker runtime values. `worker/` and `shared/` must not import browser modules. ESLint enforces these alias boundaries for application code. Project creation and cloning are coordinated by `worker/services/projects/`; the root handlers retain request validation and response shaping.
+Hosted project content uses signed origins under `CONTENT_ORIGIN`, separate from the editor's `APP_ORIGIN`. Private iframes use a host-only partitioned preview cookie minted through the editor bootstrap flow. Keep app auth cookies on the application origin. Project backend code executes in Worker Loader isolates, separately from the host Worker's bindings and privileged services.
 
-## State and storage
+## Typed API pattern
 
-React Query owns fetched resources such as the file list. The Cloudflare Agents SDK owns synchronized agent sessions and the authoritative review queue. The Zustand store in `src/lib/store.ts` composes feature slices for local UI and editor state. Review changes copied into Zustand are an editor projection of agent state. Project-specific browser persistence lives in `src/lib/project-storage.ts` and `src/lib/editor-session.ts`; the IDE lifecycle hooks in `src/features/ide/` restore it.
+Root endpoints are defined in [root-routes.ts](../worker/routes/root-routes.ts). Project endpoints live in [worker/routes/](../worker/routes/) and expose their success schemas through Hono RPC. Project creation and cloning are coordinated by [worker/services/projects/](../worker/services/projects/); route handlers retain request validation and response shaping.
 
-The agent panel in `src/features/agent/components/agent-panel/` coordinates submission and session state. Its session header owns rename and delete confirmation state, composer controls render recording and send actions, and the attachment strip renders pending image uploads. Keep transient UI state in those components and RPC orchestration in the panel and session hook.
+Browser callers use `createApiClient(projectId)` from [api-client.ts](../src/lib/api-client.ts). Root, user, organization, transfer, and Cloudflare OAuth requests use the corresponding client factories in that module. Feature request functions belong in `src/features/<feature>/api/`.
 
-Each project has one durable `@cloudflare/computer` 0.4.1 SQLite workspace, owned by the existing `DurableObjectFilesystem`. The working tree, `.git`, and `.agent` live under `/workspace`; adapters preserve root-relative RPC paths and application `/project` paths. Worker services access it through the request-bound `fs` proxy in `worker/lib/project-fs.ts`. Git operations run in the filesystem Durable Object through `worker/durable/git-service.ts`. All 85 existing production workspaces migrated and passed verification on October 11, 2026, followed by a read-only verification of the refreshed inventory. The runtime uses only Computer; new projects initialize its root directly. Existing projects missing a verified Computer marker report a recovery error. Frozen legacy SQLite/R2 content and historical snapshot/review readers remain intact; there is no legacy read or write fallback. The shell SDK's state helper uses the Computer-backed workspace client.
+```ts
+import { createApiClient } from '@/lib/api-client';
+import { throwApiError } from '@/lib/api-error';
 
-Agent, editor, Git, review, and lifecycle mutations share a durable FIFO queue. Executions retain ownership until synchronization and session change attribution finish. Durable execution IDs and baseline records allow surviving commands to be reattached without replaying uncertain outcomes. Runtime filesystem facets carry the original queue ownership. The isolate shell has no direct networking and a 30-second deadline. Native commands use the project's lazy Linux container, with gateway-controlled public HTTP(S), a five-minute deadline, and a two-minute idle timeout. Code Mode retains its full `state.*` surface, and Plan/Ask source mutations are also blocked at the RPC boundary.
+const api = createApiClient(projectId);
+const response = await api.git.status.$get({});
+if (!response.ok) {
+  await throwApiError(response, 'Failed to get git status');
+}
+const status = await response.json();
+```
 
-`ProjectCoordinatorV2` handles project WebSocket coordination; `AgentRunner` owns agent sessions and review state. Its `AgentTurnCoordinator` handles per-session turn transitions behind the existing `AgentRunner` RPC methods. Keep Durable Object export names, RPC method names, storage keys, and migrations stable across refactors.
+Application API calls must use these clients. Use `response.json()` directly on success. `throwApiError` validates untyped error payloads when status, error codes, or server messages matter; a plain fallback `Error` is sufficient otherwise.
 
-`worker/services/static-preview/` owns external module proxying and source-map error mapping for the SPA preview. `worker/services/agent/review-queue-model.ts` owns persisted review-record validation and reconciliation; `review-queue.ts` coordinates the database and workspace. `worker/durable/agent-runner-input.ts` validates submitted message parts before the agent loop, while `agent-runner-presence.ts` shapes participant identities.
+Route failures use `throw httpError(code, message, optionalStatus)` from [http-error.ts](../worker/lib/http-error.ts). Returning `c.json({ error: ... }, status)` from a typed route adds an error union to Hono's inferred schema, which breaks clean success types in callers. SDK-owned auth, development adapters, and routing middleware retain their separate response contracts.
 
-Shared types and validation are grouped by domain in `shared/types/` and `shared/validation/`. The original `shared/types.ts` and `shared/validation.ts` remain compatibility entrypoints.
+Use kebab-case route paths and bracket notation for hyphenated RPC segments, such as `api.user['recent-projects'].$get({})`. Preserve endpoint paths and response shapes when moving handlers.
 
-## Development and verification
+## State owners
 
-Install the versions selected by `mise.toml` with `mise install`, then run commands through `mise exec -- bun ...`. Use `mise exec -- bun install --frozen-lockfile` for dependencies. `bun run dev` starts the Vite and Worker development servers and builds the pinned Computer image; Docker must be running. Worker tests use workerd with controlled runtime doubles and need access to local sockets and Wrangler's log directory, without Docker. Full Worker runs use fresh batches to stay within the isolate heap limit. Integration tests target a live server through `TEST_BASE_URL`; Playwright reuses an existing local server or starts one outside CI.
+| State                                                      | Owner                                                                                                     | Extension rule                                                                                |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Fetched resources, including the file list                 | React Query                                                                                               | Update or invalidate resource queries after changes.                                          |
+| Synchronized agent sessions and authoritative review queue | Cloudflare Agents SDK / `AgentRunner`                                                                     | Change session and review state through the owning agent boundary.                            |
+| Local UI and editor state                                  | Feature slices composed by [store.ts](../src/lib/store.ts)                                                | Keep transient UI state local; review data in Zustand is an editor projection of agent state. |
+| Project-specific browser persistence                       | [project-storage.ts](../src/lib/project-storage.ts) and [editor-session.ts](../src/lib/editor-session.ts) | Restore through the IDE lifecycle hooks in `src/features/ide/`.                               |
+| Project files, `.git`, and `.agent`                        | `DurableObjectFilesystem` / Computer workspace                                                            | Use request-bound filesystem RPC and the durable mutation queue.                              |
+| Project WebSocket coordination                             | `ProjectCoordinatorV2`                                                                                    | Broadcast collaboration, HMR, and runtime events through the existing project coordinator.    |
 
-The root package owns the IDE and auxiliary Workers. `landing/` is a separate package with its own checks. `scripts/deploy.ts` is the common local and CI deployment sequence. Generated `worker-configuration.d.ts` files come from `bun run cf-typegen`; the `vendor/*.wasm` files and `auxiliary/vite-host/vendor/` come from postinstall vendor scripts. Review changes to these generated artifacts alongside the dependency or configuration change that caused them.
+Keeping these owners distinct prevents browser projections from becoming competing authorities. Calculate derived React values during rendering and keep event-driven work in events; use effects for display lifecycle work or external synchronization with cleanup.
+
+The [agent panel](../src/features/agent/components/agent-panel/) coordinates submission and session state. Its session header owns rename/delete confirmation state, composer controls own recording/send presentation, and the attachment strip renders pending uploads. Keep transient UI state in those components and RPC orchestration in the panel and session hook.
+
+## Workspace and agent execution
+
+Each project has one authoritative Computer SQLite workspace under `/workspace`. Git runs inside the filesystem DO against that same tree, with Cloudflare Artifacts as the remote. Editor, agent, Git, lifecycle, and review mutations share durable FIFO ordering. Commands retain ownership through synchronization and change attribution; durable execution IDs support recovery without replaying uncertain commands.
+
+These choices make concurrent edits and review restoration operate on one durable baseline. See [Computer workspace](computer-workspace.md) for access patterns, backend selection, mode restrictions, and recovery rules.
+
+`AgentRunner` owns project-scoped sessions and review state. Its `AgentTurnCoordinator` handles per-session transitions behind the existing RPC facade, while each `SessionTurnAgent` Think facet owns a durable turn submission queue. Keep Durable Object export names, RPC method names, storage keys, and migrations stable across refactors: they identify persisted state and live service contracts.
+
+Use Cloudflare Workflows for durable, resumable jobs with meaningful steps, external I/O, retries, and asynchronous status. Make steps idempotent. Use regular Workers or Durable Objects for fast request/response operations, interactive actions, or work already owned by a DO. This keeps orchestration proportional to the job while preserving retries where they matter.
+
+## Preview and service boundaries
+
+| Owner                                                                   | Responsibility                                                                                                            |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| [worker/services/static-preview/](../worker/services/static-preview/)   | External module proxying and source-map error mapping for SPA previews                                                    |
+| [worker/services/vite-host/](../worker/services/vite-host/)             | In-worker Vite/esbuild hosting for vinext; workerd cannot run a normal Vite server requiring code generation from strings |
+| [review-queue-model.ts](../worker/services/agent/review-queue-model.ts) | Persisted review-record validation and reconciliation                                                                     |
+| [review-queue.ts](../worker/services/agent/review-queue.ts)             | Review database and workspace coordination                                                                                |
+| [agent-runner-input.ts](../worker/durable/agent-runner-input.ts)        | Submitted message-part validation before the agent loop                                                                   |
+| [agent-runner-presence.ts](../worker/durable/agent-runner-presence.ts)  | Participant identity shaping                                                                                              |
+
+Framework build artifacts use a stateless, content-addressed Workers Cache entrypoint. vinext server modules render React Server Components in a Worker Loader isolate; browser updates use module HMR and React Fast Refresh. Extend the owning preview service instead of routing project runtime code through the host application.
+
+## Module boundaries
+
+Group code by feature under `src/features/` and colocate unit tests with their owners. Put strictly reusable UI components in `src/components/ui/`.
+
+`src/` may import Worker route types for Hono RPC, but must not import Worker runtime values. `worker/` and `shared/` must not import browser modules. ESLint enforces these alias boundaries.
+
+Shared types and validation are grouped by domain in [shared/types/](../shared/types/) and [shared/validation/](../shared/validation/). The original `shared/types.ts` and `shared/validation.ts` remain compatibility entrypoints. Review their consumers before narrowing exports; see [Knip audit guidance](knip-audit.md).
+
+See [development and verification](development.md) for setup, test environments, generated artifacts, and deployment configuration.

@@ -183,7 +183,7 @@ export const docsTopics: DocsTopic[] = [
 		tagline: 'Artifacts-backed git flow',
 		accent: 'emerald',
 		laneDescription:
-			'Routes mount the project filesystem, clone the Artifacts repo into an in-memory scratch FS, push mutations back to Artifacts, and broadcast status changes.',
+			'Routes call Git RPCs on the filesystem Durable Object, where Git uses the durable project tree and pushes history changes to Artifacts.',
 		sections: [
 			{
 				label: 'Git operations',
@@ -191,16 +191,16 @@ export const docsTopics: DocsTopic[] = [
 				nodes: [
 					{ id: 'gi-git-panel', name: 'Git Panel', detail: 'stage / commit', color: 'text' },
 					{ id: 'gi-host', name: 'Host Worker', detail: 'git-routes.ts', color: 'orange' },
-					{ id: 'gi-project-fs', name: 'ProjectFilesystem', detail: 'Durable Object', color: 'magenta' },
-					{ id: 'gi-git-service', name: 'GitClient', detail: 'isomorphic-git facade', color: 'emerald' },
-					{ id: 'gi-scratch-fs', name: 'MemoryFs', detail: 'ephemeral clone scratch', color: 'emerald' },
+					{ id: 'gi-project-fs', name: 'DurableObjectFilesystem', detail: 'queued Git RPCs', color: 'magenta' },
+					{ id: 'gi-git-service', name: 'GitService', detail: 'isomorphic-git in DO', color: 'emerald' },
+					{ id: 'gi-workspace', name: 'Computer Workspace', detail: 'durable tree + .git', color: 'emerald' },
 					{ id: 'gi-artifacts', name: 'Cloudflare Artifacts', detail: 'git remote + repo tokens', color: 'emerald' },
 				],
 				edges: [
 					{ id: 'gi-e1', source: 'gi-git-panel', target: 'gi-host', label: 'POST /api/git/*', color: 'emerald' },
-					{ id: 'gi-e2', source: 'gi-host', target: 'gi-project-fs', label: 'mounted working tree', color: 'magenta' },
-					{ id: 'gi-e3', source: 'gi-host', target: 'gi-git-service', label: 'withMounts()', color: 'emerald' },
-					{ id: 'gi-e4', source: 'gi-git-service', target: 'gi-scratch-fs', label: 'clone / commit / diff', color: 'emerald' },
+					{ id: 'gi-e2', source: 'gi-host', target: 'gi-project-fs', label: 'git* RPC', color: 'magenta' },
+					{ id: 'gi-e3', source: 'gi-project-fs', target: 'gi-git-service', label: 'shared mutation queue', color: 'emerald' },
+					{ id: 'gi-e4', source: 'gi-git-service', target: 'gi-workspace', label: 'stage / commit / diff', color: 'emerald' },
 					{ id: 'gi-e5', source: 'gi-git-service', target: 'gi-artifacts', label: 'fetch / push via repo token', color: 'emerald' },
 				],
 			},
@@ -219,7 +219,7 @@ export const docsTopics: DocsTopic[] = [
 			},
 		],
 		notes: [
-			'Git routes mount the project filesystem with <code>worker-fs-mount</code>. <code>GitClient</code> clones the Artifacts repo into an ephemeral in-memory filesystem, performs git operations with <code>isomorphic-git</code>, and pushes mutations back to Artifacts. Mutations send <code>git-status-changed</code> through ProjectCoordinator.',
+			'<code>GitService</code> runs <code>isomorphic-git</code> inside the filesystem Durable Object against the Computer workspace. The working tree, Git objects, refs, and index persist together under <code>/workspace</code>; Cloudflare Artifacts remains the remote. Git mutations share the workspace queue and send <code>git-status-changed</code> through ProjectCoordinator.',
 		],
 	},
 
@@ -241,14 +241,14 @@ export const docsTopics: DocsTopic[] = [
 					{ id: 'agent-runner', name: 'AgentRunner DO', detail: 'per-project Durable Object', color: 'ai' },
 					{ id: 'agent-service', name: 'SessionTurnAgent', detail: 'durable Think facet', color: 'ai' },
 					{ id: 'agent-workers-ai', name: 'Workers AI', detail: 'streamText() with retry', color: 'yellow' },
-					{ id: 'agent-expiring-fs', name: 'ExpiringFilesystem', detail: 'file read / write', color: 'magenta' },
+					{ id: 'agent-workspace', name: 'Computer Workspace', detail: 'file tools + execution', color: 'magenta' },
 				],
 				edges: [
 					{ id: 'agent-e1', source: 'agent-editor', target: 'agent-host', label: 'Agents SDK WebSocket', color: 'ai' },
 					{ id: 'agent-e2', source: 'agent-host', target: 'agent-runner', label: 'typed RPC', color: 'ai' },
 					{ id: 'agent-e3', source: 'agent-runner', target: 'agent-service', label: 'runTurn(submit)', color: 'ai' },
 					{ id: 'agent-e4', source: 'agent-service', target: 'agent-workers-ai', label: 'LLM call', color: 'yellow' },
-					{ id: 'agent-e5', source: 'agent-service', target: 'agent-expiring-fs', label: 'tool execution', color: 'magenta' },
+					{ id: 'agent-e5', source: 'agent-service', target: 'agent-workspace', label: 'tool execution', color: 'magenta' },
 				],
 			},
 			{

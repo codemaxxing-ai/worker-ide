@@ -2,7 +2,7 @@
 
 A browser-based full-stack development environment built on Cloudflare Workers. User projects are stored in Durable Object-backed filesystems with Git history backed by Cloudflare Artifacts, transformed on-the-fly with esbuild-wasm, and previewed with HMR. Includes an AI coding assistant powered by the Cloudflare Agents SDK and Workers AI.
 
-See [architecture and ownership](docs/architecture.md) for the request path, state owners, and extension points.
+See the [contributor documentation](docs/index.md) for architecture, workspace patterns, development guidance, and design decisions.
 
 ## Architecture
 
@@ -19,7 +19,7 @@ See [architecture and ownership](docs/architecture.md) for the request path, sta
 - User backend code runs in isolated V8 isolates via Cloudflare's [Dynamic Worker Loader](https://developers.cloudflare.com/workers/runtime-apis/bindings/worker-loader/) API.
 - vinext (App Router) projects use [vinext](https://github.com/cloudflare/vinext) built by an in-worker Vite/esbuild host (no Vite dev server, since workerd forbids code-gen-from-strings). React Server Components render in a Worker Loader isolate; the browser gets module-level HMR with React Fast Refresh and state-preserving RSC + CSS updates. Deploys produce a standalone Worker (bundled server module set + static client assets).
 - AI coding assistant powered by the Cloudflare Agents SDK and Vercel AI SDK. A project-scoped `AgentRunner` coordinates per-session `SessionTurnAgent` Think facets, retained sub-agents, automatic change snapshots, real-time WebSocket state, and a durable Code Mode runtime with configured MCP servers exposed as typed connector namespaces.
-- Hosted project content runs on signed, isolated `codemaxxing.net` origins; the editor and management API stay on `codemaxxing.app`. Private iframes use a host-only partitioned access cookie. See [hosting security and rollout](docs/content-isolation.md).
+- Hosted project content runs on signed, isolated `codemaxxing.net` origins; the editor and management API stay on `codemaxxing.app`. Private iframes use a host-only partitioned access cookie. See [hosting boundaries](docs/content-isolation.md).
 
 ### Shared (`shared/`)
 
@@ -60,7 +60,7 @@ The auxiliary email worker does not need a local `.dev.vars` example. It uses Cl
 
 Session verification keeps the existing session and device identity; it refreshes only the 24-hour eligibility window for sensitive account actions. Only configured providers linked to the account are offered. Cancellation leaves the session signed in, and successful verification requires retrying the action.
 
-Apply the additive auth migration `worker/migrations/d1-auth/0024_session-authentication.sql` before deploying these application changes (`mise exec -- bun run db:migrate:remote`). Existing sessions fall back to their original creation timestamp. Routine session renewal does not refresh verification freshness.
+The auth schema includes `worker/migrations/d1-auth/0024_session-authentication.sql`; apply D1 migrations with `mise exec -- bun run db:migrate:local` locally or `mise exec -- bun run db:migrate:remote` for deployment. Existing sessions fall back to their original creation timestamp. Routine session renewal does not refresh verification freshness.
 
 ## Scripts
 
@@ -69,7 +69,7 @@ Apply the additive auth migration `worker/migrations/d1-auth/0024_session-authen
 | `dev`              | Vite dev server with Cloudflare Worker (port 3000)                     |
 | `build`            | Production build via Turborepo                                         |
 | `deploy`           | Build and deploy to Cloudflare                                         |
-| `typecheck`        | Run all TypeScript type checks (app, node, worker)                     |
+| `typecheck`        | Run all TypeScript type checks (app, node, worker, scripts)            |
 | `lint`             | Check formatting (Prettier) and lint (ESLint)                          |
 | `format`           | Auto-fix formatting and lint issues                                    |
 | `test:unit`        | Unit tests (Node env)                                                  |
@@ -79,7 +79,7 @@ Apply the additive auth migration `worker/migrations/d1-auth/0024_session-authen
 | `test:integration` | Integration tests against a live server (`TEST_BASE_URL`)              |
 | `test:storybook`   | Storybook component tests                                              |
 | `knip`             | Check for unused dependencies and files                                |
-| `knip:audit`       | Report unused exports and types (non-gating; see `docs/knip-audit.md`) |
+| `knip:audit`       | Report unused exports and types ([audit guidance](docs/knip-audit.md)) |
 | `storybook`        | Storybook dev server (port 6006)                                       |
 | `cf-typegen`       | Generate worker type bindings (`worker-configuration.d.ts`)            |
 
@@ -96,20 +96,8 @@ Apply the additive auth migration `worker/migrations/d1-auth/0024_session-authen
 
 Each project has one authoritative `@cloudflare/computer` 0.4.1 SQLite workspace in the existing `DurableObjectFilesystem` Durable Object. The project, `.git`, and `.agent` live under `/workspace`. Root-relative RPC paths and application `/project` paths map to that same tree. Git still runs inside the DO through isomorphic-git; Cloudflare Artifacts remains the remote. Worker code uses the `fs` proxy in `worker/lib/project-fs.ts`, bound with `runWithProjectStub`.
 
-All 85 existing production workspaces migrated and passed byte/tree verification on October 11, 2026. A second read-only pass verified the refreshed inventory with zero additional migrations. The runtime now uses only Computer; new projects initialize `/workspace` directly. Existing projects without a verified Computer active-store marker fail with a recovery error instead of opening an empty replacement. Frozen legacy SQLite/R2 recovery data and readers for historical snapshots and pending reviews remain intact. The migration runtime and its internal status/retry RPCs have been removed.
+Editor, agent, Git, lifecycle, and review mutations share a durable FIFO queue. Executions retain ownership through synchronization; durable IDs prevent uncertain commands from being replayed. Existing projects without a verified Computer marker report a recovery error, and frozen legacy recovery data remains retained.
 
-Computer tools include read, ls, find, grep, write, edit, delete and exec, alongside the full Code Mode `state.*` API and existing domain, MCP, browser and extension tools. The shell SDK supplies the state helper over the Computer-backed workspace client. Plan and Ask expose read-only tools; write restrictions also apply at the DO RPC boundary.
+Exec defaults to the network-disabled isolate `shell` backend. Use `container` for native binaries, installs, and full test runners. Plan and Ask restrict source writes at both the tool and RPC boundaries.
 
-Exec defaults to the isolate `shell` backend with a 30-second deadline and no direct networking. Select `container` for native commands, package installation and full test runners. Each project starts one lazy `standard-1` container with a two-minute idle timeout. `Dockerfile.computer` pins computerd 0.4.1 and Bun 1.3.14, with Node 24, Git, Python and native build tools. Containers access public HTTP(S) through the policy gateway; private hosts, credentialed URLs and deployment hosts stay restricted. Previews and privileged services use the existing tools. Container commands have a five-minute deadline; Think allows ten minutes without stream progress. Run foreground commands and use existing preview hosting for application servers.
-
-Editor, agent, Git, lifecycle and review mutations share a durable FIFO queue. Commands retain ownership through final synchronization. Cancellation kills the runtime command before synchronization releases queued writes. Durable execution IDs prevent uncertain commands from being replayed after interruption. Synchronization failures retain ownership and report pending status. Changes are attributed to each session, with byte-preserving snapshots for binary files and symlinks. Dependency caches and temporary container outputs are excluded from source review.
-
-To build the image independently:
-
-```bash
-docker build --platform linux/amd64 -f Dockerfile.computer -t worker-ide-computer:0.4.1 .
-```
-
-Ordinary Worker tests never start Docker. Full `test:worker --run` runs in fresh batches, with the large preview-runtime integrations and D1 fixture suites isolated in separate processes to stay within workerd's heap limit. Targeted Worker runs and watch mode still use Vitest directly. Live integration and E2E suites require the Docker-aware HTTPS development server; Playwright reuses an existing local server and runs Chromium, Firefox and WebKit. E2E builds the editor and serves those frontend files through a browser fixture that preserves the live Worker's response policy; APIs, authentication and hosted project runtimes remain live. Vite caches local certificates in `.local-certificates/`; accept the local certificate for manual development. Signed previews use `*.content.localhost:3000`. Plan/todo tools save only their constrained session documents through a typed RPC while source writes remain blocked in Plan/Ask. The container startup trusts Cloudflare's injected gateway CA, including Node/Bun package-manager requests.
-
-See [Computer migration validation](docs/computer-migration-validation.md) for the recorded checks and recovery coverage.
+See [Computer workspace](docs/computer-workspace.md) for access patterns, execution limits, review, and recovery rules. See [development and verification](docs/development.md) for Docker setup, test commands, and generated artifacts.
