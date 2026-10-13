@@ -1,0 +1,31 @@
+README.md
+  s_98c99e5214113f::t_74fdd5b245cc22 5,63,72,82,99,101,103
+docs/architecture.md
+  s_98c99e5214113f::t_fd5a110c15f426 3,7,11,13,15,17-19,21-27,29,31,33,35,37-44,46-81
+docs/computer-workspace.md
+  s_98c99e5214113f::t_32e97efeb93d02 1-84
+docs/development.md
+  s_98c99e5214113f::t_62c80545bed343 1-20,24-26,37,39,41-97
+docs/index.md
+  s_98c99e5214113f::t_51064a51682599 1-4,12-21
+docs/knip-audit.md
+  s_98c99e5214113f::t_a6fc1da9087b99 1,3,5-8,10,12,14,16-37
+landing/src/data/docs-content.ts
+  s_98c99e5214113f::t_242b93303acf4b 186,194-196,201-203,222,244,251
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5768e2926943ef09afc937328f5d62c8df844112",
+  "prompts": {},
+  "sessions": {
+    "s_98c99e5214113f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1318d-fa5e-7cd2-ad99-6584bdd9aa91",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
