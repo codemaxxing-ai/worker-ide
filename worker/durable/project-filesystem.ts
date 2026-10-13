@@ -9,9 +9,12 @@ import { createAITools } from '@cloudflare/computer/tools';
 import { DurableObject, exports } from 'cloudflare:workers';
 import { z } from 'zod';
 
+import { SNAPSHOT_EXCLUDED_DIRECTORIES } from '@shared/constants';
+import { classifyOrigin } from '@shared/domain';
 import { toolInputSchemas } from '@shared/validation/tools';
 
 import { GitService } from './git-service';
+import { selectComputerBackend } from '../lib/computer-backend';
 import { ComputerChanges } from '../lib/computer-changes';
 import { drainComputerOutput } from '../lib/computer-execution';
 import { ComputerMutationQueue, ComputerSynchronizationPending } from '../lib/computer-mutation-queue';
@@ -20,6 +23,9 @@ import { ComputerShellWorkspace } from '../lib/computer-shell-workspace';
 import { restoreComputerSnapshots } from '../lib/computer-snapshots';
 import { computerStorage } from '../lib/computer-storage';
 import { ComputerWorkspace, computerPath, projectPath } from '../lib/computer-workspace';
+import { getDomainConfiguration } from '../lib/domain-configuration';
+import { nativeBuildSchema } from '../lib/native-build';
+import { collectNativePreviewSource } from '../lib/native-preview-source';
 import { generateProjectId } from '../lib/project-id';
 import { hashSnapshot } from '../lib/snapshot-hash';
 import { withSpan } from '../lib/tracing';
@@ -110,6 +116,8 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	private containerInstance?: ContainerBackend;
 	private queueInstance?: ComputerMutationQueue;
 	private changesInstance?: ComputerChanges;
+	private nativePreviewStarting?: Promise<void>;
+	private nativePreviewConfiguration?: string;
 
 	private get projectId(): string {
 		return generateProjectId(this.ctx.id);
@@ -193,12 +201,137 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 			try {
 				const result = await execute();
 				await this.changes.finish();
+				await this.syncNativePreview();
 				return result;
 			} catch (error) {
 				if (!(error instanceof ComputerSynchronizationPending)) await this.changes.finish();
 				throw error;
 			}
 		});
+	}
+
+	private async syncNativePreview(): Promise<void> {
+		if (!this.ctx.container?.running || this.ctx.storage.kv.get('computer-native-preview') !== true) return;
+		try {
+			await this.pushNativeSource();
+		} catch (error) {
+			this.nativePreviewConfiguration = undefined;
+			this.ctx.storage.kv.delete('computer-native-preview');
+			console.error('Native preview synchronization failed', error);
+		}
+	}
+	private async pushNativeSource(): Promise<void> {
+		for await (const _progress of this.computer.push('container')) {
+			/* Preserve FIFO ownership through synchronization. */
+		}
+		const source = await collectNativePreviewSource(this.workspace);
+		const response = await this.getWorkspaceContainer().fetchPort(8788, 'http://container/sync', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(source),
+			signal: AbortSignal.timeout(10_000),
+		});
+		await response.body?.cancel();
+		if (!response.ok) throw new Error('Native source synchronization failed');
+	}
+
+	private async nativePreviewFetch(request: Request, ideOrigin: string, contentOrigin: string): Promise<Response> {
+		this.assertComputerStore();
+		const origin = new URL(request.url).origin;
+		const inputs: Record<string, string> = { origin, ideOrigin };
+		for (const filename of [
+			'package.json',
+			'bun.lock',
+			'bun.lockb',
+			'package-lock.json',
+			'yarn.lock',
+			'pnpm-lock.yaml',
+			'vite.config.ts',
+			'vite.config.js',
+			'vite.config.mts',
+			'vite.config.mjs',
+			'vite.config.cts',
+			'vite.config.cjs',
+		]) {
+			const content = await this.workspace.readFile(`/${filename}`);
+			if (typeof content === 'string') inputs[filename] = content;
+		}
+		const configuration = await hashSnapshot(inputs);
+		if (!this.ctx.container?.running) this.nativePreviewConfiguration = undefined;
+		while (this.nativePreviewConfiguration !== configuration) {
+			this.nativePreviewStarting ??= (async () => {
+				await this.registerComputerSession('native-preview', 'code', { appOrigin: ideOrigin, contentOrigin });
+				const recorded = this.ctx.storage.kv.get<{ id: string; configuration: string; origin: string; ideOrigin: string }>(
+					'computer-native-start',
+				);
+				const previous = recorded
+					? this.ctx.storage.kv.get<{ result?: ComputerExecResult }>(`computer-execution:${recorded.id}`)
+					: undefined;
+				const preparation =
+					recorded && previous?.result?.syncStatus !== 'complete'
+						? recorded
+						: { id: crypto.randomUUID(), configuration, origin, ideOrigin };
+				this.ctx.storage.kv.put('computer-native-start', preparation);
+				const result = await this.computerExec(
+					'node --experimental-import-meta-resolve /opt/worker-ide/native-runtime.ts prepare',
+					{
+						id: preparation.id,
+						backend: 'container',
+						nativeRuntime: true,
+						env: { WORKER_IDE_PREVIEW_ORIGIN: preparation.origin, WORKER_IDE_APP_ORIGIN: preparation.ideOrigin },
+					},
+					'native-preview',
+				);
+				if (result.exitCode !== 0 || result.syncStatus !== 'complete')
+					throw new Error(result.stderr || 'Native Vite preview could not start');
+				this.nativePreviewConfiguration = preparation.configuration;
+				this.ctx.storage.kv.put('computer-native-preview', true);
+			})().finally(() => {
+				this.nativePreviewStarting = undefined;
+			});
+			await this.nativePreviewStarting;
+		}
+		await this.getWorkspaceContainer().setInactivityTimeout(120_000);
+		const url = new URL(request.url);
+		url.protocol = 'http:';
+		const forwarded = new Request(url, request);
+		if (import.meta.env.DEV) {
+			const protocol = forwarded.headers.get('Sec-WebSocket-Protocol');
+			if (protocol?.startsWith('worker-ide-vite')) forwarded.headers.set('Sec-WebSocket-Protocol', protocol.slice('worker-ide-'.length));
+		}
+		try {
+			return await this.getWorkspaceContainer().fetchPort(5173, forwarded);
+		} catch (error) {
+			this.nativePreviewConfiguration = undefined;
+			throw error;
+		}
+	}
+
+	async nativeBuild(snapshotHash: string): Promise<z.infer<typeof nativeBuildSchema>> {
+		this.assertComputerStore();
+		await this.registerComputerSession('native-build', 'code', { appOrigin: this.env.APP_ORIGIN, contentOrigin: this.env.CONTENT_ORIGIN });
+		const recorded = this.ctx.storage.kv.get<{ id: string; snapshotHash: string }>('computer-native-build');
+		const previous = recorded ? this.ctx.storage.kv.get<{ result?: ComputerExecResult }>(`computer-execution:${recorded.id}`) : undefined;
+		if (recorded && previous && recorded.snapshotHash !== snapshotHash && previous.result?.syncStatus !== 'complete')
+			throw new Error('A previous native build is still being recovered. Wait for synchronization before building another snapshot.');
+		const identifier =
+			recorded?.snapshotHash === snapshotHash && previous?.result?.syncStatus !== 'complete' ? recorded.id : crypto.randomUUID();
+		this.ctx.storage.kv.put('computer-native-build', { id: identifier, snapshotHash });
+		const result = await this.computerExec(
+			'node --experimental-import-meta-resolve /opt/worker-ide/native-runtime.ts build',
+			{
+				id: identifier,
+				backend: 'container',
+				nativeRuntime: true,
+				expectedSnapshotHash: snapshotHash,
+				env: { WORKER_IDE_BUILD_ID: identifier },
+			},
+			'native-build',
+		);
+		if (result.exitCode !== 0 || result.syncStatus !== 'complete') throw new Error(result.stderr || 'Native Vite build failed');
+		const response = await this.getWorkspaceContainer().fetchPort(8788, `http://container/artifact?id=${identifier}`);
+		if (!response.ok) throw new Error('Native build artifact is unavailable');
+		return nativeBuildSchema.parse(await response.json());
 	}
 
 	private async ensureComputer(): Promise<void> {
@@ -231,6 +364,9 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 		return this.ctx.storage.kv.get<RequestOriginContext>('computer-request-origin');
 	}
 	async fetch(request: Request): Promise<Response> {
+		const configuration = getDomainConfiguration(this.env);
+		if (classifyOrigin(new URL(request.url).origin, configuration).type === 'preview')
+			return this.nativePreviewFetch(request, configuration.appOrigin, configuration.contentOrigin);
 		void this.computer;
 		if (!this.containerInstance) throw new Error('Container backend is unavailable');
 		return this.containerInstance.handleFetch(request);
@@ -280,14 +416,22 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	async computerExec(command: string, options: ComputerExecOptions, sessionId: string): Promise<ComputerExecResult> {
 		this.assertWritable(sessionId);
 		const identifier = options.id ?? crypto.randomUUID();
-		const backend = options.backend ?? 'shell';
-		if (backend !== 'shell' && backend !== 'container') throw new Error(`Unsupported execution backend: ${backend}`);
+		const requestedBackend = options.backend;
+		if (requestedBackend !== undefined && !['auto', 'shell', 'container'].includes(requestedBackend))
+			throw new Error(`Unsupported execution backend: ${requestedBackend}`);
 		return this.mutate('computerExec', [command, { ...options, id: identifier }, sessionId], async () => {
 			this.assertWritable(sessionId);
 			const key = `computer-execution:${identifier}`;
-			const previous = this.ctx.storage.kv.get<{ status: string; sessionId: string; result?: ComputerExecResult }>(key);
+			const previous = this.ctx.storage.kv.get<{ status: string; sessionId: string; backend?: string; result?: ComputerExecResult }>(key);
 			if (previous && previous.sessionId !== sessionId) throw new Error('Execution belongs to another session');
 			if (previous?.result?.syncStatus === 'complete') return previous.result;
+			const backend = selectComputerBackend(command, previous?.backend ?? requestedBackend);
+			if (
+				!previous &&
+				options.expectedSnapshotHash !== undefined &&
+				(await hashSnapshot(await this.buildSnapshotRecord(SNAPSHOT_EXCLUDED_DIRECTORIES))) !== options.expectedSnapshotHash
+			)
+				throw new Error('Project changed before native build started. Build again.');
 			if (
 				this.ctx.storage.kv.get(`computer-cancelled:${identifier}`) ||
 				this.ctx.storage.kv.get(`computer-session-cancelled:${sessionId}`)
@@ -301,6 +445,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 			const cwd = previous ? undefined : computerPath(options.cwd ?? '/');
 			const input = previous || options.inputJson === undefined ? undefined : z.json().parse(JSON.parse(options.inputJson));
 			if (!previous && backend === 'container') await this.getWorkspaceContainer().setInactivityTimeout(120_000);
+			if (!previous && options.nativeRuntime) await this.pushNativeSource();
 			this.changes.resume(sessionId);
 			if (!previous) {
 				for (const path of await this.workspace._getAllPaths()) await this.captureBaseline(sessionId, path);
@@ -619,19 +764,24 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	 * the raw snapshot via `buildDetectionProbe`.
 	 */
 	async collectPreviewBootstrap(inputs: PreviewBootstrapInputs): Promise<PreviewBootstrap> {
-		const [exists, wranglerJsonc, packageJson, indexHtml, snapshotHash, ...directoryEntries] = await Promise.all([
+		const [exists, wranglerJsonc, packageJson, indexHtml, snapshotHash, configurationEntries, ...directoryEntries] = await Promise.all([
 			this.projectExists(),
 			this.workspace.readFile(inputs.wranglerPath).then((value) => value ?? undefined),
 			this.workspace.readFile(inputs.packageJsonPath).then((value) => value ?? undefined),
 			this.workspace.readFile(inputs.indexHtmlPath).then((value) => value ?? undefined),
 			hashSnapshot(await this.buildSnapshotRecord(inputs.excludedDirectories)),
+			Promise.all(
+				(inputs.configurationPaths ?? []).map(async (path) => ({ path: `/${path}`, content: await this.workspace.readFile(`/${path}`) })),
+			),
 			...inputs.routerDirectories.map((directory) => this.workspace.readDir(`/${directory}`).catch(() => [])),
 		]);
 		const routerFirstEntries: Record<string, string | undefined> = {};
 		for (const [index, directory] of inputs.routerDirectories.entries()) {
 			routerFirstEntries[directory] = directoryEntries[index][0]?.name;
 		}
-		return { exists, wranglerJsonc, packageJson, indexHtml, routerFirstEntries, snapshotHash };
+		const configurationFiles: Record<string, string> = {};
+		for (const entry of configurationEntries) if (typeof entry.content === 'string') configurationFiles[entry.path] = entry.content;
+		return { exists, wranglerJsonc, packageJson, indexHtml, routerFirstEntries, snapshotHash, configurationFiles };
 	}
 
 	/**

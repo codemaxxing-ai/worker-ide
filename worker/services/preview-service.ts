@@ -18,6 +18,7 @@ import { buildDetectionProbe } from '../lib/preview-bootstrap';
 import { finalizePreviewResponse } from '../lib/preview-response-headers';
 import { withSpan } from '../lib/tracing';
 import { selectRuntime } from './vite-host/runtimes/registry';
+import { VITE_CONFIG_PATHS } from './vite-host/runtimes/runtime-selection';
 import { serveVinextPreview } from './vite-host/runtimes/vinext-preview';
 
 import type { PreviewBootstrap } from '../lib/preview-bootstrap';
@@ -113,9 +114,10 @@ export class PreviewService {
 	 */
 	private async collectDetectionFiles(): Promise<Record<string, string>> {
 		const routerDirectories = ['app', 'pages', 'src'];
-		const [packageJson, indexHtml, ...directoryEntries] = await Promise.all([
+		const [packageJson, indexHtml, configurationEntries, ...directoryEntries] = await Promise.all([
 			fs.readFile(`${this.projectRoot}/package.json`, 'utf8').catch(() => {}),
 			fs.readFile(`${this.projectRoot}/index.html`, 'utf8').catch(() => {}),
+			Promise.all(VITE_CONFIG_PATHS.map(async (path) => [path, await fs.readFile(`${this.projectRoot}/${path}`, 'utf8').catch(() => {})])),
 			...routerDirectories.map((directory) => fs.readdir(`${this.projectRoot}/${directory}`).catch(() => [])),
 		]);
 
@@ -125,6 +127,7 @@ export class PreviewService {
 			return files;
 		}
 		files['/package.json'] = packageJson;
+		for (const [path, content] of configurationEntries) if (path !== undefined && content !== undefined) files[`/${path}`] = content;
 		if (indexHtml !== undefined) {
 			files['/index.html'] = indexHtml;
 		}

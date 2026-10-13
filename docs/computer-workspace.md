@@ -24,12 +24,15 @@ The [project HTTP middleware](../worker/http/project-app.ts) establishes this co
 
 ## Execution backends
 
-| Backend           | Use for                                                      | Limits and network access                                                                                                                       |
-| ----------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `shell` (default) | Lightweight shell commands and local Git operations          | Isolate shell; 30-second deadline; no direct networking                                                                                         |
-| `container`       | Native binaries, package installation, and full test runners | Lazy per-project `standard-1` Linux container; five-minute command deadline; two-minute idle timeout; public HTTP(S) through the policy gateway |
+| Backend          | Use for                                                      | Limits and network access                                                                                                                       |
+| ---------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auto` (default) | Selects before dispatch from the shell command AST           | Uses `shell` for supported commands; native tools, installs, network commands, dynamic commands, and full test runners use `container`          |
+| `shell`          | Lightweight shell commands and local Git operations          | Isolate shell; 30-second deadline; no direct networking                                                                                         |
+| `container`      | Native binaries, package installation, and full test runners | Lazy per-project `standard-1` Linux container; five-minute command deadline; two-minute idle timeout; public HTTP(S) through the policy gateway |
 
 Both backends operate on the same workspace. The shell SDK supplies Code Mode's `state.*` helper over the Computer-backed workspace client. Use foreground commands; use the existing preview infrastructure for application servers.
+
+Previews and deployment builds also select a runtime from the manifest and Vite configuration. Simple static/React templates stay on Workers; vinext and custom Vite projects use the lazy container. `workerIde.runtime` in `package.json` may pin `worker` or `container`. Existing vinext projects need native-compatible Vite/React plugin versions; the template uses Vite 8 and React plugin 6 for vinext 0.1.8's `parseSync` API. Container Vite runs against a staging copy synchronized directly from canonical SQLite bytes after queued mutations, providing real WebSocket HMR without background writes to authoritative source. Native source transfers are capped at 12 MiB of encoded content, and build artifacts at 8 MiB.
 
 [Dockerfile.computer](../Dockerfile.computer) pins computerd and Bun and supplies Node, Git, Python, native build tools, and FUSE. Keep the Computer package and computerd image versions aligned. The container installs Cloudflare's injected gateway CA into its trust store and provides it to Node and Bun for package-manager HTTPS requests.
 

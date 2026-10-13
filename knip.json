@@ -1,6 +1,7 @@
 {
 	"$schema": "https://unpkg.com/knip@5/schema.json",
 	"entry": [
+		"container/native-runtime.ts",
 		"auxiliary/*/index.ts",
 		"scripts/*.ts",
 		"drizzle-d1.config.ts",
@@ -14,7 +15,7 @@
 		"worker/services/vite-host/runtime/vite-module-runner-stub.ts"
 	],
 	"ignore": ["landing/**", "public/**", "auxiliary/vite-host/vendor/**", "**/worker-configuration.d.ts", "worker/migrations/**/*.d.ts"],
-	"ignoreDependencies": ["cloudflare", "vinext", "@vitejs/plugin-rsc", "react-server-dom-webpack"],
+	"ignoreDependencies": ["cloudflare"],
 	"ignoreExportsUsedInFile": true,
 	"rules": {
 		"exports": "off",

@@ -33,7 +33,7 @@ describe('Computer live runtime', () => {
 		});
 		if (!response.ok) throw new Error(`Shell execution failed: ${response.status}`);
 		const data = await response.json();
-		expect(data.result).toMatchObject({ exitCode: 0, stdout: 'editor baseline', syncStatus: 'complete' });
+		expect(data.result).toMatchObject({ exitCode: 0, stdout: 'editor baseline', syncStatus: 'complete', backend: 'shell' });
 		expect(data.changes).toContainEqual(
 			expect.objectContaining({ path: '/computer.txt', beforeContent: 'editor baseline', afterContent: 'command change' }),
 		);
@@ -63,7 +63,6 @@ describe('Computer live runtime', () => {
 		await api.file.$put({ json: { path: '/native/input.txt', content: 'from editor' } });
 		const response = await runtime.__test['computer-exec'].$post({
 			json: {
-				backend: 'container',
 				command:
 					'set -e; node --version; bun --version; git --version; python3 --version; mkdir -p native/install; cd native/install; printf \'{"name":"computer-check","private":true,"dependencies":{"is-number":"7.0.0"}}\' > package.json; bun install; node -e "if (!require(\'is-number\')(42)) process.exit(1)"; cd /workspace; python3 -c "from pathlib import Path; assert Path(\'native/input.txt\').read_text() == \'from editor\'; Path(\'native/output.txt\').write_text(\'from container\'); Path(\'native/output.bin\').write_bytes(bytes([0,255,128,42]))"; ln -s input.txt native/link',
 				snapshot: true,

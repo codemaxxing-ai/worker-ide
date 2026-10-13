@@ -28,6 +28,7 @@ describe('Computer execution lifecycle without Docker', () => {
 				{ id: crypto.randomUUID(), cwd: '/workspace/../..' },
 				{ id: crypto.randomUUID(), inputJson: '{' },
 				{ id: crypto.randomUUID(), backend: 'container' },
+				{ id: crypto.randomUUID(), backend: 'shell', expectedSnapshotHash: 'outdated' },
 			]) {
 				const execution = project.computerExec('must not run', options, 'session');
 				const editor = project.writeFileContent('/source.txt', options.id);
@@ -75,7 +76,7 @@ describe('Computer execution lifecycle without Docker', () => {
 				return { stdout: '', stderr: 'cancelled', exitCode: 130 };
 			});
 			const id = crypto.randomUUID();
-			const execution = project.computerExec('controlled command', { id }, 'first');
+			const execution = project.computerExec('controlled command', { id, backend: 'shell' }, 'first');
 			await ready;
 			expect(await project.drainWorkspaceChanges('first')).toEqual([]);
 			const session = project.wsWriteFile('/source.txt', 'second', 'second');
@@ -107,7 +108,7 @@ describe('Computer execution lifecycle without Docker', () => {
 				return { stdout: '', stderr: '', exitCode: 130 };
 			});
 			const nextId = crypto.randomUUID();
-			const next = project.computerExec('next owner', { id: nextId }, 'second');
+			const next = project.computerExec('next owner', { id: nextId, backend: 'shell' }, 'second');
 			await activeCommand;
 			if (!retainedFilesystem) throw new Error('Missing retained runtime reference');
 			const previousFilesystem = retainedFilesystem;
@@ -138,7 +139,7 @@ describe('Computer execution lifecycle without Docker', () => {
 			});
 			Reflect.set(project, 'computerInstance', computer);
 			shell.setCommand(async () => ({ stdout: 'x'.repeat(90_000), stderr: 'y'.repeat(90_000), exitCode: 42 }));
-			const result = await project.computerExec('bounded', { id: crypto.randomUUID() }, 'session');
+			const result = await project.computerExec('bounded', { id: crypto.randomUUID(), backend: 'shell' }, 'session');
 			expect(result.stdout).toHaveLength(60_000);
 			expect(result.stderr).toHaveLength(60_000);
 			expect(result).toMatchObject({ status: 'failed', exitCode: 42, syncStatus: 'complete' });
@@ -228,10 +229,10 @@ describe('Computer execution lifecycle without Docker', () => {
 			const pull = vi.spyOn(computer, 'pull').mockImplementation(async function* () {
 				/* Already synchronized. */
 			});
-			const result = await project.computerExec('must not replay', { id, backend: 'container' }, 'session');
+			const result = await project.computerExec('must not replay', { id, backend: 'shell' }, 'session');
 			expect(attach).toHaveBeenCalledWith(expect.objectContaining({ id, after: undefined }));
 			expect(execute).not.toHaveBeenCalled();
-			expect(result).toMatchObject({ stdout: 'reconnected', status: 'completed', syncStatus: 'complete' });
+			expect(result).toMatchObject({ backend: 'container', stdout: 'reconnected', status: 'completed', syncStatus: 'complete' });
 			pull.mockRestore();
 			await computer.close();
 		});

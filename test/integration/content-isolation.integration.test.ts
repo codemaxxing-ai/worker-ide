@@ -81,7 +81,7 @@ describe('live hosted content boundary', () => {
 		}
 		const preview = await api(first.projectId)['preview-url'].$get({});
 		if (!preview.ok) throw new Error('Private preview URL unavailable');
-		const { url } = await preview.json();
+		const { url, origin } = await preview.json();
 		const stolenGrant = new URL(url);
 		stolenGrant.host = new URL(second.origin).host;
 		const rejectedGrant = await localFetch(stolenGrant, { redirect: 'manual' });
@@ -98,7 +98,7 @@ describe('live hosted content boundary', () => {
 		expect(await rejected.text()).toContain('__preview-access-blocked');
 		const accepted = await localFetch(check, { headers: { Cookie: accessCookie.split(';')[0] }, redirect: 'manual' });
 		expect(accepted.status).toBe(302);
-		expect(accepted.headers.get('Location')).toBe(`${first.origin}/`);
+		expect(accepted.headers.get('Location')).toBe(`${origin}/`);
 		const stolenCookie = await localFetch(`${second.origin}/api/inspect`, {
 			headers: { Cookie: accessCookie.split(';')[0] },
 			redirect: 'manual',

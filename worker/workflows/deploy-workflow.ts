@@ -1,3 +1,5 @@
+import { Buffer } from 'node:buffer';
+
 import { WorkflowEntrypoint } from 'cloudflare:workers';
 import { NonRetryableError } from 'cloudflare:workflows';
 
@@ -100,14 +102,24 @@ export class DeployWorkflow extends WorkflowEntrypoint<Env, DeployWorkflowParame
 		const filesystemStub = filesystemNamespace.get(filesystemId);
 
 		try {
-			const inputs = await step.do('read-project-config', async () =>
-				runWithProjectStub(filesystemStub, async () => readProjectBuildInputs(parameters.projectRoot), parameters.projectRoot),
-			);
+			const { inputs, snapshotHash } = await step.do('read-project-config', async () => {
+				const snapshotHash = await filesystemStub.snapshotHash(SNAPSHOT_EXCLUDED_DIRECTORIES);
+				const inputs = await runWithProjectStub(
+					filesystemStub,
+					async () => readProjectBuildInputs(parameters.projectRoot),
+					parameters.projectRoot,
+				);
+				if (snapshotHash !== (await filesystemStub.snapshotHash(SNAPSHOT_EXCLUDED_DIRECTORIES)))
+					throw new NonRetryableError('Project changed while reading build inputs. Start a new deployment.');
+				return { inputs, snapshotHash };
+			});
 
 			const runtime = selectRuntime({ files: inputs.allFiles });
-			await (runtime.hosting === 'artifact'
-				? this.bundleAndUploadRuntime(step, parameters, inputs, runtime.id)
-				: this.bundleAndUploadStatic(step, parameters, filesystemStub, inputs));
+			if (runtime.hosting === 'container') await this.bundleAndUploadNative(step, parameters, filesystemStub, inputs, snapshotHash);
+			else
+				await (runtime.hosting === 'artifact'
+					? this.bundleAndUploadRuntime(step, parameters, inputs, runtime.id)
+					: this.bundleAndUploadStatic(step, parameters, filesystemStub, inputs));
 
 			await step.do('enable-subdomain', SHORT_CLOUDFLARE_API_STEP_CONFIG, async () => {
 				const accessToken = await this.resolveAccessToken(parameters);
@@ -159,6 +171,58 @@ export class DeployWorkflow extends WorkflowEntrypoint<Env, DeployWorkflowParame
 			});
 			return { success: false, workerName: parameters.workerName, error: message };
 		}
+	}
+
+	private async bundleAndUploadNative(
+		step: WorkflowStep,
+		parameters: DeployWorkflowParameters,
+		filesystemStub: ReturnType<typeof filesystemNamespace.get>,
+		inputs: ProjectBuildInputs,
+		snapshotHash: string,
+	): Promise<void> {
+		const r2BucketName = await this.ensureProjectR2Bucket(step, parameters, inputs);
+		await step.do('build-and-deploy-native', { ...VINEXT_DEPLOY_STEP_CONFIG, retries: { limit: 0, delay: '1 second' } }, async () => {
+			try {
+				using build = await filesystemStub.nativeBuild(snapshotHash);
+				const staticAssets = new Map<string, Uint8Array>(
+					Object.entries(build.clientFiles).map(([filename, bytes]) => [`/${filename}`, Buffer.from(bytes, 'base64')]),
+				);
+				const accessToken = await this.resolveAccessToken(parameters);
+				const assetsCompletionJwt =
+					staticAssets.size > 0
+						? await uploadStaticAssets(parameters.accountId, accessToken, parameters.workerName, staticAssets)
+						: undefined;
+				if (build.serverModules && build.mainModule) {
+					await uploadWorkerModules({
+						accountId: parameters.accountId,
+						accessToken,
+						workerName: parameters.workerName,
+						mainModule: build.mainModule,
+						modules: Object.entries(build.serverModules).map(([name, contents]) => ({ name, contents })),
+						assetsCompletionJwt,
+						assetSettings: inputs.assetSettings,
+						r2BucketName,
+					});
+					return;
+				}
+				const hasWorker = Object.keys(inputs.allFiles).some((filename) => /^worker\/index\.[jt]s$/.test(filename));
+				const workerBundle = hasWorker
+					? await runWithProjectStub(filesystemStub, () => bundleWorker(parameters.projectRoot, inputs, true), parameters.projectRoot)
+					: undefined;
+				const workerCode = workerBundle?.workerCode ?? 'export default { fetch() { return new Response("Not found", { status: 404 }); } };';
+				await uploadWorkerScript(
+					parameters.accountId,
+					accessToken,
+					parameters.workerName,
+					workerCode,
+					assetsCompletionJwt,
+					inputs.assetSettings,
+					r2BucketName,
+				);
+			} catch (error) {
+				throw toNonRetryableError(error);
+			}
+		});
 	}
 
 	/**

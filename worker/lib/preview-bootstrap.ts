@@ -17,6 +17,8 @@
  */
 import { SNAPSHOT_EXCLUDED_DIRECTORIES } from '@shared/constants';
 
+import { VITE_CONFIG_PATHS } from '../services/vite-host/runtimes/runtime-selection';
+
 import type { ProjectProbe } from '../services/vite-host/runtimes/types';
 
 /**
@@ -35,6 +37,7 @@ export interface PreviewBootstrapInputs {
 	routerDirectories: string[];
 	/** Directories excluded from the build-snapshot hash (see {@link PreviewBootstrap.snapshotHash}). */
 	excludedDirectories: readonly string[];
+	configurationPaths?: readonly string[];
 }
 
 /** The raw snapshot returned by a single preview bootstrap round trip. */
@@ -56,6 +59,7 @@ export interface PreviewBootstrap {
 	 * `hashSnapshot(collectProjectSnapshot(excludedDirectories))`.
 	 */
 	snapshotHash: string;
+	configurationFiles?: Record<string, string>;
 }
 
 /**
@@ -68,6 +72,7 @@ export const PREVIEW_BOOTSTRAP_INPUTS: PreviewBootstrapInputs = {
 	wranglerPath: '/wrangler.jsonc',
 	routerDirectories: ['app', 'pages', 'src'],
 	excludedDirectories: SNAPSHOT_EXCLUDED_DIRECTORIES,
+	configurationPaths: VITE_CONFIG_PATHS,
 };
 
 /**
@@ -82,6 +87,7 @@ export function buildDetectionProbe(bootstrap: PreviewBootstrap): ProjectProbe {
 		return { files };
 	}
 	files['/package.json'] = bootstrap.packageJson;
+	Object.assign(files, bootstrap.configurationFiles);
 	if (bootstrap.indexHtml !== undefined) {
 		files['/index.html'] = bootstrap.indexHtml;
 	}

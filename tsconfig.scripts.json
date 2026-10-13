@@ -15,5 +15,5 @@
 		"noUncheckedSideEffectImports": true,
 		"types": ["node"]
 	},
-	"include": ["scripts/**/*.ts"]
+	"include": ["scripts/**/*.ts", "container/**/*.ts"]
 }

@@ -42,6 +42,8 @@ async function editProjectFile(page: Page, projectId: string, path: string, find
 test.describe('vinext preview + HMR', () => {
 	test('server-renders the App Router app and HMR-updates each module type with client state preserved', async ({ page }) => {
 		const unexpectedReloads: string[] = [];
+		const websocketPaths: string[] = [];
+		page.on('websocket', (socket) => websocketPaths.push(new URL(socket.url()).pathname));
 		page.on('console', (message) => {
 			if (message.text().includes('changed module not in running graph')) unexpectedReloads.push(message.text());
 		});
@@ -74,6 +76,7 @@ test.describe('vinext preview + HMR', () => {
 		await expect(counter).toHaveText('Count: 1');
 		await counter.click();
 		await expect(counter).toHaveText('Count: 2');
+		expect(websocketPaths).toContain('/__native-hmr');
 
 		// Server component edit → RSC refetch + reconcile, client state preserved.
 		await editProjectFile(page, projectId, '/app/page.tsx', 'Hello vinext', 'Hello from HMR');

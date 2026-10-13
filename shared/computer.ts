@@ -4,6 +4,8 @@ export interface ComputerExecOptions {
 	cwd?: string;
 	env?: Record<string, string>;
 	inputJson?: string;
+	expectedSnapshotHash?: string;
+	nativeRuntime?: boolean;
 }
 
 export interface ComputerExecResult {

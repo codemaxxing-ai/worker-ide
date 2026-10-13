@@ -59,16 +59,17 @@ Use Cloudflare Workflows for durable, resumable jobs with meaningful steps, exte
 
 ## Preview and service boundaries
 
-| Owner                                                                   | Responsibility                                                                                                            |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| [worker/services/static-preview/](../worker/services/static-preview/)   | External module proxying and source-map error mapping for SPA previews                                                    |
-| [worker/services/vite-host/](../worker/services/vite-host/)             | In-worker Vite/esbuild hosting for vinext; workerd cannot run a normal Vite server requiring code generation from strings |
-| [review-queue-model.ts](../worker/services/agent/review-queue-model.ts) | Persisted review-record validation and reconciliation                                                                     |
-| [review-queue.ts](../worker/services/agent/review-queue.ts)             | Review database and workspace coordination                                                                                |
-| [agent-runner-input.ts](../worker/durable/agent-runner-input.ts)        | Submitted message-part validation before the agent loop                                                                   |
-| [agent-runner-presence.ts](../worker/durable/agent-runner-presence.ts)  | Participant identity shaping                                                                                              |
+| Owner                                                                   | Responsibility                                                                    |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| [worker/services/static-preview/](../worker/services/static-preview/)   | External module proxying and source-map error mapping for SPA previews            |
+| [worker/services/vite-host/](../worker/services/vite-host/)             | Framework detection and Worker hosting for simple static projects                 |
+| [container/native-runtime.ts](../container/native-runtime.ts)           | Native Vite preview/HMR and production builds for vinext and custom Vite projects |
+| [review-queue-model.ts](../worker/services/agent/review-queue-model.ts) | Persisted review-record validation and reconciliation                             |
+| [review-queue.ts](../worker/services/agent/review-queue.ts)             | Review database and workspace coordination                                        |
+| [agent-runner-input.ts](../worker/durable/agent-runner-input.ts)        | Submitted message-part validation before the agent loop                           |
+| [agent-runner-presence.ts](../worker/durable/agent-runner-presence.ts)  | Participant identity shaping                                                      |
 
-Framework build artifacts use a stateless, content-addressed Workers Cache entrypoint. vinext server modules render React Server Components in a Worker Loader isolate; browser updates use module HMR and React Fast Refresh. Extend the owning preview service instead of routing project runtime code through the host application.
+Preview and deployment share runtime detection. Simple static projects stay on Workers; vinext and custom Vite configuration run in the project's lazy Linux container. Native previews forward HTTP and WebSocket upgrades through the existing content authorization boundary. The authoritative Computer workspace is copied into a container-local staging tree, so Vite's watchers and generated files do not write outside a queued command. Editor mutations push source changes under FIFO ownership and synchronize the staging tree for HMR. Native builds use durable execution IDs and refuse changed snapshots before dispatch; their output is uploaded as Worker modules and static assets. The previous Worker vinext host remains available through an explicit `workerIde.runtime: "worker"` manifest override.
 
 ## Module boundaries
 

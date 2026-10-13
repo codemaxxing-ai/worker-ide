@@ -139,7 +139,8 @@
 			"name": "PREVIEW_RATE_LIMITER",
 			"namespace_id": "1002",
 			"simple": {
-				"limit": 100,
+				// Native Vite serves a module graph rather than a single bundled script.
+				"limit": 1000,
 				"period": 60,
 			},
 		},

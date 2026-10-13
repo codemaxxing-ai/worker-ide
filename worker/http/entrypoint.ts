@@ -33,6 +33,8 @@ function extractPushedProjectId(event: unknown): string | undefined {
 export default {
 	async fetch(request: Request, environment: Env, executionContext: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
+		const configuration = getDomainConfiguration(environment);
+		const parsed = classifyOrigin(url.origin, configuration);
 
 		// Guard: reject WebSocket upgrade requests that don't match a known
 		// WebSocket handler path before any routing can forward them to
@@ -46,10 +48,12 @@ export default {
 		//   - App domain:     /p/<projectId>/__ws   (ProjectCoordinator)
 		//   - App domain:     /p/<projectId>/__agent (AgentRunner)
 		//   - Preview domain: /__ws                  (ProjectCoordinator)
+		//   - Preview domain: /__native-hmr          (container Vite)
 		if (request.headers.get('Upgrade') === 'websocket') {
 			const isValidWebSocketPath =
 				url.pathname === '/__ws' ||
 				url.pathname.startsWith('/__ws/') ||
+				(parsed.type === 'preview' && url.pathname === '/__native-hmr') ||
 				/^\/p\/[^/]+\/__ws(\/|$)/.test(url.pathname) ||
 				/^\/p\/[^/]+\/__agent(\/|$)/.test(url.pathname) ||
 				/^\/p\/[^/]+\/api\/stt\/ws$/.test(url.pathname);
@@ -58,9 +62,6 @@ export default {
 				return new Response('WebSocket not supported on this path', { status: 404 });
 			}
 		}
-
-		const configuration = getDomainConfiguration(environment);
-		const parsed = classifyOrigin(url.origin, configuration);
 
 		switch (parsed.type) {
 			case 'preview': {

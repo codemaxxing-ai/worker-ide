@@ -60,10 +60,14 @@ export function createComputerTools(context: ToolExecutorContext, mode: 'code' |
 		readonly: mode !== 'code',
 		assets: false,
 		shell: {
-			defaultBackend: 'shell',
+			defaultBackend: 'auto',
 			maxBytes: 60_000,
 			streamMaxBytes: 60_000,
 			backends: {
+				auto: {
+					description:
+						'Select before execution: supported file/text commands use the isolate; native binaries, installs and tests use Linux. Explicit shell/container overrides remain available. Commands are never retried on another backend.',
+				},
 				shell: {
 					description:
 						'Isolate shell for file operations and text processing. No direct networking or native binaries. Deadline 30 seconds.',

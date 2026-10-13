@@ -8,8 +8,8 @@ const reactManifest = JSON.stringify({ dependencies: { react: '^19.0.0' } });
 describe('selectRuntime', () => {
 	it('selects the vinext runtime for a vinext App Router project', () => {
 		const runtime = selectRuntime({ files: { '/package.json': vinextManifest, '/app/page.tsx': '' } });
-		expect(runtime.id).toBe('vinext');
-		expect(runtime.hosting).toBe('artifact');
+		expect(runtime.id).toBe('container-vinext');
+		expect(runtime.hosting).toBe('container');
 	});
 
 	it('falls back to the react-spa runtime for a plain SPA project', () => {
@@ -22,8 +22,9 @@ describe('selectRuntime', () => {
 		expect(selectRuntime({ files: {} }).id).toBe('react-spa');
 	});
 
-	it('does not select vinext without an app/pages directory', () => {
-		expect(selectRuntime({ files: { '/package.json': vinextManifest } }).id).toBe('react-spa');
+	it('uses native vinext router discovery, including src/app projects', () => {
+		expect(selectRuntime({ files: { '/package.json': vinextManifest } }).id).toBe('container-vinext');
+		expect(selectRuntime({ files: { '/package.json': vinextManifest, '/src/app/page.tsx': '' } }).id).toBe('container-vinext');
 	});
 });
 

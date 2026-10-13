@@ -14,10 +14,10 @@ See the [contributor documentation](docs/index.md) for architecture, workspace p
 
 ### Backend (`worker/`)
 
-- Cloudflare Workers with Hono. Durable Objects back per-project file storage (SQLite-backed working tree) and WebSocket coordination (HMR, collaboration). Framework build artifacts are served through a stateless, content-addressed Workers Cache entrypoint.
+- Cloudflare Workers with Hono. Durable Objects back per-project file storage (SQLite-backed working tree) and WebSocket coordination (HMR, collaboration).
 - Git operations use `isomorphic-git` against Cloudflare Artifacts remotes, with the project working tree mounted from the project filesystem DO.
 - User backend code runs in isolated V8 isolates via Cloudflare's [Dynamic Worker Loader](https://developers.cloudflare.com/workers/runtime-apis/bindings/worker-loader/) API.
-- vinext (App Router) projects use [vinext](https://github.com/cloudflare/vinext) built by an in-worker Vite/esbuild host (no Vite dev server, since workerd forbids code-gen-from-strings). React Server Components render in a Worker Loader isolate; the browser gets module-level HMR with React Fast Refresh and state-preserving RSC + CSS updates. Deploys produce a standalone Worker (bundled server module set + static client assets).
+- Simple static/React SPA projects use the Worker esbuild host. [vinext](https://github.com/cloudflare/vinext) and projects with custom Vite plugins/configuration use a lazy per-project Linux container running native Vite with WebSocket HMR. Production builds run in the same container and deploy as Worker modules plus static assets. The vinext template uses Vite 8 and React plugin 6, matching vinext's native APIs.
 - AI coding assistant powered by the Cloudflare Agents SDK and Vercel AI SDK. A project-scoped `AgentRunner` coordinates per-session `SessionTurnAgent` Think facets, retained sub-agents, automatic change snapshots, real-time WebSocket state, and a durable Code Mode runtime with configured MCP servers exposed as typed connector namespaces.
 - Hosted project content runs on signed, isolated `codemaxxing.net` origins; the editor and management API stay on `codemaxxing.app`. Private iframes use a host-only partitioned access cookie. See [hosting boundaries](docs/content-isolation.md).
 
@@ -98,6 +98,6 @@ Each project has one authoritative `@cloudflare/computer` 0.4.1 SQLite workspace
 
 Editor, agent, Git, lifecycle, and review mutations share a durable FIFO queue. Executions retain ownership through synchronization; durable IDs prevent uncertain commands from being replayed. Existing projects without a verified Computer marker report a recovery error, and frozen legacy recovery data remains retained.
 
-Exec defaults to the network-disabled isolate `shell` backend. Use `container` for native binaries, installs, and full test runners. Plan and Ask restrict source writes at both the tool and RPC boundaries.
+Exec defaults to `auto`: supported text, file, and local Git commands use the network-disabled isolate `shell`; native binaries, installs, network commands, and full test runners use `container`. Explicit backend choices are retained, and execution recovery stays on the originally selected backend. Plan and Ask restrict source writes at both the tool and RPC boundaries.
 
 See [Computer workspace](docs/computer-workspace.md) for access patterns, execution limits, review, and recovery rules. See [development and verification](docs/development.md) for Docker setup, test commands, and generated artifacts.

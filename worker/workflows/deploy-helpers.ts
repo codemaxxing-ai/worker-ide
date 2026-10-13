@@ -222,8 +222,8 @@ export async function readProjectBuildInputs(projectRoot: string): Promise<Proje
 	return { projectName, assetSettings, bindingsConfig, registeredDependencies, tsconfigRaw, allFiles };
 }
 
-export async function bundleWorker(projectRoot: string, inputs: ProjectBuildInputs): Promise<WorkerBundleResult> {
-	const workerFiles = await collectProjectFiles(`${projectRoot}/worker`, 'worker');
+export async function bundleWorker(projectRoot: string, inputs: ProjectBuildInputs, snapshotOnly = false): Promise<WorkerBundleResult> {
+	const workerFiles = snapshotOnly ? {} : await collectProjectFiles(`${projectRoot}/worker`, 'worker');
 	const workerBundleFiles: Record<string, string> = { ...workerFiles };
 	for (const [filePath, content] of Object.entries(inputs.allFiles)) {
 		if (!filePath.startsWith('src/') && !(filePath in workerBundleFiles)) {

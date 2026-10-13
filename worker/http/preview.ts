@@ -223,6 +223,8 @@ export async function handlePreviewRequest(request: Request, projectId: string, 
 		);
 	}
 	if (url.pathname.startsWith(PREVIEW_ACCESS_PREFIX)) return new Response('Not found', { status: 404 });
+	if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket' && !hasValidWebSocketOrigin(request, url.origin))
+		return new Response('Forbidden', { status: 403 });
 
 	const response = await runWithProjectStub(fsStub, async () => {
 		if (url.pathname === '/__ws' || url.pathname.startsWith('/__ws')) {

@@ -89,4 +89,9 @@ export interface StatelessFrameworkRuntime extends BaseRuntime {
 	serve(request: Request, context: StatelessPreviewContext): Promise<Response>;
 }
 
-export type FrameworkRuntime = ArtifactFrameworkRuntime | StatelessFrameworkRuntime;
+export interface ContainerFrameworkRuntime extends BaseRuntime {
+	readonly hosting: 'container';
+	serve(request: Request, context: StatelessPreviewContext): Promise<Response>;
+}
+
+export type FrameworkRuntime = ArtifactFrameworkRuntime | StatelessFrameworkRuntime | ContainerFrameworkRuntime;

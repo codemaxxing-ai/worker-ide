@@ -7,6 +7,7 @@
  * tried in order; the first to claim the project wins. Projects that no runtime
  * claims fall back to the legacy esbuild preview/deploy pipeline.
  */
+import { containerVinextRuntime, containerViteRuntime } from './container-vite';
 import { reactSpaRuntime } from './react-spa';
 import { vinextRuntime } from './vinext';
 
@@ -17,7 +18,7 @@ import type { FrameworkRuntime, ProjectProbe } from './types';
  * ({@link reactSpaRuntime}) is the catch-all, so every project resolves to a
  * runtime — there is no separate legacy pipeline.
  */
-const RUNTIMES: readonly FrameworkRuntime[] = [vinextRuntime, reactSpaRuntime];
+const RUNTIMES: readonly FrameworkRuntime[] = [containerVinextRuntime, containerViteRuntime, vinextRuntime, reactSpaRuntime];
 
 /** The runtime that claims this project (always defined — react-spa is catch-all). */
 export function selectRuntime(probe: ProjectProbe): FrameworkRuntime {

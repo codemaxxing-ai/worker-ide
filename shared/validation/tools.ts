@@ -152,7 +152,7 @@ export const toolInputSchemas = {
 	exec: z.object({
 		command: z.string().min(1),
 		cwd: z.string().optional(),
-		backend: z.enum(['shell', 'container']).optional(),
+		backend: z.enum(['auto', 'shell', 'container']).optional(),
 		env: z.record(z.string(), z.string()).optional(),
 		input: z.json().optional(),
 	}),

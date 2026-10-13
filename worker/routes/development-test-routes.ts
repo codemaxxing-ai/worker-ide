@@ -4,8 +4,11 @@ import { zValidator } from '@hono/zod-validator';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
+import { SNAPSHOT_EXCLUDED_DIRECTORIES, WORKERS_COMPATIBILITY_DATE } from '@shared/constants';
+
 import { getDomainConfiguration } from '../lib/domain-configuration';
 import { addFileToSnapshot, initSnapshot } from '../services/agent/snapshot-manager';
+import { getServerEntrypoint, serverModulesFromOutput } from '../services/vite-host/runtime/loader-runner';
 
 import type { FileChange, ModelMessage } from '../services/agent/types';
 import type { AppEnvironment } from '../types';
@@ -63,7 +66,7 @@ export const developmentTestRoutes = new Hono<AppEnvironment>()
 			'json',
 			z.object({
 				command: z.string(),
-				backend: z.enum(['shell', 'container']).default('shell'),
+				backend: z.enum(['auto', 'shell', 'container']).default('auto'),
 				id: z.string().optional(),
 				sessionId: z.string().default('computer-integration'),
 				snapshot: z.boolean().default(false),
@@ -102,6 +105,29 @@ export const developmentTestRoutes = new Hono<AppEnvironment>()
 	.get('/__test/computer-executions', zValidator('query', z.object({ sessionId: z.string() })), async (c) => {
 		using executions = await c.get('fsStub').getComputerExecutions(c.req.valid('query').sessionId);
 		return c.json({ executions: executions.map((execution) => ({ ...execution })) });
+	})
+	.post('/__test/native-build', async (c) => {
+		const project = c.get('fsStub');
+		const snapshotHash = await project.snapshotHash(SNAPSHOT_EXCLUDED_DIRECTORIES);
+		using artifact = await project.nativeBuild(snapshotHash);
+		let renderedHtml: string | undefined;
+		let renderedStatus: number | undefined;
+		if (artifact.serverModules && artifact.mainModule) {
+			const server = getServerEntrypoint({
+				loader: c.env.LOADER,
+				cacheKey: `native-build-test:${crypto.randomUUID()}`,
+				moduleSet: {
+					mainModule: artifact.mainModule,
+					modules: serverModulesFromOutput(artifact.serverModules),
+					compatibilityDate: WORKERS_COMPATIBILITY_DATE,
+					compatibilityFlags: ['nodejs_compat'],
+				},
+			});
+			const response = await server.fetch(new Request('https://native-build.test/'));
+			renderedHtml = await response.text();
+			renderedStatus = response.status;
+		}
+		return c.json({ ...artifact, renderedHtml, renderedStatus });
 	})
 	.post('/__test/computer-cancel', zValidator('json', z.object({ id: z.string(), sessionId: z.string() })), async (c) => {
 		const { id, sessionId } = c.req.valid('json');

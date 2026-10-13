@@ -182,6 +182,15 @@ function httpsWebSocketPlugin(): Plugin {
 		configureServer(server) {
 			server.httpServer?.prependListener('upgrade', (request) => {
 				request.headers['x-forwarded-proto'] = request.socket instanceof TLSSocket && request.socket.encrypted ? 'https' : 'http';
+				const protocol = request.headers['sec-websocket-protocol'];
+				if (request.url?.split('?')[0] !== '/__native-hmr' || typeof protocol !== 'string' || !protocol.startsWith('vite')) return;
+				// The Cloudflare adapter otherwise reserves every Vite socket for the editor.
+				// It copies headers synchronously before awaiting the Worker response.
+				request.headers['sec-websocket-protocol'] = `worker-ide-${protocol}`;
+				queueMicrotask(() => {
+					// Preserve the browser's offered protocol for the outer upgrade handshake.
+					request.headers['sec-websocket-protocol'] = protocol;
+				});
 			});
 		},
 	};
