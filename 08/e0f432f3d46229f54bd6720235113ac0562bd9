@@ -1,0 +1,21 @@
+worker/durable/project-filesystem.ts
+  s_457989c78dafac::t_2a81d8813d0277 447-452,474,493
+worker/lib/computer-exec.test.ts
+  s_457989c78dafac::t_bd3cf88eed8363 17-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "08e0f432f3d46229f54bd6720235113ac0562bd9",
+  "prompts": {},
+  "sessions": {
+    "s_457989c78dafac": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12c91-7af0-7ef0-bcfd-17269d020b36",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
