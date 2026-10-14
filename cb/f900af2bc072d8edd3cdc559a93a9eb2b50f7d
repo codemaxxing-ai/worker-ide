@@ -1,0 +1,21 @@
+test/e2e/helpers.ts
+  s_457989c78dafac::t_c6fbf96406f787 6,91,124-133
+test/e2e/runtime-handover.test.ts
+  s_457989c78dafac::t_810a6eb39cc7e8 23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cbf900af2bc072d8edd3cdc559a93a9eb2b50f7d",
+  "prompts": {},
+  "sessions": {
+    "s_457989c78dafac": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12c91-7af0-7ef0-bcfd-17269d020b36",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
