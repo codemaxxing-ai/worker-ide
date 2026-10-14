@@ -14,6 +14,41 @@ class ControlledShell extends ShellWorker {
 }
 
 describe('Computer execution lifecycle without Docker', () => {
+	it('starts a cold container before setting its idle timeout or dispatching a command', async () => {
+		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
+			const shell = new ControlledShell(createExecutionContext(), { HOST: { getWorkspace: () => project.__getWorkspaceStub() } });
+			const computer = new Computer({
+				storage: computerStorage(state.storage),
+				backends: [
+					new WorkerShellBackend({ id: 'container', source: { type: 'external-runtime', connect: () => shell }, egress: { mode: 'none' } }),
+				],
+			});
+			Reflect.set(project, 'computerInstance', computer);
+			let running = false;
+			const operations: string[] = [];
+			vi.spyOn(computer, 'push').mockImplementation(async function* () {
+				operations.push('start');
+				running = true;
+				yield* [];
+			});
+			vi.spyOn(computer, 'pull').mockImplementation(async function* () {});
+			Reflect.set(project, 'getWorkspaceContainer', () => ({
+				setInactivityTimeout: async () => {
+					if (!running) throw new Error('The container has not been started');
+					operations.push('timeout');
+				},
+			}));
+			shell.setCommand(async () => {
+				operations.push('execute');
+				return { stdout: 'started', stderr: '', exitCode: 0 };
+			});
+			const result = await project.computerExec('native command', { backend: 'container' }, 'session');
+			expect(result).toMatchObject({ stdout: 'started', syncStatus: 'complete' });
+			expect(operations.slice(0, 3)).toEqual(['start', 'timeout', 'execute']);
+			await computer.close();
+		});
+	});
+
 	it('releases queued editor writes after validation and container preparation fail before dispatch', async () => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
 			const computer = new Computer({ storage: computerStorage(state.storage) });

@@ -444,7 +444,12 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 			// Known preparation failures must not become an uncertain execution.
 			const cwd = previous ? undefined : computerPath(options.cwd ?? '/');
 			const input = previous || options.inputJson === undefined ? undefined : z.json().parse(JSON.parse(options.inputJson));
-			if (!previous && backend === 'container') await this.getWorkspaceContainer().setInactivityTimeout(120_000);
+			if (!previous && backend === 'container') {
+				for await (const _progress of this.computer.push('container')) {
+					/* Start and synchronize before touching the running container. */
+				}
+				await this.getWorkspaceContainer().setInactivityTimeout(120_000);
+			}
 			if (!previous && options.nativeRuntime) await this.pushNativeSource();
 			this.changes.resume(sessionId);
 			if (!previous) {
@@ -452,7 +457,6 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 				this.ctx.storage.kv.put(key, { status: 'starting', sessionId, backend });
 			}
 			try {
-				if (previous && backend === 'container') await this.getWorkspaceContainer().setInactivityTimeout(120_000);
 				let response = previous?.result;
 				if (!response) {
 					using handle = previous
@@ -467,6 +471,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 								timeoutMs: backend === 'container' ? 300_000 : 30_000,
 								sync: 'wait',
 							});
+					if (backend === 'container') await this.getWorkspaceContainer().setInactivityTimeout(120_000);
 					this.ctx.storage.kv.put(key, { status: 'running', sessionId, backend });
 					const output = await drainComputerOutput(handle, () => this.ctx.storage.setAlarm(Date.now() + 30_000));
 					const cancelled =
@@ -485,6 +490,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 						await this.ctx.storage.setAlarm(Date.now() + 30_000);
 						if (!progress.complete) continue;
 					}
+					await this.getWorkspaceContainer().setInactivityTimeout(120_000);
 				}
 				for (const path of await this.workspace._getAllPaths()) this.markTouched(sessionId, path);
 				await this.changes.finish();
