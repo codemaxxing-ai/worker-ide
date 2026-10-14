@@ -20,7 +20,7 @@ test('promotes a project by size and preserves preview state in the same iframe'
 	document.getElementById('increment').onclick=()=>{counter++;show()};
 	window.__WORKER_IDE_PREVIEW_STATE__={capture:()=>({counter}),restore:state=>{counter=state.counter;show()}};
 	</script></body></html>`;
-	const projectId = await gotoIDE(page, { template: 'minimal', files: { '/index.html': html } });
+	const projectId = await gotoIDE(page, { template: 'minimal', files: { '/index.html': html }, warmContainer: true });
 	const iframe = page.locator('iframe[title="Project Preview"]');
 	const frame = page.frameLocator('iframe[title="Project Preview"]');
 	await expect(frame.getByRole('button', { name: 'Increment' })).toBeVisible();

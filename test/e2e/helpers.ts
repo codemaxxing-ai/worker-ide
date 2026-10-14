@@ -3,6 +3,7 @@ import { hc } from 'hono/client';
 import { localFetch as fetch } from '../local-https';
 
 import type { ApiRoutes, OrgRoutes } from '../../worker/routes';
+import type { DevelopmentTestRoutes } from '../../worker/routes/development-test-routes';
 import type { BrowserContext, Page } from 'playwright/test';
 
 const BASE_URL = process.env.TEST_BASE_URL || 'https://localhost:3000';
@@ -87,7 +88,7 @@ async function createProject(template = 'request-inspector'): Promise<{ projectI
  */
 export async function gotoIDE(
 	page: Page,
-	options: { template?: string; files?: Record<string, string>; warmPreview?: boolean } = {},
+	options: { template?: string; files?: Record<string, string>; warmPreview?: boolean; warmContainer?: boolean } = {},
 ): Promise<string> {
 	const cookie = await ensureTestSession();
 	const { url, projectId } = await createProject(options.template);
@@ -118,6 +119,16 @@ export async function gotoIDE(
 			const response = await api.file.$put({ json: { path, content } });
 			if (!response.ok) throw new Error(`Failed to populate ${path}: ${response.status}`);
 		}
+	}
+
+	if (options.warmContainer) {
+		// Prepare rootless Docker networking before navigating Chromium. Vite
+		// still starts during promotion, after the preview has loaded on Worker.
+		const api = hc<DevelopmentTestRoutes>(`${BASE_URL}/p/${projectId}/api`, { fetch, headers: { Cookie: cookie } });
+		const response = await api.__test['computer-exec'].$post({ json: { command: 'true', backend: 'container' } });
+		if (!response.ok) throw new Error(`Failed to prepare container networking: ${response.status}`);
+		const { result } = await response.json();
+		if (result.exitCode !== 0 || result.syncStatus !== 'complete') throw new Error('Container networking preparation failed');
 	}
 
 	if (options.warmPreview) {
