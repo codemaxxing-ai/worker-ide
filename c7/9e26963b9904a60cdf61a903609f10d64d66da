@@ -1,0 +1,45 @@
+docs/architecture.md
+  s_457989c78dafac::t_9f1b60cfba84e2 50-51
+shared/agent-rpc.ts
+  s_457989c78dafac::t_e1dcf1b3f8176c 29
+src/features/agent/components/agent-panel/panel.test.tsx
+  s_457989c78dafac::t_0d5840cd88c11f 35,79,121,226,343,347,364,378,406-416
+src/features/agent/components/agent-panel/panel.tsx
+  s_457989c78dafac::t_58f558140cca5b 335,542,594
+src/features/agent/hooks/use-agent-sessions.test.tsx
+  s_457989c78dafac::t_3f3c3b5e22e1f4 10,73,240-248,301-400
+src/features/agent/hooks/use-agent-sessions.ts
+  s_457989c78dafac::t_5b8adaf6b85f43 106-108,280,282-283,291,296,298,300,302,305-306,313-321,324-325
+src/features/agent/lib/agent-stub.ts
+  s_457989c78dafac::t_83b5ff16ca18f9 17
+src/features/notifications/notification-toggle.test.tsx
+  s_457989c78dafac::t_9b7a76f7ceead3 37,42,51-99
+src/features/notifications/notification-toggle.tsx
+  s_457989c78dafac::t_ccc644b2cd6c19 54,56,59
+test/e2e/vinext-preview.test.ts
+  s_457989c78dafac::t_f2031c56e14ca5 99-110
+worker/durable/agent-runner-lifecycle.test.ts
+  s_457989c78dafac::t_96136217b7e1b2 2,7,32-91
+worker/durable/agent-runner.ts
+  s_457989c78dafac::t_bb334abe8264b5 112,628,692,754-759,771-773,788,1058,1063
+worker/services/vite-host/runtimes/vinext-preview.test.ts
+  s_457989c78dafac::t_21c64329c7089a 1-55
+worker/services/vite-host/runtimes/vinext-preview.ts
+  s_457989c78dafac::t_5981103c6ef0f7 64-66,87,142,146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c79e26963b9904a60cdf61a903609f10d64d66da",
+  "prompts": {},
+  "sessions": {
+    "s_457989c78dafac": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12c91-7af0-7ef0-bcfd-17269d020b36",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
