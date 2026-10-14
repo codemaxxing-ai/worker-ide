@@ -13,6 +13,7 @@ import { HIDDEN_ENTRIES, STORAGE_BINDING_NAME, WORKERS_COMPATIBILITY_DATE } from
 import { parseJsonc } from '@shared/jsonc';
 import { parsePreviewExternalModuleRequest, parsePreviewRequest, PREVIEW_EXTERNAL_MODULE_PATH } from '@shared/preview-path';
 import { resolveAssetSettings } from '@shared/types';
+import { isWorkerResourceLimit } from '@shared/worker-resource-budget';
 import { fs } from '@worker/lib/project-fs';
 
 import { bundleFiles } from './bundle-service';
@@ -274,6 +275,7 @@ export class StaticReactPreview {
 			});
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
+			if (isWorkerResourceLimit(error)) throw error;
 			if (errorMessage.includes('ENOENT') && !entryFileResolved) {
 				const fallbackResponse = await this.handleNotFoundFallback(url, ideOrigin, assetSettings.not_found_handling);
 				if (fallbackResponse) {

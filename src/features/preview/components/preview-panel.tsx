@@ -16,8 +16,10 @@ import { cn } from '@/lib/utils';
 import { sanitizePreviewElementReference } from '@shared/preview-element';
 
 import { HmrStatusIndicator } from './hmr-status-indicator';
+import { RuntimeStatusIndicator } from './runtime-status-indicator';
 
 export interface PreviewPanelProperties {
+	projectId?: string;
 	previewUrl: string | undefined;
 	previewOrigin: string | undefined;
 	isLoadingUrl: boolean;
@@ -27,6 +29,7 @@ export interface PreviewPanelProperties {
 }
 
 export function PreviewPanel({
+	projectId,
 	previewUrl,
 	previewOrigin,
 	isLoadingUrl,
@@ -256,6 +259,9 @@ export function PreviewPanel({
 				<div className="flex min-w-0 items-center gap-2">
 					<span className="truncate text-xs font-medium text-text-secondary">Preview</span>
 					<HmrStatusIndicator />
+					{projectId && (
+						<RuntimeStatusIndicator key={projectId} projectId={projectId} previewOrigin={previewOrigin} iframeReference={iframeReference} />
+					)}
 				</div>
 
 				<div className="flex shrink-0 items-center gap-1">

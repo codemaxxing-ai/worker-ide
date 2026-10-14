@@ -14,6 +14,8 @@
  * SAME vendored React the rest of the build uses — a second React instance
  * would break hooks.
  */
+import { readWorkerModule } from '@shared/worker-resource-budget';
+
 import { parsePackageSpecifier } from './package-resolver';
 
 import type { MemoryFileSystem } from './node-fs/memory-file-system';
@@ -138,7 +140,7 @@ export async function fetchEsmModule(url: string, fetchImplementation: typeof fe
 	const cache = await openEsmCache();
 	const cachedResponse = cache === undefined ? undefined : await cache.match(url).catch(() => {});
 	if (cachedResponse !== undefined) {
-		return cachedResponse.text();
+		return readWorkerModule(cachedResponse);
 	}
 
 	const response = await fetchImplementation(url, { redirect: 'follow' });
@@ -146,7 +148,7 @@ export async function fetchEsmModule(url: string, fetchImplementation: typeof fe
 		const detail = response.status === 404 ? 'package or version not found' : `${response.status} ${response.statusText}`;
 		throw new Error(`Failed to fetch "${url}" from esm.sh (${detail}).`);
 	}
-	const source = await response.text();
+	const source = await readWorkerModule(response);
 	// Store off-heap under our own long-lived, immutable Cache-Control so the
 	// entry is reused regardless of esm.sh's response headers. Best-effort.
 	if (cache !== undefined) {

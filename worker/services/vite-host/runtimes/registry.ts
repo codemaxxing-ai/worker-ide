@@ -9,9 +9,11 @@
  */
 import { containerVinextRuntime, containerViteRuntime } from './container-vite';
 import { reactSpaRuntime } from './react-spa';
+import { declaresVinext } from './runtime-selection';
 import { vinextRuntime } from './vinext';
 
 import type { FrameworkRuntime, ProjectProbe } from './types';
+import type { RuntimeBackend } from '@shared/runtime-status';
 
 /**
  * All registered runtimes, in detection-priority order. The last entry
@@ -21,7 +23,9 @@ import type { FrameworkRuntime, ProjectProbe } from './types';
 const RUNTIMES: readonly FrameworkRuntime[] = [containerVinextRuntime, containerViteRuntime, vinextRuntime, reactSpaRuntime];
 
 /** The runtime that claims this project (always defined — react-spa is catch-all). */
-export function selectRuntime(probe: ProjectProbe): FrameworkRuntime {
+export function selectRuntime(probe: ProjectProbe, backend?: RuntimeBackend): FrameworkRuntime {
+	if (backend === 'container') return declaresVinext(probe.files) ? containerVinextRuntime : containerViteRuntime;
+	if (backend === 'worker') return vinextRuntime.detect(probe) ? vinextRuntime : reactSpaRuntime;
 	return RUNTIMES.find((runtime) => runtime.detect(probe)) ?? reactSpaRuntime;
 }
 

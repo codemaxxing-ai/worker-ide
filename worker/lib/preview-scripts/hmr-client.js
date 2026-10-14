@@ -81,6 +81,10 @@
 		// Server-driven rebuild lifecycle for warm-build adapters whose (slow) build
 		// happens out-of-band from the client Fast Refresh path. Surface it in the
 		// IDE header via the shared HMR status indicator.
+		if (data.type === 'runtime-status' && data.status) {
+			window.dispatchEvent(new CustomEvent('__preview-runtime-status', { detail: data.status }));
+			return;
+		}
 		if (data.type === 'custom' && data.event === 'preview:rebuild') {
 			postStatus(data.data && data.data.status === 'start' ? 'building' : 'updated');
 			return;

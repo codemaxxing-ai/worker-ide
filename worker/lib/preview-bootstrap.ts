@@ -20,6 +20,7 @@ import { SNAPSHOT_EXCLUDED_DIRECTORIES } from '@shared/constants';
 import { VITE_CONFIG_PATHS } from '../services/vite-host/runtimes/runtime-selection';
 
 import type { ProjectProbe } from '../services/vite-host/runtimes/types';
+import type { RuntimeDecision } from '@shared/runtime-status';
 
 /**
  * What {@link ProjectFilesystem.collectPreviewBootstrap} reads, in root-relative
@@ -60,6 +61,7 @@ export interface PreviewBootstrap {
 	 */
 	snapshotHash: string;
 	configurationFiles?: Record<string, string>;
+	runtimeDecision?: RuntimeDecision;
 }
 
 /**

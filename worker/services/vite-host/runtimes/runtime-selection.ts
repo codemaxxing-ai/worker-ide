@@ -30,6 +30,10 @@ export function declaresVinext(files: Record<string, string>): boolean {
 	return manifest?.dependencies?.vinext !== undefined || manifest?.devDependencies?.vinext !== undefined;
 }
 
+export function readRuntimeOverride(files: Record<string, string>): 'auto' | 'worker' | 'container' | undefined {
+	return readManifest(files)?.workerIde?.runtime;
+}
+
 /** A configuration the Worker host does not implement must run through real Vite. */
 export function selectBuildBackend(files: Record<string, string>): 'worker' | 'container' {
 	const manifest = readManifest(files);

@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
+import { runtimeStatusSchema } from './runtime-status';
+
 import type { PreviewUpdateTarget } from './preview-path';
+import type { RuntimeStatus } from './runtime-status';
 import type { CursorPosition, Participant, SelectionRange, ServerError, ServerLogEntry } from './types';
 export interface PingMessage {
 	type: 'ping';
@@ -164,6 +167,7 @@ export interface TestResultsChangedMessage {
 }
 
 export type ServerMessage =
+	| { type: 'runtime-status'; status: RuntimeStatus }
 	| PongMessage
 	| CollabStateMessage
 	| ParticipantJoinedMessage
@@ -264,6 +268,7 @@ const hmrUpdateSchema = z.object({
 });
 
 export const serverMessageSchema = z.discriminatedUnion('type', [
+	z.object({ type: z.literal('runtime-status'), status: runtimeStatusSchema }),
 	z.object({ type: z.literal('pong') }),
 	z.object({
 		type: z.literal('collab-state'),

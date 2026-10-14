@@ -11,6 +11,8 @@
  * The result is one bundled ESM string per environment, content-addressable and
  * ready to hand to `env.LOADER`.
  */
+import { WorkerBuildBudget } from '@shared/worker-resource-budget';
+
 import { conditionsForEnvironment } from './conditions';
 import {
 	buildEsmCdnUrl,
@@ -291,6 +293,7 @@ function resolveVinextSubpath(specifier: string, fileSystem: MemoryFileSystem): 
 
 function createBridgePlugin(options: BundleModuleGraphOptions, moduleExports?: Map<string, string[]>): EsbuildPlugin {
 	const { container, fileSystem, environment, externals } = options;
+	const dependencyBudget = new WorkerBuildBudget();
 	const ssr = environment !== 'client';
 
 	// Give the container's `this.resolve` the same default resolution the bridge
@@ -360,6 +363,7 @@ function createBridgePlugin(options: BundleModuleGraphOptions, moduleExports?: M
 
 			build.onLoad({ filter: /.*/, namespace: ESM_CDN_NAMESPACE }, async (arguments_) => {
 				const source = await fetchEsmModule(arguments_.path);
+				dependencyBudget.addSource(source);
 				return { contents: source, loader: 'js' };
 			});
 

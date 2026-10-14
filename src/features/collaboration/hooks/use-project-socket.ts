@@ -46,6 +46,7 @@ function invalidateReconnectState(queryClient: ReturnType<typeof useQueryClient>
 	void queryClient.invalidateQueries({ queryKey: ['project-deps', projectId] });
 	void queryClient.invalidateQueries({ queryKey: ['project-settings', projectId] });
 	void queryClient.invalidateQueries({ queryKey: ['project-meta', projectId] });
+	void queryClient.invalidateQueries({ queryKey: ['runtime-status', projectId] });
 
 	// The file-content cache is the single source of on-disk truth. Always
 	// refresh every cached file after a reconnect; in-flight local edits live
@@ -147,6 +148,14 @@ export function useProjectSocket({ projectId, enabled = true }: UseProjectSocket
 					const projectIdCurrent = projectIdReference.current;
 
 					switch (message.type) {
+						case 'runtime-status': {
+							queryClientCurrent.setQueryData(
+								['runtime-status', projectIdCurrent],
+								(previous: import('@shared/runtime-status').RuntimeStatus | undefined) =>
+									previous && previous.revision > message.status.revision ? previous : message.status,
+							);
+							break;
+						}
 						case 'update':
 						case 'full-reload': {
 							// Invalidate the content query for every updated path,

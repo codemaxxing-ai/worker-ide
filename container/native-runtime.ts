@@ -115,7 +115,9 @@ async function flattenPlugins(options: PluginOption[]): Promise<Plugin[]> {
 async function loadConfiguration(command: 'serve' | 'build') {
 	process.chdir(ROOT);
 	const parent = pathToFileURL(path.join(ROOT, 'package.json')).href;
-	const vite: typeof import('vite') = await import(import.meta.resolve('vite', parent));
+	const vite: typeof import('vite') = await Promise.resolve()
+		.then(() => import(import.meta.resolve('vite', parent)))
+		.catch(() => import('vite'));
 	const loaded = await vite.loadConfigFromFile({ command, mode: command === 'serve' ? 'development' : 'production' }, undefined, ROOT);
 	const manifest: unknown = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
 	const vinext = Boolean(
@@ -263,7 +265,40 @@ async function build(identifier: string): Promise<void> {
 		);
 		mainModule = 'index.js';
 	} else {
-		await vite.build({ ...config, build: { ...config.build, outDir: clientDirectory, emptyOutDir: true, write: true } });
+		await mkdir(clientDirectory, { recursive: true });
+		if (await readOptional(path.join(config.root ?? ROOT, 'index.html'))) {
+			await vite.build({ ...config, build: { ...config.build, outDir: clientDirectory, emptyOutDir: true, write: true } });
+		}
+		const entries = await Promise.all(
+			[
+				'worker/index.ts',
+				'worker/index.js',
+				'worker/index.mts',
+				'worker/index.mjs',
+				'src/index.ts',
+				'src/index.js',
+				'index.ts',
+				'index.js',
+			].map(async (filename) => ((await readOptional(path.join(ROOT, filename))) ? filename : undefined)),
+		);
+		const entry = entries.find(Boolean);
+		if (entry) {
+			const esbuild: typeof import('esbuild') = await import('esbuild');
+			const result = await esbuild.build({
+				absWorkingDir: ROOT,
+				entryPoints: [entry],
+				bundle: true,
+				format: 'esm',
+				platform: 'neutral',
+				conditions: ['workerd', 'worker'],
+				mainFields: ['module', 'main'],
+				external: ['node:*', 'cloudflare:*'],
+				minify: true,
+				write: false,
+			});
+			serverModules = { 'index.js': result.outputFiles[0].text };
+			mainModule = 'index.js';
+		}
 	}
 	const clientFiles = await collectFiles(clientDirectory);
 	const size =
@@ -277,6 +312,10 @@ function serveManager(): void {
 	createServer(async (request, response) => {
 		try {
 			const url = new URL(request.url ?? '/', 'http://container');
+			if (request.method === 'GET' && url.pathname === '/health') {
+				response.writeHead(200).end('Ready');
+				return;
+			}
 			if (request.method === 'GET' && url.pathname === '/artifact') {
 				const identifier = url.searchParams.get('id') ?? '';
 				if (!/^[a-f\d-]{36}$/.test(identifier)) throw new Error('Invalid artifact identifier');

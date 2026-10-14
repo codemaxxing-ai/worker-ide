@@ -197,6 +197,7 @@ export function MobileLayout({
 					<div className={cn('overflow-hidden', devtoolsVisible ? 'h-1/2' : 'flex-1')}>
 						<Suspense fallback={<PreviewPanelSkeleton />}>
 							<PreviewPanel
+								projectId={projectId}
 								previewUrl={previewUrl}
 								previewOrigin={previewOrigin}
 								isLoadingUrl={isLoadingPreviewUrl}

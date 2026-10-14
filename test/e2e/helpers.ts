@@ -134,9 +134,7 @@ export async function gotoIDE(
 	}
 
 	// Clear localStorage before the app boots to reset persisted UI state
-	await page.addInitScript(() => {
-		localStorage.clear();
-	});
+	await page.addInitScript({ content: `if (location.origin === ${JSON.stringify(parsedUrl.origin)}) localStorage.clear();` });
 
 	await page.goto(url);
 

@@ -295,6 +295,7 @@ export function DesktopLayout({
 						<Panel id="preview" defaultSize={devtoolsVisible ? '70%' : '100%'} minSize="20%">
 							<Suspense fallback={<PreviewPanelSkeleton />}>
 								<PreviewPanel
+									projectId={projectId}
 									previewUrl={previewUrl}
 									previewOrigin={previewOrigin}
 									isLoadingUrl={isLoadingPreviewUrl}

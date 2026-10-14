@@ -12,17 +12,22 @@
  */
 import { parseJsonc } from '@shared/jsonc';
 import { resolveAssetSettings } from '@shared/types';
+import { isWorkerResourceLimit } from '@shared/worker-resource-budget';
 import { fs } from '@worker/lib/project-fs';
 
+import { filesystemNamespace } from '../lib/durable-object-namespaces';
 import { buildDetectionProbe } from '../lib/preview-bootstrap';
 import { finalizePreviewResponse } from '../lib/preview-response-headers';
+import { previewTransitionScript } from '../lib/preview-transition-script';
+import { toDurableObjectId } from '../lib/project-id';
 import { withSpan } from '../lib/tracing';
 import { selectRuntime } from './vite-host/runtimes/registry';
-import { VITE_CONFIG_PATHS } from './vite-host/runtimes/runtime-selection';
+import { readRuntimeOverride, VITE_CONFIG_PATHS } from './vite-host/runtimes/runtime-selection';
 import { serveVinextPreview } from './vite-host/runtimes/vinext-preview';
 
 import type { PreviewBootstrap } from '../lib/preview-bootstrap';
 import type { FrameworkRuntime } from './vite-host/runtimes/types';
+import type { RuntimeDecision } from '@shared/runtime-status';
 import type { ResolvedAssetSettings } from '@shared/types';
 
 export class PreviewService {
@@ -31,13 +36,6 @@ export class PreviewService {
 		private readonly projectId: string,
 	) {}
 
-	/**
-	 * Seed the runtime + asset-settings memos from a single preview bootstrap
-	 * snapshot (see {@link PreviewBootstrap}), so the burst of subrequests behind
-	 * a page load serve without any further cross-DO reads. The `PreviewService`
-	 * instance is cached per project; seeding with a fresh snapshot is strictly
-	 * better than letting the memos lazily re-read the tree.
-	 */
 	/** Asset settings from the project's `wrangler.jsonc` (defaults when absent). */
 	async loadAssetSettings(): Promise<ResolvedAssetSettings> {
 		let raw: string | undefined;
@@ -61,44 +59,110 @@ export class PreviewService {
 		return withSpan(
 			'preview.route',
 			async (span) => {
-				const runtime = bootstrap === undefined ? await this.resolveRuntime() : selectRuntime(buildDetectionProbe(bootstrap));
+				const probe = bootstrap === undefined ? { files: await this.collectDetectionFiles() } : buildDetectionProbe(bootstrap);
+				const project = filesystemNamespace.get(toDurableObjectId(filesystemNamespace, this.projectId));
+				let decision = bootstrap?.runtimeDecision ?? (await project.getBuildRuntimeDecision(probe.files));
+				const runtime = selectRuntime(probe, decision.backend);
 				span.setAttribute('runtime.id', runtime.id);
 				span.setAttribute('runtime.hosting', runtime.hosting);
-
-				if (runtime.hosting === 'artifact') {
-					if (snapshotHash === undefined) throw new Error('Missing snapshot hash for build runtime');
-					return finalizePreviewResponse(
-						await serveVinextPreview({
-							request,
-							projectId: this.projectId,
-							projectRoot: this.projectRoot,
-							ideOrigin,
-							snapshotHash,
-							runtime,
-						}),
-						{ ideOrigin },
-					);
-				}
-
+				const navigation =
+					request.method === 'GET' && (new URL(request.url).pathname === '/' || request.headers.get('Accept')?.includes('text/html'));
+				if (navigation) await project.reportRuntimeStatus('preview', decision, 'starting');
 				const assetSettings = preloadedAssetSettings ?? (await this.loadAssetSettings());
-				return runtime.serve(request, {
-					projectRoot: this.projectRoot,
-					projectId: this.projectId,
-					ideOrigin,
-					assetSettings,
-				});
+				try {
+					// Dependency/source edits can select a container on a module subrequest.
+					// Warm its document before notifying the already loaded preview to switch.
+					if (!navigation && decision.backend === 'container' && request.method === 'GET') {
+						const status = await project.getRuntimeStatus();
+						if (
+							status.preview.backend !== 'container' ||
+							status.preview.phase !== 'ready' ||
+							status.preview.generation !== decision.generation
+						) {
+							await project.reportRuntimeStatus('preview', decision, 'starting');
+							const readyUrl = new URL(request.url);
+							readyUrl.pathname = '/';
+							readyUrl.search = '';
+							const ready = await this.serve(
+								runtime,
+								new Request(readyUrl, { headers: request.headers }),
+								ideOrigin,
+								assetSettings,
+								snapshotHash,
+							);
+							await project.reportRuntimeStatus('preview', decision, ready.ok ? 'ready' : 'error');
+							await ready.body?.cancel();
+						}
+					}
+					const response = await this.serve(runtime, request, ideOrigin, assetSettings, snapshotHash);
+					if (navigation) await project.reportRuntimeStatus('preview', decision, response.ok ? 'ready' : 'error');
+					return this.describeRuntime(response, decision, ideOrigin);
+				} catch (error) {
+					if (decision.backend !== 'worker' || !isWorkerResourceLimit(error) || readRuntimeOverride(probe.files) === 'worker') {
+						await project.reportRuntimeStatus('preview', decision, 'error');
+						throw error;
+					}
+					// Only retry preview GET/HEAD requests. Never replay application mutations.
+					if (request.method !== 'GET' && request.method !== 'HEAD') throw error;
+					decision = await project.promoteBuildRuntime('preview');
+					const native = selectRuntime(probe, 'container');
+					const readyUrl = new URL(request.url);
+					readyUrl.pathname = '/';
+					readyUrl.search = '';
+					try {
+						const ready = await this.serve(
+							native,
+							new Request(readyUrl, { headers: request.headers }),
+							ideOrigin,
+							assetSettings,
+							snapshotHash,
+						);
+						await project.reportRuntimeStatus('preview', decision, ready.ok ? 'ready' : 'error');
+						if (navigation && new URL(request.url).pathname === '/') return this.describeRuntime(ready, decision, ideOrigin);
+						await ready.body?.cancel();
+						return this.describeRuntime(await this.serve(native, request, ideOrigin, assetSettings, snapshotHash), decision, ideOrigin);
+					} catch (nativeError) {
+						await project.reportRuntimeStatus('preview', decision, 'error');
+						throw nativeError;
+					}
+				}
 			},
 			{ 'project.id': this.projectId, 'request.path': new URL(request.url).pathname },
 		);
 	}
 
-	/**
-	 * Resolve the project's runtime from a minimal probe when the request did not
-	 * already carry the one-round-trip preview bootstrap.
-	 */
-	private async resolveRuntime(): Promise<FrameworkRuntime> {
-		const probe = await withSpan('preview.detect', () => this.collectDetectionFiles());
-		return selectRuntime({ files: probe });
+	/** Serve through the selected host after authorization and runtime selection. */
+	private async serve(
+		runtime: FrameworkRuntime,
+		request: Request,
+		ideOrigin: string,
+		assetSettings: ResolvedAssetSettings,
+		snapshotHash?: string,
+	): Promise<Response> {
+		if (runtime.hosting === 'artifact') {
+			if (snapshotHash === undefined) throw new Error('Missing snapshot hash for build runtime');
+			return finalizePreviewResponse(
+				await serveVinextPreview({ request, projectId: this.projectId, projectRoot: this.projectRoot, ideOrigin, snapshotHash, runtime }),
+				{ ideOrigin },
+			);
+		}
+		return runtime.serve(request, { projectRoot: this.projectRoot, projectId: this.projectId, ideOrigin, assetSettings });
+	}
+
+	private describeRuntime(response: Response, decision: RuntimeDecision, ideOrigin: string): Response {
+		if (response.status === 101) return response;
+		const headers = new Headers(response.headers);
+		headers.set('X-Worker-Ide-Runtime', decision.backend);
+		const described = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+		if (!response.ok || !response.headers.get('Content-Type')?.includes('text/html')) return described;
+		const script = `<script>${previewTransitionScript(decision, ideOrigin, this.projectId)}</script>`;
+		return new HTMLRewriter()
+			.on('head', {
+				element(element) {
+					element.prepend(script, { html: true });
+				},
+			})
+			.transform(described);
 	}
 
 	/**

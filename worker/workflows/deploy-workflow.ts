@@ -5,6 +5,7 @@ import { NonRetryableError } from 'cloudflare:workflows';
 
 import { SNAPSHOT_EXCLUDED_DIRECTORIES } from '@shared/constants';
 import { sanitizeR2BucketName } from '@shared/deploy-helpers';
+import { isWorkerResourceLimit, WorkerResourceLimitError } from '@shared/worker-resource-budget';
 
 import {
 	bundleFrontend,
@@ -30,6 +31,7 @@ import { getBuildArtifact } from '../services/vite-host/build-artifact-client';
 import { selectRuntime } from '../services/vite-host/runtimes/registry';
 
 import type { DeployResult, DeployWorkflowParameters } from '@shared/deploy-types';
+import type { RuntimeDecision } from '@shared/runtime-status';
 import type { WorkflowEvent, WorkflowStep, WorkflowStepConfig } from 'cloudflare:workers';
 
 const BUILD_STEP_CONFIG: WorkflowStepConfig = {
@@ -63,7 +65,7 @@ function extractErrorMessage(error: unknown): string {
 }
 
 function toNonRetryableError(error: unknown): Error {
-	return new NonRetryableError(extractErrorMessage(error));
+	return new NonRetryableError(isWorkerResourceLimit(error) ? new WorkerResourceLimitError().message : extractErrorMessage(error));
 }
 
 export class DeployWorkflow extends WorkflowEntrypoint<Env, DeployWorkflowParameters> {
@@ -100,6 +102,7 @@ export class DeployWorkflow extends WorkflowEntrypoint<Env, DeployWorkflowParame
 		const parameters = event.payload;
 		const filesystemId = toDurableObjectId(filesystemNamespace, parameters.projectId);
 		const filesystemStub = filesystemNamespace.get(filesystemId);
+		let decision: RuntimeDecision | undefined;
 
 		try {
 			const { inputs, snapshotHash } = await step.do('read-project-config', async () => {
@@ -114,12 +117,24 @@ export class DeployWorkflow extends WorkflowEntrypoint<Env, DeployWorkflowParame
 				return { inputs, snapshotHash };
 			});
 
-			const runtime = selectRuntime({ files: inputs.allFiles });
+			decision = await filesystemStub.getBuildRuntimeDecision(inputs.allFiles);
+			await filesystemStub.reportRuntimeStatus('build', decision, 'starting');
+			const runtime = selectRuntime({ files: inputs.allFiles }, decision.backend);
 			if (runtime.hosting === 'container') await this.bundleAndUploadNative(step, parameters, filesystemStub, inputs, snapshotHash);
-			else
-				await (runtime.hosting === 'artifact'
-					? this.bundleAndUploadRuntime(step, parameters, inputs, runtime.id)
-					: this.bundleAndUploadStatic(step, parameters, filesystemStub, inputs));
+			else {
+				try {
+					await (runtime.hosting === 'artifact'
+						? this.bundleAndUploadRuntime(step, parameters, inputs, runtime.id)
+						: this.bundleAndUploadStatic(step, parameters, filesystemStub, inputs));
+				} catch (error) {
+					// Only compiler failures are tagged. Upload failures do not restart builds.
+					if (!(error instanceof Error) || !error.message.includes('WORKER_RESOURCE_LIMIT') || decision.reason === 'explicit-choice')
+						throw error;
+					decision = await filesystemStub.promoteBuildRuntime('build');
+					await this.bundleAndUploadNative(step, parameters, filesystemStub, inputs, snapshotHash);
+				}
+			}
+			await filesystemStub.reportRuntimeStatus('build', decision, 'ready');
 
 			await step.do('enable-subdomain', SHORT_CLOUDFLARE_API_STEP_CONFIG, async () => {
 				const accessToken = await this.resolveAccessToken(parameters);
@@ -159,6 +174,7 @@ export class DeployWorkflow extends WorkflowEntrypoint<Env, DeployWorkflowParame
 
 			return result;
 		} catch (error) {
+			if (decision) await filesystemStub.reportRuntimeStatus('build', decision, 'error');
 			const message = extractErrorMessage(error);
 			trackProjectEvent({
 				organizationId: parameters.organizationId,
@@ -184,6 +200,11 @@ export class DeployWorkflow extends WorkflowEntrypoint<Env, DeployWorkflowParame
 		await step.do('build-and-deploy-native', { ...VINEXT_DEPLOY_STEP_CONFIG, retries: { limit: 0, delay: '1 second' } }, async () => {
 			try {
 				using build = await filesystemStub.nativeBuild(snapshotHash);
+				if (
+					!build.serverModules &&
+					Object.keys(inputs.allFiles).some((filename) => /^(?:worker\/index\.m?[jt]s|(?:src\/)?index\.[jt]s)$/.test(filename))
+				)
+					throw new Error('Native build did not produce the Worker entry. Retry after the container runtime updates.');
 				const staticAssets = new Map<string, Uint8Array>(
 					Object.entries(build.clientFiles).map(([filename, bytes]) => [`/${filename}`, Buffer.from(bytes, 'base64')]),
 				);
@@ -205,11 +226,7 @@ export class DeployWorkflow extends WorkflowEntrypoint<Env, DeployWorkflowParame
 					});
 					return;
 				}
-				const hasWorker = Object.keys(inputs.allFiles).some((filename) => /^worker\/index\.[jt]s$/.test(filename));
-				const workerBundle = hasWorker
-					? await runWithProjectStub(filesystemStub, () => bundleWorker(parameters.projectRoot, inputs, true), parameters.projectRoot)
-					: undefined;
-				const workerCode = workerBundle?.workerCode ?? 'export default { fetch() { return new Response("Not found", { status: 404 }); } };';
+				const workerCode = 'export default { fetch() { return new Response("Not found", { status: 404 }); } };';
 				await uploadWorkerScript(
 					parameters.accountId,
 					accessToken,
@@ -250,7 +267,17 @@ export class DeployWorkflow extends WorkflowEntrypoint<Env, DeployWorkflowParame
 		);
 
 		const frontendBundle = await step.do('bundle-frontend', BUILD_STEP_CONFIG, async () =>
-			runWithProjectStub(filesystemStub, async () => bundleFrontend(parameters.projectRoot, inputs), parameters.projectRoot),
+			runWithProjectStub(
+				filesystemStub,
+				async () => {
+					try {
+						return await bundleFrontend(parameters.projectRoot, inputs);
+					} catch (error) {
+						throw toNonRetryableError(error);
+					}
+				},
+				parameters.projectRoot,
+			),
 		);
 
 		const staticAssets = entriesToStaticAssets(frontendBundle.staticAssetsEntries);

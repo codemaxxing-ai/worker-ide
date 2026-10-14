@@ -10,6 +10,7 @@ import { lintRoutes } from './lint-routes';
 import { previewUrlRoutes } from './preview-url-routes';
 import { projectRoutes } from './project-routes';
 import { reviewRoutes } from './review-routes';
+import { runtimeStatusRoutes } from './runtime-status-routes';
 import { snapshotRoutes } from './snapshot-routes';
 import { sttRoutes } from './stt-routes';
 import { testRoutes } from './test-routes';
@@ -25,6 +26,7 @@ export const apiRoutes = new Hono<AppEnvironment>()
 	.route('', fileRoutes)
 	.route('', projectRoutes)
 	.route('', previewUrlRoutes)
+	.route('', runtimeStatusRoutes)
 	.route('', reviewRoutes)
 	.route('', snapshotRoutes)
 	.route('', agentRoutes)

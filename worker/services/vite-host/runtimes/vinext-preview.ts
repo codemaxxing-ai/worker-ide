@@ -3,6 +3,7 @@ import { env, exports } from 'cloudflare:workers';
 
 import { SNAPSHOT_EXCLUDED_DIRECTORIES, STORAGE_BINDING_NAME, WORKERS_COMPATIBILITY_DATE } from '@shared/constants';
 import { isPreviewStylePath, normalizePreviewPath } from '@shared/preview-path';
+import { isWorkerResourceLimit } from '@shared/worker-resource-budget';
 
 import { DEVELOPMENT_STYLE_PREFIX } from './shared';
 import { toBundleServerError } from '../../../lib/build-server-error';
@@ -86,6 +87,7 @@ export async function serveVinextPreview(input: VinextPreviewInput): Promise<Res
 		}
 		return response.headers.get('Content-Type')?.includes('text/html') ? injectHmrRuntime(response, input, bootVersion) : response;
 	} catch (error) {
+		if (isWorkerResourceLimit(error)) throw error;
 		return renderServerError(toBundleServerError(error), input);
 	}
 }

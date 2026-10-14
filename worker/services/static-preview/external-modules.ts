@@ -1,4 +1,5 @@
 import { isAllowedPreviewExternalModuleUrl } from '@shared/preview-path';
+import { isWorkerResourceLimit, readWorkerModule } from '@shared/worker-resource-budget';
 
 import { rewriteExternalModuleImports } from '../transform-service';
 import { cleanBuildErrorMessage } from './preview-errors';
@@ -22,7 +23,7 @@ async function fetchExternalModule(externalUrl: string): Promise<ExternalModule>
 
 	const contentTypeHeader = upstreamResponse.headers.get('content-type') || 'application/javascript';
 	const contentType = contentTypeHeader.split(';')[0]?.trim() || 'application/javascript';
-	const bodyText = await upstreamResponse.text();
+	const bodyText = await readWorkerModule(upstreamResponse);
 	return { bodyText, contentType, finalUrl: upstreamResponse.url };
 }
 
@@ -48,6 +49,7 @@ async function serveExternalModule(externalUrl: string, requestTimestamp: string
 			headers: { 'Content-Type': externalModule.contentType, 'Cache-Control': 'public, max-age=1800' },
 		});
 	} catch (error) {
+		if (isWorkerResourceLimit(error)) throw error;
 		const errorMessage = error instanceof Error ? error.message : String(error);
 		const errorModule = `throw new Error(${JSON.stringify(cleanBuildErrorMessage(errorMessage))});`;
 		return new Response(errorModule, {

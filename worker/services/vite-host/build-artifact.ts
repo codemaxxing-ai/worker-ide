@@ -9,6 +9,7 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 
 import { SNAPSHOT_EXCLUDED_DIRECTORIES } from '@shared/constants';
+import { isWorkerResourceLimit } from '@shared/worker-resource-budget';
 
 import { getRuntimeById } from './runtimes/registry';
 import { parseRuntimeBuild } from './runtimes/runtime-build';
@@ -100,7 +101,13 @@ export class BuildArtifact extends WorkerEntrypoint<Env, BuildArtifactProperties
 				});
 			},
 			{ 'project.id': this.ctx.props.projectId },
-		);
+		).catch((error: unknown) => {
+			if (!isWorkerResourceLimit(error)) throw error;
+			return new Response('Compilation requires a container', {
+				status: 503,
+				headers: { 'Cache-Control': 'no-store', 'X-Worker-Ide-Resource-Limit': '1' },
+			});
+		});
 		if (response.ok) {
 			await cache.put(request, response.clone());
 		}

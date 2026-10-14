@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { SNAPSHOT_EXCLUDED_DIRECTORIES } from '@shared/constants';
 import { classifyOrigin } from '@shared/domain';
 import { toolInputSchemas } from '@shared/validation/tools';
+import { WorkerBuildBudget, isWorkerResourceLimit } from '@shared/worker-resource-budget';
 
 import { GitService } from './git-service';
 import { selectComputerBackend } from '../lib/computer-backend';
@@ -24,12 +25,16 @@ import { restoreComputerSnapshots } from '../lib/computer-snapshots';
 import { computerStorage } from '../lib/computer-storage';
 import { ComputerWorkspace, computerPath, projectPath } from '../lib/computer-workspace';
 import { getDomainConfiguration } from '../lib/domain-configuration';
+import { coordinatorNamespace } from '../lib/durable-object-namespaces';
 import { nativeBuildSchema } from '../lib/native-build';
 import { collectNativePreviewSource } from '../lib/native-preview-source';
+import { waitForNativeRuntime } from '../lib/native-runtime-readiness';
 import { generateProjectId } from '../lib/project-id';
+import { ProjectRuntimeState } from '../lib/project-runtime-state';
 import { hashSnapshot } from '../lib/snapshot-hash';
 import { withSpan } from '../lib/tracing';
 import { WorkspaceFsAdapter } from '../lib/workspace-fs-adapter';
+import { readRuntimeOverride, selectBuildBackend } from '../services/vite-host/runtimes/runtime-selection';
 
 import type { GitAuthor, GitStatusResponse } from './git-service';
 import type { PreviewBootstrap, PreviewBootstrapInputs } from '../lib/preview-bootstrap';
@@ -37,6 +42,7 @@ import type { RequestOriginContext } from '../services/agent/request-origin-cont
 import type { FileInfo, FileStat } from '@cloudflare/shell';
 import type { ComputerExecOptions, ComputerExecResult, ComputerReviewOptions } from '@shared/computer';
 import type { ProjectFilesystemRpc } from '@shared/project-filesystem-rpc';
+import type { RuntimeDecision, RuntimePhase, RuntimeStatus, RuntimeSurface } from '@shared/runtime-status';
 import type { GitBranchInfo, GitCommitEntry, GitFileDiff, GitMergeResult } from '@shared/types';
 
 interface SeedFile {
@@ -118,6 +124,56 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	private changesInstance?: ComputerChanges;
 	private nativePreviewStarting?: Promise<void>;
 	private nativePreviewConfiguration?: string;
+	private nativePreviewMonitor?: Promise<void>;
+	private get runtimeState(): ProjectRuntimeState {
+		return new ProjectRuntimeState(this.ctx.storage.kv);
+	}
+
+	getBuildRuntimeDecision(files: Record<string, string>): RuntimeDecision {
+		const override = readRuntimeOverride(files);
+		if (override === 'worker' || override === 'container') return this.runtimeState.select(override, 'explicit-choice');
+		if (selectBuildBackend(files) === 'container') return this.runtimeState.select('container', 'project-requirements');
+		if (this.runtimeState.promoted) return this.runtimeState.select('container', 'resource-limit');
+		try {
+			const budget = new WorkerBuildBudget();
+			for (const [filename, contents] of Object.entries(files)) if (/\.(?:[mc]?[jt]sx?|css)$/.test(filename)) budget.addSource(contents);
+		} catch (error) {
+			if (!isWorkerResourceLimit(error)) throw error;
+			this.runtimeState.promote();
+			return this.runtimeState.select('container', 'resource-limit');
+		}
+		return this.runtimeState.select('worker', 'simple-project');
+	}
+
+	async promoteBuildRuntime(surface: RuntimeSurface): Promise<RuntimeDecision> {
+		this.runtimeState.promote();
+		const decision = this.runtimeState.select('container', 'resource-limit');
+		await this.reportRuntimeStatus(surface, decision, 'starting');
+		return decision;
+	}
+
+	async reportRuntimeStatus(surface: RuntimeSurface, decision: RuntimeDecision, phase: RuntimePhase): Promise<void> {
+		const status = this.runtimeState.update(surface, decision, phase);
+		if (!status) return;
+		await coordinatorNamespace
+			.getByName(`project:${this.projectId}`)
+			.updateRuntimeStatus(status)
+			.catch((error: unknown) => {
+				console.error('Runtime status broadcast failed', error);
+			});
+	}
+
+	async getRuntimeStatus(): Promise<RuntimeStatus> {
+		const status = this.runtimeState.status;
+		if (status.preview.backend === 'container' && status.preview.phase === 'ready' && !this.ctx.container?.running) {
+			await this.reportRuntimeStatus(
+				'preview',
+				{ backend: 'container', generation: status.preview.generation, reason: status.preview.reason ?? 'project-requirements' },
+				'sleeping',
+			);
+		}
+		return this.runtimeState.status;
+	}
 
 	private get projectId(): string {
 		return generateProjectId(this.ctx.id);
@@ -224,6 +280,9 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 		for await (const _progress of this.computer.push('container')) {
 			/* Preserve FIFO ownership through synchronization. */
 		}
+		await waitForNativeRuntime(() =>
+			this.getWorkspaceContainer().fetchPort(8788, 'http://container/health', { signal: AbortSignal.timeout(3000) }),
+		);
 		const source = await collectNativePreviewSource(this.workspace);
 		const response = await this.getWorkspaceContainer().fetchPort(8788, 'http://container/sync', {
 			method: 'POST',
@@ -236,6 +295,20 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	}
 
 	private async nativePreviewFetch(request: Request, ideOrigin: string, contentOrigin: string): Promise<Response> {
+		const selected = this.ctx.storage.kv.get<RuntimeDecision>('project-runtime-decision');
+		const decision = selected?.backend === 'container' ? selected : undefined;
+		if (decision) await this.reportRuntimeStatus('preview', decision, 'starting');
+		try {
+			const response = await this.serveNativePreview(request, ideOrigin, contentOrigin);
+			if (decision) await this.reportRuntimeStatus('preview', decision, response.status < 500 ? 'ready' : 'error');
+			return response;
+		} catch (error) {
+			if (decision) await this.reportRuntimeStatus('preview', decision, 'error');
+			throw error;
+		}
+	}
+
+	private async serveNativePreview(request: Request, ideOrigin: string, contentOrigin: string): Promise<Response> {
 		this.assertComputerStore();
 		const origin = new URL(request.url).origin;
 		const inputs: Record<string, string> = { origin, ideOrigin };
@@ -300,7 +373,20 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 			if (protocol?.startsWith('worker-ide-vite')) forwarded.headers.set('Sec-WebSocket-Protocol', protocol.slice('worker-ide-'.length));
 		}
 		try {
-			return await this.getWorkspaceContainer().fetchPort(5173, forwarded);
+			const response = await this.getWorkspaceContainer().fetchPort(5173, forwarded);
+			if (!this.nativePreviewMonitor && this.ctx.container) {
+				this.nativePreviewMonitor = this.ctx.container
+					.monitor()
+					.catch(() => {})
+					.then(async () => {
+						this.nativePreviewMonitor = undefined;
+						if (this.ctx.container?.running) return;
+						this.nativePreviewConfiguration = undefined;
+						await this.getRuntimeStatus();
+					});
+				this.ctx.waitUntil(this.nativePreviewMonitor);
+			}
+			return response;
 		} catch (error) {
 			this.nativePreviewConfiguration = undefined;
 			throw error;
@@ -770,12 +856,13 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	 * the raw snapshot via `buildDetectionProbe`.
 	 */
 	async collectPreviewBootstrap(inputs: PreviewBootstrapInputs): Promise<PreviewBootstrap> {
+		const snapshot = await this.buildSnapshotRecord(inputs.excludedDirectories);
 		const [exists, wranglerJsonc, packageJson, indexHtml, snapshotHash, configurationEntries, ...directoryEntries] = await Promise.all([
 			this.projectExists(),
 			this.workspace.readFile(inputs.wranglerPath).then((value) => value ?? undefined),
 			this.workspace.readFile(inputs.packageJsonPath).then((value) => value ?? undefined),
 			this.workspace.readFile(inputs.indexHtmlPath).then((value) => value ?? undefined),
-			hashSnapshot(await this.buildSnapshotRecord(inputs.excludedDirectories)),
+			hashSnapshot(snapshot),
 			Promise.all(
 				(inputs.configurationPaths ?? []).map(async (path) => ({ path: `/${path}`, content: await this.workspace.readFile(`/${path}`) })),
 			),
@@ -787,7 +874,16 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 		}
 		const configurationFiles: Record<string, string> = {};
 		for (const entry of configurationEntries) if (typeof entry.content === 'string') configurationFiles[entry.path] = entry.content;
-		return { exists, wranglerJsonc, packageJson, indexHtml, routerFirstEntries, snapshotHash, configurationFiles };
+		return {
+			exists,
+			wranglerJsonc,
+			packageJson,
+			indexHtml,
+			routerFirstEntries,
+			snapshotHash,
+			configurationFiles,
+			runtimeDecision: this.getBuildRuntimeDecision(snapshot),
+		};
 	}
 
 	/**

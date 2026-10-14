@@ -405,6 +405,22 @@ describe('preview runtime and hmr transport', () => {
 		previewRuntime.createHotContext('/src/custom.ts').send('client:event', { ok: true });
 		expect(socket.sentMessages).toContain(JSON.stringify({ type: 'custom', event: 'client:event', data: { ok: true } }));
 	});
+	it('delivers live runtime status to the standalone handover bridge', () => {
+		bootPreviewRuntime();
+		const socket = bootHmrClient();
+		const received: unknown[] = [];
+		const receive = (event: Event) => {
+			if (event instanceof CustomEvent) received.push(event.detail);
+		};
+		globalThis.addEventListener('__preview-runtime-status', receive);
+		try {
+			const status = { preview: { backend: 'container', phase: 'ready', generation: 2 } };
+			socket.dispatch('message', { data: JSON.stringify({ type: 'runtime-status', status }) });
+			expect(received).toEqual([status]);
+		} finally {
+			globalThis.removeEventListener('__preview-runtime-status', receive);
+		}
+	});
 
 	it('preserves an existing self-accept callback when auto-accept runs afterwards', async () => {
 		bootPreviewRuntime();

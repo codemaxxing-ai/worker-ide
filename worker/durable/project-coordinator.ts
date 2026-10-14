@@ -5,6 +5,7 @@ import { serializeMessage, parseClientMessage } from '@shared/ws-messages';
 
 import { trackWebSocketEvent } from '../lib/analytics';
 
+import type { RuntimeStatus } from '@shared/runtime-status';
 import type { AssetSettings, BindingsConfig, HmrUpdate, Participant } from '@shared/types';
 import type { ServerMessage } from '@shared/ws-messages';
 type ProjectSocketClientKind = 'ide' | 'preview';
@@ -412,6 +413,14 @@ export class ProjectCoordinatorV2 extends DurableObject {
 		this.sendToKind('ide', serialized);
 	}
 
+	updateRuntimeStatus(status: RuntimeStatus): void {
+		const previous = this.ctx.storage.kv.get<RuntimeStatus>('project-runtime-status');
+		if (previous && previous.revision >= status.revision) return;
+		this.ctx.storage.kv.put('project-runtime-status', status);
+		this.sendToKind('ide', serializeMessage({ type: 'runtime-status', status }));
+		this.sendToKind('preview', serializeMessage({ type: 'runtime-status', status }));
+	}
+
 	async closeProjectConnections(code: number, reason: string): Promise<void> {
 		for (const ws of this.ctx.getWebSockets()) {
 			try {
@@ -574,6 +583,10 @@ export class ProjectCoordinatorV2 extends DurableObject {
 					}
 				}
 
+				// Reconnecting standalone previews may have missed a runtime transition.
+				const runtimeStatus = this.ctx.storage.kv.get<RuntimeStatus>('project-runtime-status');
+				if (runtimeStatus) ws.send(serializeMessage({ type: 'runtime-status', status: runtimeStatus }));
+
 				// Replay the last bundle error to a freshly-connected (or reloaded)
 				// preview so its in-iframe overlay reflects the current state without
 				// the editor having to forward it. The preview client renders the
@@ -600,6 +613,8 @@ export class ProjectCoordinatorV2 extends DurableObject {
 				}
 				att.joined = true;
 				this.setAttachment(ws, att);
+				const runtimeStatus = this.ctx.storage.kv.get<RuntimeStatus>('project-runtime-status');
+				if (runtimeStatus) ws.send(serializeMessage({ type: 'runtime-status', status: runtimeStatus }));
 
 				// Send initial collab state with active agent session (if any).
 				// The agent status query is async, so we send the base state first

@@ -2,6 +2,7 @@ import * as esbuild from 'esbuild-wasm';
 
 import { BundleDependencyError } from '@shared/bundler-types';
 import { toAbsolutePreviewPath } from '@shared/preview-path';
+import { WorkerBuildBudget, readWorkerModule } from '@shared/worker-resource-budget';
 
 // @ts-expect-error -- WASM module import resolved to WebAssembly.Module by Cloudflare at deploy time
 import esbuildWasm from '../../vendor/esbuild.wasm';
@@ -48,6 +49,7 @@ function getLoader(path: string): esbuild.Loader {
 	return 'js';
 }
 export async function transformCode(code: string, filename: string, options?: TransformOptions): Promise<TransformResult> {
+	new WorkerBuildBudget().addSource(code);
 	await initializeEsbuild();
 
 	const loader = getLoader(filename);
@@ -80,7 +82,7 @@ function extractPackageName(urlPath: string): string {
  * Fetch a module from esm.sh, following redirects.
  * Pushes structured errors into the collector when a package cannot be resolved.
  */
-async function fetchFromCdn(url: string, dependencyErrors?: DependencyError[]): Promise<string> {
+async function fetchFromCdn(url: string, dependencyErrors?: DependencyError[], budget?: WorkerBuildBudget): Promise<string> {
 	const response = await fetch(url, { redirect: 'follow' });
 	if (!response.ok) {
 		const urlPath = url.replace(ESM_CDN + '/', '');
@@ -94,7 +96,7 @@ async function fetchFromCdn(url: string, dependencyErrors?: DependencyError[]): 
 		dependencyErrors?.push({ packageName, code: 'resolve-failed', message });
 		throw new Error(message);
 	}
-	return response.text();
+	return readWorkerModule(response, budget);
 }
 function resolveUrl(base: string, relative: string): string {
 	try {
@@ -108,7 +110,7 @@ function resolveUrl(base: string, relative: string): string {
  * esbuild plugin that resolves bare package imports via esm.sh CDN.
  * Fetches and inlines the module source at bundle time.
  */
-function createEsmCdnPlugin(dependencyErrors?: DependencyError[]): esbuild.Plugin {
+function createEsmCdnPlugin(dependencyErrors: DependencyError[], budget: WorkerBuildBudget): esbuild.Plugin {
 	return {
 		name: 'esm-cdn',
 		setup(build) {
@@ -130,7 +132,7 @@ function createEsmCdnPlugin(dependencyErrors?: DependencyError[]): esbuild.Plugi
 
 			// Load modules from esm.sh
 			build.onLoad({ filter: /.*/, namespace: 'esm-cdn' }, async (arguments_) => {
-				const source = await fetchFromCdn(arguments_.path, dependencyErrors);
+				const source = await fetchFromCdn(arguments_.path, dependencyErrors, budget);
 				return { contents: source, loader: 'js' };
 			});
 		},
@@ -408,6 +410,8 @@ function isJsxOrTsxFile(filePath: string): boolean {
  * from esm.sh CDN at bundle time. Used for both frontend (React) and backend (Hono).
  */
 export async function bundleWithCdn(options: BundleWithCdnOptions): Promise<BundleResult> {
+	const budget = new WorkerBuildBudget();
+	for (const contents of Object.values(options.files)) budget.addSource(contents);
 	await initializeEsbuild();
 
 	const {
@@ -445,7 +449,7 @@ export async function bundleWithCdn(options: BundleWithCdnOptions): Promise<Bund
 			target: 'es2022',
 			minify,
 			sourcemap: sourcemap ? 'inline' : false,
-			plugins: [virtualFsPlugin, createEsmCdnPlugin(collectedDependencyErrors)],
+			plugins: [virtualFsPlugin, createEsmCdnPlugin(collectedDependencyErrors, budget)],
 			outfile: 'bundle.js',
 			tsconfigRaw,
 		});

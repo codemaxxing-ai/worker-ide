@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
+import { emptyRuntimeStatus } from '@shared/runtime-status';
 import { parseServerMessage, serializeMessage } from '@shared/ws-messages';
 
 import type { ProjectCoordinatorV2 } from './project-coordinator';
@@ -103,6 +104,68 @@ function closeSocket(socket: WebSocket): void {
 		// ignore
 	}
 }
+
+describe('runtime status transport', () => {
+	it('delivers live changes to standalone previews and replays them after HMR reconnect', async () => {
+		const stub = getCoordinatorStub(crypto.randomUUID());
+		const response = await stub.fetch(
+			new Request('https://example.test/ws', {
+				headers: { Upgrade: 'websocket', 'x-worker-ide-client-kind': 'preview' },
+			}),
+		);
+		const socket = response.webSocket;
+		if (!socket) throw new Error('Expected preview WebSocket');
+		socket.accept();
+		try {
+			const parsed = parseServerMessage(
+				JSON.stringify({
+					type: 'runtime-status',
+					status: { ...emptyRuntimeStatus(), revision: 7, preview: { backend: 'container', phase: 'ready', generation: 3 } },
+				}),
+			);
+			if (!parsed.success || parsed.data.type !== 'runtime-status') throw new Error('Invalid runtime fixture');
+			const live = readNextMessage(socket);
+			await stub.updateRuntimeStatus(parsed.data.status);
+			expect(await live).toEqual(parsed.data);
+			const replay = readNextMessage(socket);
+			socket.send(serializeMessage({ type: 'hmr-connect', version: 0 }));
+			expect(await replay).toEqual(parsed.data);
+		} finally {
+			closeSocket(socket);
+		}
+	});
+	it('broadcasts live changes, ignores old revisions and replays on reconnect', async () => {
+		const stub = getCoordinatorStub(crypto.randomUUID());
+		const socket = await connectIdeSocket(stub, 'runtime-test', false);
+		try {
+			socket.send(serializeMessage({ type: 'collab-join' }));
+			await readNextMessage(socket);
+			const status = { ...emptyRuntimeStatus(), revision: 4, preview: { backend: 'container', phase: 'ready', generation: 2 } };
+			const parsed = parseServerMessage(JSON.stringify({ type: 'runtime-status', status }));
+			if (!parsed.success || parsed.data.type !== 'runtime-status') throw new Error('Invalid runtime fixture');
+			const next = readNextMessage(socket);
+			await stub.updateRuntimeStatus(parsed.data.status);
+			expect(await next).toEqual(parsed.data);
+			await stub.updateRuntimeStatus({ ...parsed.data.status, revision: 3 });
+			await expectNoMessage(socket);
+			const reconnect = await connectIdeSocket(stub, 'runtime-test', false);
+			try {
+				const messages: ServerMessage[] = [];
+				reconnect.addEventListener('message', (event) => {
+					if (typeof event.data !== 'string') return;
+					const message = parseServerMessage(event.data);
+					if (message.success) messages.push(message.data);
+				});
+				reconnect.send(serializeMessage({ type: 'collab-join' }));
+				await expect.poll(() => messages.find((message) => message.type === 'runtime-status')).toEqual(parsed.data);
+			} finally {
+				closeSocket(reconnect);
+			}
+		} finally {
+			closeSocket(socket);
+		}
+	});
+});
 
 describe('getOutputLogs', () => {
 	it('returns empty string initially', async () => {
