@@ -1,0 +1,119 @@
+Dockerfile.computer
+  s_b67565246ec263::t_9ad377c1c2f0d7 10
+auxiliary/esbuild/esbuild-core.ts
+  s_b67565246ec263::t_312fd8c0aedeab 5,52,85,99,113,135,413-414,452
+shared/runtime-status.ts
+  s_b67565246ec263::t_b9c46dff748086 1-32
+shared/ws-messages.ts
+  s_b67565246ec263::t_f553efe14b497c 3-4,6,170,271
+src/features/ide/desktop-layout.tsx
+  s_b67565246ec263::t_f585087aacc87a 298
+src/features/ide/mobile-layout.tsx
+  s_b67565246ec263::t_e92581e2366675 200
+src/features/preview/components/runtime-status-indicator.tsx
+  s_31bc4438247d21::t_e0f7d5926c7f2d 1-121
+worker/durable/project-filesystem.ts
+  s_f1d01475d8405b::t_bf34f6ce24dfac 15,28,31,33,37,45,127-176,283-285,298-311,376-389,859,865,877-886
+worker/lib/preview-bootstrap.ts
+  s_b67565246ec263::t_231f3cd626c636 23,64
+worker/lib/project-runtime-state.test.ts
+  s_f1d01475d8405b::t_52d173d1c6fd0c 1-74
+worker/routes/index.ts
+  s_b67565246ec263::t_659bd0ac4a64bb 13,29
+worker/routes/runtime-status-routes.ts
+  s_b67565246ec263::t_9c6714afe63181 1-11
+worker/services/preview-service.test.ts
+  s_b67565246ec263::t_5d631154a8c551 1-70
+worker/services/static-preview.ts
+  s_b67565246ec263::t_d021d7dc67770a 16,278
+worker/services/static-preview/external-modules.ts
+  s_b67565246ec263::t_40c6d4ee6ce2c5 2,26,52
+worker/services/vite-host/build-artifact.ts
+  s_b67565246ec263::t_41291bef2ffdff 12,104-110
+worker/services/vite-host/esbuild-bridge.ts
+  s_b67565246ec263::t_50d938425390b8 14-15,296,366
+worker/services/vite-host/runtimes/registry.ts
+  s_b67565246ec263::t_dbdddf8f451c56 12,16,26-28
+worker/services/vite-host/runtimes/runtime-selection.ts
+  s_b67565246ec263::t_c1ec76a7c4f2ed 33-36
+worker/services/vite-host/runtimes/vinext-preview.ts
+  s_b67565246ec263::t_3061a5edc715f3 6,90
+README.md
+  s_457989c78dafac::t_ccc21e14545545 21-22
+shared/preview-transition.test.ts
+  s_457989c78dafac::t_59231cecf0a93d 1-100
+shared/worker-resource-budget.test.ts
+  s_457989c78dafac::t_3aff70f3d035cb 1-77
+shared/worker-resource-budget.ts
+  s_457989c78dafac::t_e8f03c1b9a44c6 1-59
+src/features/collaboration/hooks/use-project-socket.ts
+  s_457989c78dafac::t_36d4764c546377 49,151-158
+src/features/preview/components/preview-panel.tsx
+  s_457989c78dafac::t_bdaf38aa94fb1c 19,22,32,262-264
+src/lib/hmr-client.test.tsx
+  s_457989c78dafac::t_d005bed2617c86 408-423
+test/e2e/helpers.ts
+  s_457989c78dafac::t_6c090aec6c712a 137
+test/e2e/runtime-handover.test.ts
+  s_457989c78dafac::t_3b375cead67601 1-72
+worker/durable/project-coordinator.test.ts
+  s_457989c78dafac::t_0e9866c4fdc27a 4,108-169
+worker/durable/project-coordinator.ts
+  s_457989c78dafac::t_0b5be9fa5902e9 8,416-423,586-589,616-617
+worker/lib/native-runtime-readiness.test.ts
+  s_457989c78dafac::t_0cbce3fec82878 1-32
+worker/lib/native-runtime-readiness.ts
+  s_457989c78dafac::t_4df3cb1e3228ee 1-18
+worker/lib/preview-scripts/hmr-client.js
+  s_457989c78dafac::t_3f23e0077dd3fe 84-87
+worker/lib/preview-transition-script.ts
+  s_457989c78dafac::t_74b8beb75a6c65 1-86
+worker/lib/project-runtime-state.ts
+  s_457989c78dafac::t_08d0e7a02538f6 1-50
+worker/services/preview-service.ts
+  s_457989c78dafac::t_1ab5940f4b39c6 15,18,21-22,25,30,62-65,68-115,117,119-127,134-165
+worker/services/vite-host/build-artifact-client.ts
+  s_457989c78dafac::t_6801187bfc2278 3-4,24
+worker/services/vite-host/esm-cdn.ts
+  s_457989c78dafac::t_9397a45afb8cbf 17-18,143,151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "37d9291e6c58eaade579a9e6053fcd2e5a9cde74",
+  "prompts": {},
+  "sessions": {
+    "s_31bc4438247d21": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ec482ce17ffeGHZDcjQJn0MZ3y",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    },
+    "s_457989c78dafac": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12c91-7af0-7ef0-bcfd-17269d020b36",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    },
+    "s_b67565246ec263": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ec482cdebffe0J7I1VxzwhTr83",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    },
+    "s_f1d01475d8405b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ec482cdd0ffeGJa5gGYPqSgnUp",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
