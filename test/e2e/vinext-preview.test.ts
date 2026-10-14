@@ -47,7 +47,7 @@ test.describe('vinext preview + HMR', () => {
 		page.on('console', (message) => {
 			if (message.text().includes('changed module not in running graph')) unexpectedReloads.push(message.text());
 		});
-		const projectId = await gotoIDE(page, { template: 'vinext' });
+		const projectId = await gotoIDE(page, { template: 'vinext', warmPreview: true });
 		await waitForFileTree(page, 'app');
 
 		const previewIframe = page.locator('iframe[title="Project Preview"]');

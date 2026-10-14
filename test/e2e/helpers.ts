@@ -85,7 +85,10 @@ async function createProject(template = 'request-inspector'): Promise<{ projectI
  * AuthGate passes, then clears localStorage to reset persisted Zustand
  * state (sidebar/terminal visibility, etc.) before the page loads.
  */
-export async function gotoIDE(page: Page, options: { template?: string; files?: Record<string, string> } = {}): Promise<string> {
+export async function gotoIDE(
+	page: Page,
+	options: { template?: string; files?: Record<string, string>; warmPreview?: boolean } = {},
+): Promise<string> {
 	const cookie = await ensureTestSession();
 	const { url, projectId } = await createProject(options.template);
 	const context = page.context();
@@ -115,6 +118,19 @@ export async function gotoIDE(page: Page, options: { template?: string; files?: 
 			const response = await api.file.$put({ json: { path, content } });
 			if (!response.ok) throw new Error(`Failed to populate ${path}: ${response.status}`);
 		}
+	}
+
+	if (options.warmPreview) {
+		// Rootless Docker changes Linux network interfaces on container startup.
+		// Complete that startup outside Chromium's first iframe navigation, which
+		// otherwise fails with ERR_NETWORK_CHANGED in the shared CI namespace.
+		const api = hc<ApiRoutes>(`${BASE_URL}/p/${projectId}/api`, { fetch, headers: { Cookie: cookie } });
+		const previewUrlResponse = await api['preview-url'].$get({});
+		if (!previewUrlResponse.ok) throw new Error(`Failed to get preview URL: ${previewUrlResponse.status}`);
+		const { url: previewUrl } = await previewUrlResponse.json();
+		const previewResponse = await fetch(previewUrl);
+		if (!previewResponse.ok) throw new Error(`Failed to start preview: ${previewResponse.status}`);
+		await previewResponse.arrayBuffer();
 	}
 
 	// Clear localStorage before the app boots to reset persisted UI state
