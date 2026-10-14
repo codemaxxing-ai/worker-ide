@@ -1,0 +1,21 @@
+test/e2e/helpers.ts
+  s_457989c78dafac::t_7203e2678c541b 88-91,123-135
+test/e2e/vinext-preview.test.ts
+  s_457989c78dafac::t_4c8a20ff4afad4 50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "52c269c363f86be8efe9b1f4f5aac01800927237",
+  "prompts": {},
+  "sessions": {
+    "s_457989c78dafac": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12c91-7af0-7ef0-bcfd-17269d020b36",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
