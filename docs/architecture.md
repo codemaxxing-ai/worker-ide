@@ -47,6 +47,8 @@ Keeping these owners distinct prevents browser projections from becoming competi
 
 The [agent panel](../src/features/agent/components/agent-panel/) coordinates submission and session state. Its session header owns rename/delete confirmation state, composer controls own recording/send presentation, and the attachment strip renders pending uploads. Keep transient UI state in those components and RPC orchestration in the panel and session hook.
 
+Use `loadSession` for explicit session selection and restoration. Background history refreshes use the read-only `readSession` RPC, keyed by session ID and history version, so they cannot change selection or replace live streaming state. Delayed selections yield to newer selections, clears, or message submissions.
+
 ## Workspace and agent execution
 
 Each project has one authoritative Computer SQLite workspace under `/workspace`. Git runs inside the filesystem DO against that same tree, with Cloudflare Artifacts as the remote. Editor, agent, Git, lifecycle, and review mutations share durable FIFO ordering. Commands retain ownership through synchronization and change attribution; durable execution IDs support recovery without replaying uncertain commands.

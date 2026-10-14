@@ -26,6 +26,7 @@ export interface AgentRunnerClient {
 	startRun(request: StartRunRequest): Promise<{ sessionId: string }>;
 	abortRun(sessionId?: string): Promise<void>;
 	loadSession(sessionId: string): Promise<AiSession | undefined>;
+	readSession(sessionId: string): Promise<AiSession | undefined>;
 	listSessions(): Promise<Array<{ id: string; title: string; createdAt: number; isRunning: boolean }>>;
 	searchSessions(query: string, limit?: number): Promise<Array<{ sessionId: string; role: string; content: string }>>;
 	revertSession(sessionId: string, messageIndex: number): Promise<{ contextTokensUsed: number }>;

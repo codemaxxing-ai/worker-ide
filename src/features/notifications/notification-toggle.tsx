@@ -51,10 +51,12 @@ export function NotificationToggle() {
 				variant="ghost"
 				size="icon"
 				aria-label={tooltipContent}
+				aria-busy={isLoading}
 				onClick={handleClick}
-				disabled={isLoading}
+				isLoading={isLoading}
 				className={cn(
 					'relative',
+					isLoading && 'disabled:opacity-100',
 					needsPermissionApproval &&
 						`
 							bg-accent/6 text-accent ring-1 ring-accent/15 ring-inset

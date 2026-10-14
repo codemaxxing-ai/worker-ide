@@ -61,6 +61,9 @@ export async function serveVinextPreview(input: VinextPreviewInput): Promise<Res
 				return scriptResponse(code, immutable ? 'immutable' : 'no-cache');
 			}
 		}
+		// Capture the version before building so edits during rendering are still
+		// detected when the preview connects. A fixed zero causes a reload loop.
+		const bootVersion = await coordinatorNamespace.getByName(`project:${input.projectId}`).getUpdateVersion();
 		const build = await getBuildArtifact({
 			projectId: input.projectId,
 			projectRoot: input.projectRoot,
@@ -81,7 +84,7 @@ export async function serveVinextPreview(input: VinextPreviewInput): Promise<Res
 			const surfaced = await surfaceServerRenderError(response, input);
 			if (surfaced !== undefined) return surfaced;
 		}
-		return response.headers.get('Content-Type')?.includes('text/html') ? injectHmrRuntime(response, input) : response;
+		return response.headers.get('Content-Type')?.includes('text/html') ? injectHmrRuntime(response, input, bootVersion) : response;
 	} catch (error) {
 		return renderServerError(toBundleServerError(error), input);
 	}
@@ -136,11 +139,11 @@ async function resolveServerEnvironment(input: VinextPreviewInput): Promise<Reco
 	return { [STORAGE_BINDING_NAME]: exports.ObjectStorageBinding({ props: { projectId: input.projectId, quotaBytes } }) };
 }
 
-async function injectHmrRuntime(response: Response, input: VinextPreviewInput): Promise<Response> {
+async function injectHmrRuntime(response: Response, input: VinextPreviewInput, bootVersion: number): Promise<Response> {
 	const html = await response.text();
 	const url = new URL(input.request.url);
 	const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-	const config = { wsUrl: `${protocol}//${url.host}/__ws`, ideOrigin: input.ideOrigin, projectId: input.projectId, bootVersion: 0 };
+	const config = { wsUrl: `${protocol}//${url.host}/__ws`, ideOrigin: input.ideOrigin, projectId: input.projectId, bootVersion };
 	const scripts = [
 		`<script>window.__PREVIEW_CONFIG=${JSON.stringify(config).replaceAll('<', String.raw`\u003c`)}</script>`,
 		...HMR_SCRIPT_PATHS.map((path) => `<script src="${path}"></script>`),

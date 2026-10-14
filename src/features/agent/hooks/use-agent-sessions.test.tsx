@@ -7,7 +7,7 @@ import { useStore } from '@/lib/store';
 import { useAgentSessions } from './use-agent-sessions';
 import { createUnavailableAgentRunnerStub } from '../lib/agent-stub';
 
-import type { AgentRuntimeHandle } from '../components/agent-runtime-context';
+import type { AgentConnectionState, AgentRuntimeHandle } from '../components/agent-runtime-context';
 import type { AgentState, AgentSessionState } from '@shared/agent-state';
 import type { AiSession, PendingFileChange, ReviewEntry } from '@shared/types';
 
@@ -70,6 +70,7 @@ function createCurrentSession(sessionId: string, status: AgentSessionState['stat
 function createAgent(state?: AgentState): AgentRuntimeHandle {
 	const stub = createUnavailableAgentRunnerStub();
 	stub.loadSession = vi.fn(async (): Promise<AiSession | undefined> => undefined);
+	stub.readSession = vi.fn(async (): Promise<AiSession | undefined> => undefined);
 	return {
 		identified: true,
 		state,
@@ -236,6 +237,15 @@ describe('useAgentSessions', () => {
 		expect(agent.stub.loadSession).not.toHaveBeenCalled();
 	});
 
+	it('keeps restoration pending after connecting until the initial agent state arrives', () => {
+		setActiveSessionId('project-1', 'saved-session');
+		const agent = createAgent();
+		const { result } = renderHook(() => useAgentSessions({ projectId: 'project-1', agent, agentConnectionState: 'connected' }));
+
+		expect(result.current.isRestoringSession).toBe(true);
+		expect(agent.stub.loadSession).not.toHaveBeenCalled();
+	});
+
 	it('clears stale saved sessions that cannot be restored', async () => {
 		localStorage.setItem('worker-ide-project:project-1', JSON.stringify({ activeSessionId: 'missing-session' }));
 
@@ -288,6 +298,105 @@ describe('useAgentSessions', () => {
 			expect(stored.activeSessionId).toBe('session-3');
 		});
 
-		expect(agent.stub.loadSession).toHaveBeenCalledWith('session-3');
+		expect(agent.stub.readSession).toHaveBeenCalledWith('session-3');
+		expect(agent.stub.loadSession).not.toHaveBeenCalled();
+	});
+
+	it('loads saved history without selecting again or restarting on streaming updates', async () => {
+		const state: AgentState = {
+			currentSession: createCurrentSession('session-1'),
+			sessions: [],
+			sessionParticipants: {},
+			reviewEntries: {},
+			reviewSummary: { unresolvedCount: 0, reviewVersion: 0, sessionCounts: {} },
+		};
+		const agent = createAgent(state);
+		const history = Promise.withResolvers<AiSession | undefined>();
+		agent.stub.readSession = vi.fn().mockReturnValue(history.promise);
+		const { result, rerender } = renderHook(() =>
+			useAgentSessions({ projectId: 'project-history', agent, agentConnectionState: 'connected' }),
+		);
+		state.currentSession = { ...createCurrentSession('session-1', 'running'), statusText: 'Thinking...' };
+		rerender();
+		const savedSession: AiSession = {
+			id: 'session-1',
+			title: 'Saved session',
+			createdAt: 1,
+			history: [{ id: 'saved-message', role: 'user', parts: [{ type: 'text', content: 'Previous request' }] }],
+		};
+		await act(async () => history.resolve(savedSession));
+
+		expect(result.current.sessionSnapshot).toEqual(savedSession);
+		expect(agent.stub.readSession).toHaveBeenCalledTimes(1);
+		expect(agent.stub.loadSession).not.toHaveBeenCalled();
+
+		const updatedSession: AiSession = {
+			...savedSession,
+			history: [...savedSession.history, { id: 'reply', role: 'assistant', parts: [] }],
+		};
+		agent.stub.readSession = vi.fn(async () => updatedSession);
+		state.currentSession = { ...createCurrentSession('session-1'), historyVersion: 1 };
+		rerender();
+		await waitFor(() => expect(result.current.sessionSnapshot).toEqual(updatedSession));
+		expect(agent.stub.loadSession).not.toHaveBeenCalled();
+	});
+
+	it('ignores an old history refresh after selecting another session', async () => {
+		const state: AgentState = {
+			currentSession: createCurrentSession('first'),
+			sessions: [],
+			sessionParticipants: {},
+			reviewEntries: {},
+			reviewSummary: { unresolvedCount: 0, reviewVersion: 0, sessionCounts: {} },
+		};
+		const agent = createAgent(state);
+		const oldHistory = Promise.withResolvers<AiSession | undefined>();
+		const selection = Promise.withResolvers<AiSession | undefined>();
+		const selectedSession: AiSession = { id: 'second', title: 'Second', createdAt: 2, history: [] };
+		agent.stub.readSession = vi.fn().mockReturnValueOnce(oldHistory.promise).mockResolvedValue(selectedSession);
+		agent.stub.loadSession = vi.fn().mockReturnValue(selection.promise);
+		const { result, rerender } = renderHook(() =>
+			useAgentSessions({ projectId: 'project-switch', agent, agentConnectionState: 'connected' }),
+		);
+
+		act(() => result.current.handleLoadSession('second'));
+		expect(result.current.isRestoringSession).toBe(true);
+		// WebSocket state arrives before the selection RPC response.
+		state.currentSession = createCurrentSession('second');
+		rerender();
+		await act(async () => selection.resolve(selectedSession));
+		await act(async () => oldHistory.resolve({ id: 'first', title: 'First', createdAt: 1, history: [] }));
+
+		expect(result.current.sessionSnapshot).toEqual(selectedSession);
+		expect(result.current.isRestoringSession).toBe(false);
+		expect(getActiveSessionId('project-switch')).toBe('second');
+		expect(agent.stub.loadSession).toHaveBeenCalledTimes(1);
+	});
+
+	it('retries history on reconnect without selecting the session again', async () => {
+		const state: AgentState = {
+			currentSession: createCurrentSession('session-1'),
+			sessions: [],
+			sessionParticipants: {},
+			reviewEntries: {},
+			reviewSummary: { unresolvedCount: 0, reviewVersion: 0, sessionCounts: {} },
+		};
+		const agent = createAgent(state);
+		const savedSession: AiSession = { id: 'session-1', title: 'Saved session', createdAt: 1, history: [] };
+		const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		agent.stub.readSession = vi.fn().mockRejectedValueOnce(new Error('Disconnected')).mockResolvedValue(savedSession);
+		const { result, rerender } = renderHook(
+			({ agentConnectionState }: { agentConnectionState: AgentConnectionState }) =>
+				useAgentSessions({ projectId: 'project-reconnect', agent, agentConnectionState }),
+			{ initialProps: { agentConnectionState: 'connected' } },
+		);
+		await waitFor(() => expect(warning).toHaveBeenCalled());
+		rerender({ agentConnectionState: 'disconnected' });
+		rerender({ agentConnectionState: 'connected' });
+		await waitFor(() => expect(result.current.sessionSnapshot).toEqual(savedSession));
+		warning.mockRestore();
+
+		expect(agent.stub.readSession).toHaveBeenCalledTimes(2);
+		expect(agent.stub.loadSession).not.toHaveBeenCalled();
 	});
 });

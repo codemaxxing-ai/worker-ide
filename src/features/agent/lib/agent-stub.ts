@@ -14,6 +14,7 @@ export function createUnavailableAgentRunnerStub(): AgentRunnerStub {
 		startRun: unavailableAgentRpc,
 		abortRun: unavailableAgentRpc,
 		loadSession: unavailableAgentRpc,
+		readSession: unavailableAgentRpc,
 		listSessions: unavailableAgentRpc,
 		searchSessions: unavailableAgentRpc,
 		revertSession: unavailableAgentRpc,

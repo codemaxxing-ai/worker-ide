@@ -1,10 +1,10 @@
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_AI_MODEL } from '@shared/constants';
 
 import type { AgentRunner } from './agent-runner';
-import type { ChatMessage } from '@shared/types';
+import type { AiSession, ChatMessage } from '@shared/types';
 
 function getAgentStub(name: string): DurableObjectStub<AgentRunner> {
 	const namespace = env.AgentRunner;
@@ -29,6 +29,66 @@ async function createTestAgent(name: string, sessionId: string): Promise<Durable
 }
 
 describe('agent runner turn completion', () => {
+	it('reads another session history without changing the selected session or live messages', async () => {
+		const stub = await createTestAgent('agent:history-read-test', 'selected');
+		await runInDurableObject(stub, (_instance, state) => {
+			state.storage.sql.exec("INSERT INTO assistant_sessions (id, name) VALUES ('other', 'Other session')");
+		});
+		const history: ChatMessage[] = [{ id: 'saved', role: 'user', parts: [{ type: 'text', content: 'Other context' }] }];
+		await stub.completeThinkTurn('other', 'saved', history, 'completed');
+		await stub.loadSession('selected');
+		await runInDurableObject(stub, (instance) => {
+			const currentSession = instance.state.currentSession;
+			if (!currentSession) throw new Error('Expected a selected session');
+			instance.setState({
+				...instance.state,
+				currentSession: { ...currentSession, status: 'running', messages: [{ id: 'live', role: 'assistant', parts: [] }] },
+			});
+		});
+
+		using snapshot = await stub.readSession('other');
+		expect(snapshot?.history).toEqual(history);
+		await stub.readSession('selected');
+		await runInDurableObject(stub, (instance) => {
+			expect(instance.state.currentSession?.sessionId).toBe('selected');
+			expect(instance.state.currentSession?.status).toBe('running');
+			expect(instance.state.currentSession?.messages).toEqual([{ id: 'live', role: 'assistant', parts: [] }]);
+		});
+	});
+
+	it('keeps the newer selection when an earlier load finishes last', async () => {
+		const stub = await createTestAgent('agent:selection-order-test', 'first');
+		await runInDurableObject(stub, async (instance) => {
+			const firstRead = Promise.withResolvers<AiSession | undefined>();
+			const readSession = vi.spyOn(instance, 'readSession').mockImplementation(async (sessionId) => {
+				if (sessionId === 'first') return firstRead.promise;
+				return { id: sessionId, title: 'Second', createdAt: 2, history: [] };
+			});
+			const firstLoad = instance.loadSession('first');
+			await instance.loadSession('second');
+			firstRead.resolve({ id: 'first', title: 'First', createdAt: 1, history: [] });
+			await firstLoad;
+			readSession.mockRestore();
+
+			expect(instance.state.currentSession?.sessionId).toBe('second');
+		});
+	});
+
+	it('does not restore a delayed selection after starting a new session', async () => {
+		const stub = await createTestAgent('agent:selection-clear-test', 'first');
+		await runInDurableObject(stub, async (instance) => {
+			const pendingRead = Promise.withResolvers<AiSession | undefined>();
+			const readSession = vi.spyOn(instance, 'readSession').mockReturnValue(pendingRead.promise);
+			const pendingLoad = instance.loadSession('first');
+			await instance.clearCurrentSession();
+			pendingRead.resolve({ id: 'first', title: 'First', createdAt: 1, history: [] });
+			await pendingLoad;
+			readSession.mockRestore();
+
+			expect(instance.state.currentSession).toBeUndefined();
+		});
+	});
+
 	it('persists a completed turn once when the child replays its completion', async () => {
 		const stub = await createTestAgent('agent:turn-completion-test', 'session-1');
 

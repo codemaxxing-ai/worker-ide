@@ -103,7 +103,9 @@ export function useAgentSessions({
 
 				setActiveSessionId(projectId, session.id);
 				setSessionSnapshot(session);
-				setSnapshotHistoryVersion(agent.state?.currentSession?.historyVersion ?? 0);
+				// Confirm the history version with a read-only refresh. State may
+				// have advanced while the selection RPC was reading persisted history.
+				setSnapshotHistoryVersion(-1);
 				return { status: 'loaded', session };
 			} catch {
 				if (!isCurrent()) return { status: 'superseded' };
@@ -275,9 +277,10 @@ export function useAgentSessions({
 		});
 	}, [agentConnectionState, agentState, loadSessionById, projectId, updateSessionLoadPhase]);
 
+	const agentHistoryVersion = agentState?.currentSession?.historyVersion;
 	useEffect(() => {
-		const currentSession = agentState?.currentSession;
-		if (!currentSession) {
+		if (isLoadingSession || agentConnectionState === 'disconnected') return;
+		if (!agentSessionId) {
 			queueMicrotask(() => {
 				setSessionSnapshot(undefined);
 				setSnapshotHistoryVersion(-1);
@@ -285,31 +288,41 @@ export function useAgentSessions({
 			return;
 		}
 
-		if (sessionSnapshot?.id === currentSession.sessionId && snapshotHistoryVersion === currentSession.historyVersion) {
+		if (sessionSnapshot?.id === agentSessionId && snapshotHistoryVersion === agentHistoryVersion) {
 			return;
 		}
 
 		let cancelled = false;
+		const sequence = sessionLoadSequenceReference.current;
 		void agent.stub
-			.loadSession(currentSession.sessionId)
+			.readSession(agentSessionId)
 			.then((session) => {
-				if (cancelled || !session) return;
+				if (cancelled || sequence !== sessionLoadSequenceReference.current || !session) return;
 				setSessionSnapshot(session);
-				setSnapshotHistoryVersion(currentSession.historyVersion);
+				setSnapshotHistoryVersion(agentHistoryVersion ?? 0);
 			})
 			.catch((error: unknown) => {
-				// Keep the last snapshot during a transient disconnect. A later
-				// state update retries the refresh without an unhandled rejection.
+				// Keep the last snapshot during a transient disconnect. A reconnect
+				// or history version update retries the refresh.
 				if (!cancelled) console.warn('[AgentSessions] Failed to refresh session history:', error);
 			});
 
 		return () => {
 			cancelled = true;
 		};
-	}, [agent.stub, agentState?.currentSession, sessionSnapshot?.id, snapshotHistoryVersion]);
+	}, [
+		agent.stub,
+		agentConnectionState,
+		agentSessionId,
+		agentHistoryVersion,
+		isLoadingSession,
+		sessionSnapshot?.id,
+		snapshotHistoryVersion,
+	]);
 
 	const isRestoringSession =
-		sessionLoadPhase === 'loading-saved-session' || (sessionLoadPhase === 'awaiting-agent-state' && agentConnectionState === 'connecting');
+		sessionLoadPhase === 'loading-saved-session' ||
+		(sessionLoadPhase === 'awaiting-agent-state' && agentConnectionState !== 'disconnected');
 
 	return {
 		allSessions: savedSessions,

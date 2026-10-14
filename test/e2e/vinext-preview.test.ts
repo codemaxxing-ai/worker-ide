@@ -96,5 +96,17 @@ test.describe('vinext preview + HMR', () => {
 		await expect(styledButton).toHaveCSS('background-color', 'rgb(7, 201, 91)', { timeout: 30_000 });
 		await expect(styledButton).toHaveText('Tally: 2');
 		expect(await previewFrame.evaluate(() => Reflect.get(globalThis, '__vinextHmrSentinel'))).toBe(sentinel);
+
+		// Refresh after edits must reconnect and leave the new document interactive.
+		await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+		await expect(preview.getByRole('heading', { name: 'Hello from HMR' })).toBeVisible({ timeout: 30_000 });
+		await expect(preview.getByRole('button', { name: /Tally:/ })).toHaveText('Tally: 0', { timeout: 30_000 });
+		await expect(page.getByRole('status', { name: 'HMR connected', exact: true })).toBeVisible({ timeout: 30_000 });
+		const refreshedFrameHandle = await previewIframe.elementHandle();
+		const refreshedFrame = await refreshedFrameHandle?.contentFrame();
+		if (!refreshedFrame) throw new Error('Expected refreshed preview iframe');
+		expect(await refreshedFrame.evaluate(() => Reflect.get(globalThis, '__vinextHmrSentinel'))).toBeUndefined();
+		await preview.getByRole('button', { name: /Tally:/ }).click();
+		await expect(preview.getByRole('button', { name: /Tally:/ })).toHaveText('Tally: 1');
 	});
 });

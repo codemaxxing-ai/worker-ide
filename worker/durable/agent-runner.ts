@@ -109,6 +109,7 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 	private reviewQueue!: ReviewQueueStore;
 	private extensionManager?: ExtensionManager;
 	private reviewVersion = 0;
+	private sessionSelectionSequence = 0;
 	private rootMemoryProvider = new SharedContextProvider(this, ROOT_MEMORY_CONTEXT_LABEL);
 	private artifactsProvider = new AgentSearchProvider(this);
 	private artifactsContextProvider = {
@@ -624,6 +625,7 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 		if (!messagePartsHaveUserContent(sanitizedParts)) {
 			throw new Error('Message is required.');
 		}
+		this.sessionSelectionSequence += 1;
 
 		const promptText = getUserMessagePromptText(sanitizedParts);
 
@@ -687,6 +689,7 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 
 	@callable()
 	async startRun(request: StartRunRequest): Promise<{ sessionId: string }> {
+		this.sessionSelectionSequence += 1;
 		const mode = request.mode ?? 'code';
 		const model = request.model ?? DEFAULT_AI_MODEL;
 		const resolvedSessionId = request.sessionId ?? crypto.randomUUID().replaceAll('-', '').slice(0, 16);
@@ -748,6 +751,12 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 		await this.turnCoordinator.abortRun(resolvedSessionId);
 	}
 
+	/** Read persisted history without changing the selected session or live messages. */
+	@callable()
+	async readSession(sessionId: string): Promise<AiSession | undefined> {
+		return this.agentSessionStore.read(sessionId);
+	}
+
 	/**
 	 * Load a session into the current state.
 	 *
@@ -759,8 +768,9 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 	 */
 	@callable()
 	async loadSession(sessionId: string): Promise<AiSession | undefined> {
-		const session = await this.agentSessionStore.read(sessionId);
-		if (!session) return undefined;
+		const sequence = ++this.sessionSelectionSequence;
+		const session = await this.readSession(sessionId);
+		if (!session || sequence !== this.sessionSelectionSequence) return session;
 
 		// If this session is already loaded and actively running, don't overwrite
 		// the live in-memory state with stale DB data. Mid-turn streaming content
@@ -775,6 +785,7 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 		const pendingChangesMap = this.loadPendingChangesFromDatabase();
 		const isRunning = this.state.currentSession?.sessionId === sessionId && this.state.currentSession.status === 'running';
 		const sessionParticipants = await this.resolveSessionParticipants(session.history);
+		if (sequence !== this.sessionSelectionSequence) return session;
 
 		this.setState({
 			...this.state,
@@ -1044,10 +1055,12 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 	 */
 	@callable()
 	async clearCurrentSession(sessionId?: string): Promise<void> {
+		const sequence = ++this.sessionSelectionSequence;
 		if (sessionId) {
 			const sessionAgent = await this.subAgent(SessionTurnAgent, sessionId);
 			await sessionAgent.cancelActiveSubmissions();
 		}
+		if (sequence !== this.sessionSelectionSequence) return;
 		this.setState({
 			...this.state,
 			currentSession: undefined,

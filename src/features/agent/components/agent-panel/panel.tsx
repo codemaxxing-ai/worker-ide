@@ -332,7 +332,7 @@ export function AgentPanel({ projectId, className }: { projectId: string; classN
 	}, [liveTranscript, preRecordingSegments, segments, speechToText.isRecording]);
 	const visibleInputSegments = speechToText.isRecording ? recordingSegments : segments;
 	const hasVisibleInputContent = useMemo(() => segmentsHaveContent(visibleInputSegments), [visibleInputSegments]);
-	const canSubmit = (hasVisibleInputContent || readyImageParts.length > 0) && !hasUploadingImages;
+	const canSubmit = (hasVisibleInputContent || readyImageParts.length > 0) && !hasUploadingImages && !isRestoringSession;
 
 	// Move cursor to end of input as transcript grows during recording
 	useEffect(() => {
@@ -539,6 +539,7 @@ export function AgentPanel({ projectId, className }: { projectId: string; classN
 	// Submit a new request. The server decides whether it starts immediately or queues.
 	const handleSubmit = useCallback(
 		async (messageOverride?: string) => {
+			if (isRestoringSession) return;
 			if (!messageOverride && hasUploadingImages) {
 				toast.error('Please wait for images to finish uploading.');
 				return;
@@ -590,6 +591,7 @@ export function AgentPanel({ projectId, className }: { projectId: string; classN
 			}
 		},
 		[
+			isRestoringSession,
 			files,
 			visibleInputSegments,
 			setSegments,

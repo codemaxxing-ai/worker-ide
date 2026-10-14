@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => {
 	const toastError = vi.fn();
 	const toastInfo = vi.fn();
 	const setActiveSessionId = vi.fn();
+	const sessionLoading = { isRestoringSession: false };
 
 	const storeState = {
 		files: [],
@@ -75,7 +76,7 @@ const mocks = vi.hoisted(() => {
 		agent,
 		agentConnectionState: 'connected',
 		isConnected: true,
-		segments: [],
+		segments: new Array<{ type: 'text'; value: string }>(),
 		setSegments,
 		cursorPosition: 0,
 		setCursorPosition,
@@ -117,6 +118,7 @@ const mocks = vi.hoisted(() => {
 		toastError,
 		toastInfo,
 		setActiveSessionId,
+		sessionLoading,
 		storeState,
 		agentRuntime,
 		speechToText,
@@ -221,7 +223,7 @@ vi.mock('@/features/agent/hooks/use-agent-sessions', () => ({
 		handleDeleteSession: mocks.handleDeleteSession,
 		sessionSearchQuery: '',
 		setSessionSearchQuery: vi.fn(),
-		isRestoringSession: false,
+		isRestoringSession: mocks.sessionLoading.isRestoringSession,
 	}),
 }));
 
@@ -338,9 +340,11 @@ vi.mock('../revert-confirm-dialog', () => ({
 vi.mock('../rich-text-input', () => {
 	function RichTextInput({
 		inlineSuffix,
+		onKeyDown,
 		ref,
 	}: {
 		inlineSuffix?: ReactNode;
+		onKeyDown?: React.KeyboardEventHandler<HTMLDivElement>;
 		ref?: Ref<{
 			clear: () => void;
 			focus: () => void;
@@ -357,7 +361,7 @@ vi.mock('../rich-text-input', () => {
 
 		return (
 			<div>
-				<div data-testid="rich-text-input" />
+				<div data-testid="rich-text-input" onKeyDown={onKeyDown} />
 				{inlineSuffix}
 			</div>
 		);
@@ -371,6 +375,7 @@ import { AgentPanel } from './panel';
 describe('AgentPanel footer controls', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		mocks.sessionLoading.isRestoringSession = false;
 		mocks.agentRuntime.segments = [];
 		mocks.agentRuntime.agent.state.currentSession.status = 'running';
 		mocks.agentRuntime.agent.state.currentSession.messages = [
@@ -396,6 +401,17 @@ describe('AgentPanel footer controls', () => {
 
 		fireEvent.click(screen.getByRole('button', { name: 'Start voice input' }));
 		expect(mocks.speechStart).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not send to the previous session while a selection is loading', () => {
+		mocks.sessionLoading.isRestoringSession = true;
+		mocks.agentRuntime.segments = [{ type: 'text', value: 'A request for the selected session' }];
+		render(<AgentPanel projectId="project-1" />);
+		expect(screen.getByRole('button', { name: 'Queue message' })).toBeDisabled();
+		fireEvent.keyDown(screen.getByTestId('rich-text-input'), { key: 'Enter' });
+
+		expect(mocks.submitMessage).not.toHaveBeenCalled();
+		expect(mocks.setSegments).not.toHaveBeenCalledWith([]);
 	});
 
 	it('keeps the action cluster from collapsing underneath the selectors', () => {
