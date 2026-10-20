@@ -50,6 +50,7 @@ describe('todos_update', () => {
 		expect(result.metadata).toHaveProperty('todos');
 		const todosResult = result.metadata.todos as unknown[];
 		expect(todosResult).toHaveLength(2);
+		expect(JSON.parse(result.output)).toEqual({ todos });
 		// File should be written
 		expect(memoryFs.store.has(`${PROJECT_ROOT}/.agent/todo/ses-update.json`)).toBe(true);
 	});

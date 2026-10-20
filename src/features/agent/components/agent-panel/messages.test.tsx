@@ -279,6 +279,32 @@ describe('MessageBubble', () => {
 		expect(screen.getByText('Run validation')).toBeInTheDocument();
 	});
 
+	it('renders TODOs from the persisted tool output without streamed metadata', () => {
+		renderWithProviders(
+			<AssistantMessage
+				message={{
+					id: 'assistant-persisted-todos',
+					role: 'assistant',
+					parts: [
+						{ type: 'tool-call', toolCallId: 'persisted-todos', toolName: 'todos_get', arguments: {} },
+						{
+							type: 'tool-result',
+							toolCallId: 'persisted-todos',
+							toolName: 'todos_get',
+							result: JSON.stringify({
+								todos: [{ id: 'one', content: 'Verify persisted task', status: 'in_progress', priority: 'high' }],
+							}),
+						},
+					],
+					createdAt: 1,
+				}}
+			/>,
+		);
+
+		expect(screen.getByText('Verify persisted task')).toBeInTheDocument();
+		expect(screen.getByText('high')).toBeInTheDocument();
+	});
+
 	it('shows current asset settings after asset_settings_update', () => {
 		renderWithProviders(
 			<AssistantMessage

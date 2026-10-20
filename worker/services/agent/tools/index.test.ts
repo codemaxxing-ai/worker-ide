@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import { toolInputSchemas } from '@shared/validation';
 
@@ -102,6 +103,21 @@ describe('SUB_AGENT_EXCLUDED_TOOLS', () => {
 });
 
 describe('tool registration sync', () => {
+	it('keeps declared argument names aligned with shared validation', () => {
+		const schemas = new Map(Object.entries(toolInputSchemas));
+		for (const definition of AGENT_TOOLS) {
+			const schema = schemas.get(definition.name);
+			if (!schema) throw new Error(`Missing schema for ${definition.name}`);
+			const sharedSchema = z.toJSONSchema(schema);
+			expect(Object.keys(definition.input_schema.properties ?? {}).toSorted(), definition.name).toEqual(
+				Object.keys(sharedSchema.properties ?? {}).toSorted(),
+			);
+			expect([...(definition.input_schema.required ?? [])].toSorted(), definition.name).toEqual(
+				[...(sharedSchema.required ?? [])].toSorted(),
+			);
+		}
+	});
+
 	const externalToolNames = [
 		'read',
 		'ls',

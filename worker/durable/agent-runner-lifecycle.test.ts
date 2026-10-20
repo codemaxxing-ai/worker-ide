@@ -29,6 +29,89 @@ async function createTestAgent(name: string, sessionId: string): Promise<Durable
 }
 
 describe('agent runner turn completion', () => {
+	it.each([true, false])('persists rich tool results and errors through completion (selected: %s)', async (selected) => {
+		const sessionId = `tool-session-${selected}`;
+		const stub = await createTestAgent(`agent:tool-metadata-${selected}`, sessionId);
+		if (selected) await stub.loadSession(sessionId);
+		const todos = [{ id: 'task-1', content: 'Fix tools', status: 'in_progress', priority: 'high' }];
+		await stub.receiveThinkEvents(sessionId, [
+			{ type: 'tool-result', toolCallId: 'todos-1', toolName: 'todos_update', title: 'todos', metadata: { todos } },
+		]);
+		await stub.receiveThinkEvents(sessionId, [
+			{
+				type: 'tool-result',
+				toolCallId: 'plan-1',
+				toolName: 'plan_update',
+				title: 'plan',
+				metadata: { planFilePath: '.agent/plans/test.md' },
+			},
+			{ type: 'tool-error', toolCallId: 'lint-1', toolName: 'lint_check', errorCode: 'FILE_NOT_FOUND', errorMessage: 'Missing file' },
+		]);
+		if (selected) {
+			await runInDurableObject(stub, (instance) => {
+				expect(instance.state.currentSession?.toolErrors['lint-1']?.errorCode).toBe('FILE_NOT_FOUND');
+			});
+		}
+		await stub.completeThinkTurn(
+			sessionId,
+			'request',
+			[{ id: 'request', role: 'user', parts: [{ type: 'text', content: 'Fix tools' }] }],
+			'completed',
+		);
+
+		using snapshot = await stub.readSession(sessionId);
+		expect(snapshot?.toolMetadata?.['todos-1']?.metadata).toEqual({ todos });
+		expect(snapshot?.toolMetadata?.['plan-1']?.metadata).toEqual({ planFilePath: '.agent/plans/test.md' });
+		expect(snapshot?.toolErrors?.['lint-1']).toMatchObject({ errorCode: 'FILE_NOT_FOUND', toolName: 'lint_check' });
+
+		await stub.loadSession(sessionId);
+		await runInDurableObject(stub, (instance) => {
+			expect(instance.state.currentSession?.toolMetadata['todos-1']?.metadata).toEqual({ todos });
+			expect(instance.state.currentSession?.toolErrors['lint-1']?.errorCode).toBe('FILE_NOT_FOUND');
+		});
+	});
+
+	it('restores an unanswered question when reloading its session and clears it for the answer', async () => {
+		const stub = await createTestAgent('agent:question-reload-test', 'question-session');
+		const history: ChatMessage[] = [
+			{ id: 'request', role: 'user', parts: [{ type: 'text', content: 'Choose a color' }] },
+			{
+				id: 'question',
+				role: 'assistant',
+				parts: [
+					{
+						type: 'tool-call',
+						toolCallId: 'question-1',
+						toolName: 'user_question',
+						arguments: { question: 'Which color?', options: 'Red, Blue' },
+					},
+					{ type: 'tool-result', toolCallId: 'question-1', toolName: 'user_question', result: 'Question displayed' },
+				],
+			},
+		];
+		await stub.completeThinkTurn('question-session', 'request', history, 'completed');
+		await stub.loadSession('question-session');
+		await runInDurableObject(stub, (instance) => {
+			expect(instance.state.currentSession?.pendingQuestion).toEqual({ question: 'Which color?', options: 'Red, Blue' });
+			expect(instance.state.currentSession?.status).toBe('completed');
+		});
+
+		await stub.beginThinkTurn('question-session', 'answer');
+		await runInDurableObject(stub, (instance) => {
+			expect(instance.state.currentSession?.pendingQuestion).toBeUndefined();
+		});
+		await stub.completeThinkTurn(
+			'question-session',
+			'answer',
+			[...history, { id: 'answer', role: 'user', parts: [{ type: 'text', content: 'Red' }] }],
+			'completed',
+		);
+		await stub.loadSession('question-session');
+		await runInDurableObject(stub, (instance) => {
+			expect(instance.state.currentSession?.pendingQuestion).toBeUndefined();
+		});
+	});
+
 	it('reads another session history without changing the selected session or live messages', async () => {
 		const stub = await createTestAgent('agent:history-read-test', 'selected');
 		await runInDurableObject(stub, (_instance, state) => {

@@ -1,5 +1,6 @@
 import { DEFAULT_AI_MODEL, getModelConfig } from '@shared/constants';
 import { sanitizePreviewElementReference } from '@shared/preview-element';
+import { questionInputSchema } from '@shared/validation/tools';
 
 import type { SessionMessageMetadataInsert, SessionMessageMetadataRow } from './db';
 import type { AIModelId } from '@shared/constants';
@@ -76,6 +77,23 @@ export function getQueuedMessages(messages: ChatMessage[]): ChatMessage[] {
 
 export function getCommittedMessages(messages: ChatMessage[]): ChatMessage[] {
 	return messages.filter((message) => !isQueuedMessage(message));
+}
+
+/** Restore an unanswered, successfully displayed question from canonical history. */
+export function getPendingUserQuestion(messages: ChatMessage[]): { question: string; options: string } | undefined {
+	const successfulQuestions = new Set<string>();
+	for (const message of messages.toReversed()) {
+		if (isQueuedMessage(message)) continue;
+		if (message.role === 'user') return;
+		for (const part of message.parts.toReversed()) {
+			if (part.type === 'tool-result' && part.toolName === 'user_question' && !part.isError) {
+				successfulQuestions.add(part.toolCallId);
+			}
+			if (part.type !== 'tool-call' || part.toolName !== 'user_question' || !successfulQuestions.has(part.toolCallId)) continue;
+			const question = questionInputSchema.safeParse(part.arguments);
+			if (question.success) return { question: question.data.question, options: question.data.options ?? '' };
+		}
+	}
 }
 
 export function getLastCommittedRequestConfig(messages: ChatMessage[]): { mode: AgentMode; model: AIModelId } {

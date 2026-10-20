@@ -32,10 +32,7 @@ export async function execute(
 	sendEvent('status', { message: 'Reading TODOs...' });
 	const todos = await readTodos(projectRoot, sessionId);
 
-	const completed = todos.filter((t) => t.status === 'completed').length;
-	const inProgress = todos.filter((t) => t.status === 'in_progress').length;
-	const pending = todos.filter((t) => t.status === 'pending').length;
-	const output = `${todos.length} TODOs (${completed} completed, ${inProgress} in progress, ${pending} pending)`;
+	const output = JSON.stringify({ todos });
 
 	return { title: 'todos', metadata: { todos }, output };
 }

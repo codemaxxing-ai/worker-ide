@@ -102,6 +102,22 @@ export class SessionStreamState {
 				});
 				break;
 			}
+			case 'tool-error': {
+				const current = this.host.getCurrentSession();
+				if (!current) break;
+				this.host.updateSessionState(sessionId, {
+					toolErrors: {
+						...current.toolErrors,
+						[event.toolCallId]: {
+							toolCallId: event.toolCallId,
+							toolName: event.toolName,
+							errorCode: event.errorCode,
+							errorMessage: event.errorMessage,
+						},
+					},
+				});
+				break;
+			}
 			case 'turn-complete': {
 				this.flushContentDelta(sessionId);
 				this.toolCallArgumentBuffers.delete(sessionId);

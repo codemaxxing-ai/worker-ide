@@ -6,7 +6,7 @@ import { aiModelSchema } from '@shared/validation';
 import { filesystemNamespace } from '../lib/durable-object-namespaces';
 import { runWithProjectStub } from '../lib/project-fs';
 import { toDurableObjectId } from '../lib/project-id';
-import { createSendEventFunction } from '../services/agent/event-helpers';
+import { createSendEventFunction, drainEventQueue } from '../services/agent/event-helpers';
 import { callConfiguredMcpTool, registerConfiguredMcpServers } from '../services/agent/mcp';
 import { isRequestOriginContext } from '../services/agent/request-origin-context';
 import { readAgentsContext } from '../services/agent/system-prompt-builder';
@@ -137,8 +137,7 @@ export class SubAgentWorker extends Think<Env, SubAgentState> {
 	}
 
 	private async forwardParentEvents(): Promise<void> {
-		const events = buildSubAgentParentEvents(this.eventQueue, this.state.input?.parentToolCallId);
-		this.eventQueue = [];
+		const events = buildSubAgentParentEvents(drainEventQueue(this.eventQueue), this.state.input?.parentToolCallId);
 		if (events.length === 0) return;
 
 		const { SessionTurnAgent } = await import('./session-turn-agent');

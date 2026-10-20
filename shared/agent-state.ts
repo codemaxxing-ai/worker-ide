@@ -84,6 +84,7 @@ export type StreamEvent =
 	| ToolCallArgumentsDeltaEvent
 	| ToolCallEndEvent
 	| ToolResultEvent
+	| ToolErrorEvent
 	| StatusEvent
 	| FileChangedEvent
 	| SnapshotCreatedEvent

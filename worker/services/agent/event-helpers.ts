@@ -1,3 +1,5 @@
+import { ToolExecutionError } from '@shared/tool-errors';
+
 import type {
 	FileChangedEvent,
 	PlanCreatedEvent,
@@ -8,8 +10,24 @@ import type {
 	SubAgentActivity,
 	SubAgentActivityEvent,
 	ToolResultEvent,
+	ToolErrorEvent,
 	UserQuestionEvent,
 } from '@shared/agent-state';
+
+/** Keep the queue identity stable: tool senders retain a reference to this array. */
+export function drainEventQueue(queue: StreamEvent[]): StreamEvent[] {
+	return queue.splice(0);
+}
+
+export function createToolErrorEvent(toolCallId: string, toolName: string, error: unknown): ToolErrorEvent {
+	return {
+		type: 'tool-error',
+		toolCallId,
+		toolName,
+		errorCode: error instanceof ToolExecutionError ? error.code : 'TOOL_EXECUTION_FAILED',
+		errorMessage: error instanceof Error ? error.message : String(error),
+	};
+}
 
 function statusEvent(message: string): StatusEvent {
 	return { type: 'status', message };

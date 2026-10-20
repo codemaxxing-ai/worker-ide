@@ -98,7 +98,9 @@ const DEFINITIONS_BY_NAME: ReadonlyMap<string, ToolDefinition> = new Map(AGENT_T
  * Tools the model calls directly (outside Code Mode): they pause for user
  * input or drive durable UI panels, so they cannot run inside the sandbox.
  */
-const DIRECT_TOOL_NAMES = new Set(['user_question', 'plan_update', 'todos_get', 'todos_update']);
+const DIRECT_TOOL_NAMES = new Set(['user_question', 'plan_update', 'todos_get', 'todos_update', 'sub_agent']);
+
+const DIRECT_DEPENDENCY_TOOL_NAMES = new Set(['dependencies_list', 'dependencies_update']);
 
 const PLAN_MODE_TOOL_NAMES = new Set([
 	'user_question',
@@ -211,9 +213,10 @@ type AnyTool = Record<string, unknown>;
 /**
  * Assemble the model-facing tool surface: a single `codemode` tool exposing
  * domain tools as `tools.*`, the workspace filesystem as `state.*`, and the
- * browser as `tools.browser_*`, plus the interactive tools that must stay direct
- * (they pause for input or drive UI panels). Without isolate bindings (tests,
- * sub-agents) every tool is exposed directly instead.
+ * browser as `tools.browser_*`, plus direct Computer, dependency and interactive
+ * tools. Dependency tools also stay in Code Mode so either surface can manage
+ * the protected manifest. Without isolate bindings (tests, sub-agents) every
+ * tool is exposed directly instead.
  */
 export async function createServerTools(
 	sendEvent: SendEventFunction,
@@ -268,7 +271,11 @@ export async function createServerTools(
 		const definition = DEFINITIONS_BY_NAME.get(name);
 		const executor = TOOL_EXECUTORS.get(name);
 		if (definition && executor) {
-			codeModeTools[name] = wrapTool(definition, executor, wrapDeps(trackedSendEvent));
+			const wrapped = wrapTool(definition, executor, wrapDeps(trackedSendEvent));
+			codeModeTools[name] = wrapped;
+			if (DIRECT_DEPENDENCY_TOOL_NAMES.has(name)) {
+				llmTools[name] = wrapDirectTool(wrapped, context, trackedSendEvent, queryChanges, emittedChangePaths);
+			}
 		}
 	}
 
@@ -290,6 +297,8 @@ export async function createServerTools(
 		const connectors = context.agentReference ? await createConfiguredMcpConnectors(context.agentReference, context.ctx, env) : [];
 		const { tool } = createExecuteRuntime({
 			ctx: context.ctx,
+			// Allow five-minute container commands to finish and synchronize their workspace changes.
+			timeout: 360_000,
 			tools: codeModeTools,
 			state: createStateBackend(context, mode),
 			loader: context.loader,
@@ -304,7 +313,7 @@ export async function createServerTools(
 		// that surfaces drain-only tools (e.g. dependencies_update) without
 		// double-recording paths the tool already pushed.
 		for (const [name, codeModeTool] of Object.entries(codeModeTools)) {
-			llmTools[name] = wrapFallbackTool(codeModeTool, context, trackedSendEvent, queryChanges, emittedChangePaths);
+			llmTools[name] = wrapDirectTool(codeModeTool, context, trackedSendEvent, queryChanges, emittedChangePaths);
 		}
 	}
 
@@ -396,13 +405,12 @@ function wrapCodemodeTool(
 }
 
 /**
- * No-loader fallback: `tools.*` are exposed directly (no Code Mode sandbox), so
- * they run in this context and push their own changes into `queryChanges`. Wrap
- * each with a post-run drain so tools that surface changes ONLY via the drain
- * (e.g. dependencies_update) still appear, deduping paths the tool already
- * recorded to avoid double entries.
+ * Direct tools run in this context and push their own changes into
+ * `queryChanges`. A post-run drain surfaces changes from tools that report
+ * them only through the drain (e.g. dependencies_update), deduping paths the
+ * tool already recorded to avoid double entries.
  */
-function wrapFallbackTool(
+function wrapDirectTool(
 	tool: AnyTool,
 	context: ToolExecutorContext,
 	sendEvent: SendEventFunction,
@@ -448,12 +456,12 @@ function wrapTool(definition: ToolDefinition, executor: ToolExecuteFunction, dep
 	return {
 		description: definition.description,
 		inputSchema: schema,
-		execute: async (input: Record<string, string>, executeOptions?: { toolCallId?: string }) => {
-			if (context.abortSignal?.aborted) {
-				throw new DOMException('Aborted', 'AbortError');
-			}
+		execute: async (input: Record<string, string>, executeOptions?: { toolCallId?: string; abortSignal?: AbortSignal }) => {
+			const signals = [context.abortSignal, executeOptions?.abortSignal].filter((signal) => signal !== undefined);
+			const abortSignal = signals.length > 0 ? AbortSignal.any(signals) : undefined;
+			abortSignal?.throwIfAborted();
 
-			const callContext: ToolExecutorContext = { ...context, toolCallId: executeOptions?.toolCallId };
+			const callContext: ToolExecutorContext = { ...context, toolCallId: executeOptions?.toolCallId, abortSignal };
 
 			// Defense-in-depth: reject editing tools in non-code modes.
 			if (mode !== 'code' && EDITING_TOOL_NAMES.has(toolName)) {

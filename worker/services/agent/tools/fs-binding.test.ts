@@ -14,6 +14,7 @@
  * This test uses the REAL `@worker/lib/project-fs` (no mock) so the re-binding
  * is actually exercised.
  */
+import { env } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_AI_MODEL } from '@shared/constants';
@@ -21,8 +22,13 @@ import { runWithProjectStub } from '@worker/lib/project-fs';
 import { readDependencies } from '@worker/lib/protected-files';
 
 import { createServerTools } from './index';
+import { createMockSendEvent } from './test-helpers';
 
-import type { SendEventFunction, ToolExecutorContext } from '../types';
+import type { FileChange, SendEventFunction, ToolExecutorContext } from '../types';
+
+vi.mock('@worker/lib/durable-object-namespaces', () => ({
+	coordinatorNamespace: { getByName: () => ({ triggerUpdate: async () => {} }) },
+}));
 
 interface ExecutableTool {
 	execute: (input: Record<string, string>, options?: { toolCallId?: string }) => Promise<string>;
@@ -85,5 +91,26 @@ describe('wrapTool project-fs binding', () => {
 		const stub = createFakeFsStub({ '/package.json': PACKAGE_JSON });
 		const dependencies = await runWithProjectStub(stub, () => readDependencies('/project'), '/project');
 		expect(dependencies).toEqual({ 'react-confetti': '6.4.1', react: '^19.0.0' });
+	});
+
+	it('adds dependencies to a full Worker project and records review changes without running an install', async () => {
+		const fsStub = env.DurableObjectFilesystem.getByName(crypto.randomUUID());
+		await fsStub.writeFileContent('/package.json', PACKAGE_JSON);
+		await fsStub.writeFileContent('/worker/index.ts', "export default { fetch: () => new Response('worker') };");
+		const context = { ...createContext({}), fsStub };
+		const queryChanges: FileChange[] = [];
+		const sendEvent = createMockSendEvent();
+		const tools = await createServerTools(sendEvent, context, queryChanges, 'code');
+		const update = tools.dependencies_update;
+		if (!update?.execute) throw new Error('Missing dependency tool');
+		await update.execute({ action: 'add', name: 'is-number', version: '7.0.0' }, { toolCallId: 'add-dependency', messages: [] });
+
+		expect(await runWithProjectStub(fsStub, () => readDependencies('/project'))).toMatchObject({
+			'is-number': '7.0.0',
+			'react-confetti': '6.4.1',
+		});
+		expect(queryChanges).toContainEqual(expect.objectContaining({ path: '/package.json', action: 'edit' }));
+		expect(sendEvent.calls).toContainEqual(['file_changed', expect.objectContaining({ path: '/package.json' })]);
+		expect(await fsStub.getComputerExecutions('session')).toEqual([]);
 	});
 });

@@ -9,7 +9,7 @@ import { AgentRunner } from './agent-runner';
 import { filesystemNamespace } from '../lib/durable-object-namespaces';
 import { runWithProjectStub } from '../lib/project-fs';
 import { toDurableObjectId } from '../lib/project-id';
-import { createSendEventFunction } from '../services/agent/event-helpers';
+import { createSendEventFunction, createToolErrorEvent, drainEventQueue } from '../services/agent/event-helpers';
 import { registerConfiguredMcpServers } from '../services/agent/mcp';
 import { isRequestOriginContext, type RequestOriginContext } from '../services/agent/request-origin-context';
 import { addFileToSnapshot, deleteDirectoryRecursive, initSnapshot } from '../services/agent/snapshot-manager';
@@ -20,10 +20,18 @@ import { createAdapter as createWorkersAiAdapter } from '../services/agent/worke
 
 import type { SnapshotContext } from '../services/agent/snapshot-manager';
 import type { FileChange } from '../services/agent/types';
-import type { ChatResponseResult, ChunkContext, ThinkSubmissionInspection, TurnConfig, TurnContext } from '@cloudflare/think';
+import type {
+	ChatResponseResult,
+	ChunkContext,
+	ThinkSubmissionInspection,
+	ToolCallResultContext,
+	TurnConfig,
+	TurnContext,
+} from '@cloudflare/think';
 import type { StreamEvent } from '@shared/agent-state';
 import type { AIModelId } from '@shared/constants';
 import type { AgentMode, ChatMessage } from '@shared/types';
+import type { StopCondition, ToolSet } from 'ai';
 
 interface SessionTurnConfiguration {
 	projectId: string;
@@ -59,6 +67,10 @@ interface SessionTurnState {
 		error?: string;
 	};
 }
+
+/** A successful question ends the turn so the next model step receives the user's answer. */
+export const shouldWaitForUser: StopCondition<ToolSet> = ({ steps }) =>
+	steps.at(-1)?.toolResults.some((result) => result.toolName === 'user_question') ?? false;
 
 export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 	initialState: SessionTurnState = {};
@@ -166,13 +178,14 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 			instructions,
 			tools,
 			maxSteps: this.maxSteps,
+			stopWhen: shouldWaitForUser,
 			chatStreamStallTimeoutMs: this.chatStreamStallTimeoutMs,
 			maxRetries: 0,
 		};
 	}
 
 	override async onChunk(context: ChunkContext): Promise<void> {
-		const events = this.drainToolEvents();
+		const events = drainEventQueue(this.eventQueue);
 		const chunk = context.chunk;
 		switch (chunk.type) {
 			case 'text-delta': {
@@ -208,8 +221,23 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		await this.forwardEvents(events);
 	}
 
+	override async afterToolCall(context: ToolCallResultContext): Promise<void> {
+		if (context.toolOutput.type !== 'tool-error') return;
+		const events = drainEventQueue(this.eventQueue);
+		const error = createToolErrorEvent(context.toolCallId, context.toolName, context.toolOutput.error);
+		events.push(error, {
+			type: 'tool-call-end',
+			toolCallId: context.toolCallId,
+			toolName: context.toolName,
+			result: error.errorMessage,
+			isError: true,
+		});
+		await this.saveSnapshotChanges(events);
+		await this.forwardEvents(events);
+	}
+
 	override async onChatResponse(result: ChatResponseResult): Promise<void> {
-		const remainingEvents = this.drainToolEvents();
+		const remainingEvents = drainEventQueue(this.eventQueue);
 		await this.saveSnapshotChanges(remainingEvents);
 		await this.forwardEvents(remainingEvents);
 		const history = uiMessagesToChatMessages(await this.getMessages());
@@ -313,12 +341,6 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		const configuration = this.state.activeTurn;
 		if (!configuration) throw new Error('Turn execution configuration is missing or invalid.');
 		return configuration;
-	}
-
-	private drainToolEvents(): StreamEvent[] {
-		const events = this.eventQueue;
-		this.eventQueue = [];
-		return events;
 	}
 
 	private async forwardEvents(events: StreamEvent[]): Promise<void> {
