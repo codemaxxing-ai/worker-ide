@@ -1,4 +1,5 @@
 import { getActiveThinkMessages, mergeThinkHistory } from './agent-runner-helpers';
+import { getPendingUserQuestion } from './session-history';
 
 import type { ActiveThinkSubmission } from './agent-runner-helpers';
 import type { AgentSessionStore } from './session-store';
@@ -137,6 +138,7 @@ export class AgentTurnCoordinator {
 		this.dependencies.updateSessionState(sessionId, {
 			status: 'running',
 			statusText: 'Thinking...',
+			pendingQuestion: undefined,
 			messages: current.messages.map((message) => {
 				if (message.id !== submissionId || message.role !== 'user' || !message.metadata?.request) return message;
 				return {
@@ -185,6 +187,7 @@ export class AgentTurnCoordinator {
 				toolMetadata: {},
 				toolErrors: {},
 				subAgentActivities: {},
+				pendingQuestion: hasActiveSubmission ? undefined : getPendingUserQuestion(mergedHistory),
 			});
 		}
 		await this.dependencies.refreshSessionsList();

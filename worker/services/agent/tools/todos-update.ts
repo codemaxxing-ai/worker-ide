@@ -92,7 +92,7 @@ export async function execute(
 		if (context.indexArtifact) {
 			await context.indexArtifact(buildTodosArtifactEntry(sessionId, validated));
 		}
-		return { title: 'todos', metadata: { todos: validated }, output: `Updated ${validated.length} TODO(s).` };
+		return { title: 'todos', metadata: { todos: validated }, output: JSON.stringify({ todos: validated }) };
 	} catch (error) {
 		if (error instanceof ToolExecutionError) {
 			throw error;

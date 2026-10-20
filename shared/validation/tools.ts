@@ -46,10 +46,10 @@ export const assetSettingsUpdateInputSchema = z.object({
 	run_worker_first: z.string().optional(),
 });
 export const lintCheckInputSchema = z.object({
-	path: filePathSchema,
+	file_path: filePathSchema,
 });
 export const lintFixInputSchema = z.object({
-	path: filePathSchema,
+	file_path: filePathSchema,
 });
 
 export const cdpEvalInputSchema = z.object({
@@ -69,7 +69,7 @@ export const testRunInputSchema = z.object({
 });
 export const imageGenerateInputSchema = z.object({
 	prompt: z.string().min(1, 'Prompt is required'),
-	path: filePathSchema,
+	file_path: filePathSchema,
 });
 export const subAgentInputSchema = z.object({
 	prompt: z.string().min(1, 'Prompt is required'),

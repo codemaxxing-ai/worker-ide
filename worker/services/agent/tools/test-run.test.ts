@@ -331,6 +331,7 @@ describe('test_run', () => {
 			const config = await callback();
 			expect(config.modules).toEqual({ 'test-worker.js': 'const x = 1;' });
 			expect(config.mainModule).toBe('test-worker.js');
+			expect(config.globalOutbound).toBeNull();
 		});
 
 		it('handles runtime errors from the worker', async () => {

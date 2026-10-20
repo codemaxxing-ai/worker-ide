@@ -591,7 +591,8 @@ async function runSingleTestFile(
 		mainModule: 'test-worker.js',
 		modules: { 'test-worker.js': bundled.code },
 		// Block outbound network access for test isolation
-		globalOutbound: undefined,
+		// eslint-disable-next-line unicorn/no-null -- WorkerLoader uses null to disable outbound networking
+		globalOutbound: null,
 	}));
 
 	const entrypoint = worker.getEntrypoint();

@@ -85,6 +85,17 @@ function createHarness(messages: ChatMessage[] = []) {
 const turnConfiguration: TurnExecutionConfiguration = { mode: 'code', model: DEFAULT_AI_MODEL };
 
 describe('agent turn coordination', () => {
+	it('clears the previous question when an answer begins its turn', () => {
+		const answer = userMessage('answer', 'queued');
+		const harness = createHarness([answer]);
+		harness.currentSession().pendingQuestion = { question: 'Which color?', options: 'Red, Blue' };
+
+		harness.coordinator.beginThinkTurn('session-1', 'answer');
+
+		expect(harness.currentSession().pendingQuestion).toBeUndefined();
+		expect(harness.currentSession().messages[0]?.metadata?.request?.state).toBe('committed');
+	});
+
 	it('queues a second message without interrupting the running turn', async () => {
 		const firstMessage = userMessage('first', 'committed');
 		const queuedMessage = userMessage('second', 'queued');

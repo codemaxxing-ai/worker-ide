@@ -4,6 +4,7 @@ import { compactHistoryForPersistence } from '../services/agent/persisted-histor
 import { chatMessageToSessionMessage, sessionMessagesToChatMessages } from '../services/agent/session-messages';
 
 import type { AgentDatabase, SessionMetadataRow } from './db';
+import type { StreamEvent } from '@shared/agent-state';
 import type { AgentSessionStatus, AiSession, ChatMessage, ToolErrorInfo, ToolMetadataInfo } from '@shared/types';
 import type { SessionInfo, SessionMessage } from 'agents/experimental/memory/session';
 
@@ -79,6 +80,33 @@ export class AgentSessionStore {
 
 	getMetadata(sessionId: string): SessionMetadataState {
 		return parseSessionMetadata(readSessionMetadata(this.database, sessionId));
+	}
+
+	recordToolEvents(sessionId: string, events: StreamEvent[]): void {
+		const results = events.filter((event) => event.type === 'tool-result' || event.type === 'tool-error');
+		if (results.length === 0) return;
+		const existing = this.getMetadata(sessionId);
+		const toolMetadata = { ...existing.toolMetadata };
+		const toolErrors = { ...existing.toolErrors };
+		for (const event of results) {
+			if (!event.toolCallId) continue;
+			if (event.type === 'tool-result') {
+				toolMetadata[event.toolCallId] = {
+					toolCallId: event.toolCallId,
+					toolName: event.toolName,
+					title: event.title,
+					metadata: event.metadata,
+				};
+				continue;
+			}
+			toolErrors[event.toolCallId] = {
+				toolCallId: event.toolCallId,
+				toolName: event.toolName,
+				errorCode: event.errorCode,
+				errorMessage: event.errorMessage,
+			};
+		}
+		this.writeMetadata(sessionId, { toolMetadata, toolErrors });
 	}
 
 	async read(sessionId: string): Promise<AiSession | undefined> {

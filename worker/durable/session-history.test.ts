@@ -7,6 +7,7 @@ import {
 	clearSnapshotFromMessages,
 	getCommittedMessages,
 	getLastCommittedRequestConfig,
+	getPendingUserQuestion,
 	getQueuedMessages,
 	mergeQueuedMessages,
 	promoteNextQueuedMessage,
@@ -40,6 +41,56 @@ function createUserMessage(
 }
 
 describe('session-history', () => {
+	it('restores the most recent unanswered successful question from persisted tool calls', () => {
+		const question: ChatMessage = {
+			id: 'question',
+			role: 'assistant',
+			parts: [
+				{
+					type: 'tool-call',
+					toolCallId: 'question-1',
+					toolName: 'user_question',
+					arguments: { question: 'Which color?', options: 'Red, Blue' },
+				},
+				{ type: 'tool-result', toolCallId: 'question-1', toolName: 'user_question', result: 'Question for the user: Which color?' },
+			],
+		};
+		const messages = [createUserMessage('request', 'Choose a color', 'committed'), question];
+
+		expect(getPendingUserQuestion(messages)).toEqual({ question: 'Which color?', options: 'Red, Blue' });
+		expect(getPendingUserQuestion([...messages, createUserMessage('answer', 'Red', 'committed')])).toBeUndefined();
+		expect(getPendingUserQuestion([...messages, createUserMessage('queued', 'Follow up', 'queued')])).toEqual({
+			question: 'Which color?',
+			options: 'Red, Blue',
+		});
+	});
+
+	it('does not restore failed or unfinished questions', () => {
+		const call: ChatMessage = {
+			id: 'question',
+			role: 'assistant',
+			parts: [{ type: 'tool-call', toolCallId: 'question-1', toolName: 'user_question', arguments: { question: 'Which color?' } }],
+		};
+		expect(getPendingUserQuestion([call])).toBeUndefined();
+		expect(
+			getPendingUserQuestion([
+				{
+					...call,
+					parts: [
+						...call.parts,
+						{ type: 'tool-result', toolCallId: 'question-1', toolName: 'user_question', result: 'Failed', isError: true },
+					],
+				},
+			]),
+		).toBeUndefined();
+		const result: ChatMessage = {
+			id: 'result',
+			role: 'assistant',
+			parts: [{ type: 'tool-result', toolCallId: 'question-1', toolName: 'user_question', result: 'Question displayed' }],
+		};
+		expect(getPendingUserQuestion([call, result])).toEqual({ question: 'Which color?', options: '' });
+	});
+
 	it('separates committed and queued messages', () => {
 		const messages = [createUserMessage('m1', 'first', 'committed'), createUserMessage('m2', 'second', 'queued')];
 

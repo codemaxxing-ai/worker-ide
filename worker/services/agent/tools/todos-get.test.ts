@@ -52,6 +52,7 @@ describe('todos_get', () => {
 		expect(todosResult).toHaveLength(3);
 		expect(todosResult[0]).toHaveProperty('id', '1');
 		expect(todosResult[0]).toHaveProperty('status', 'pending');
+		expect(JSON.parse(result.output)).toEqual({ todos });
 	});
 
 	// ── No todos file ─────────────────────────────────────────────────────

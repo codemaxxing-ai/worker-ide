@@ -11,6 +11,7 @@ export const definition: ToolDefinition = {
 	name: 'dependencies_update',
 	description: stripIndent`
 		Add, remove, or update a project dependency. Dependencies are stored in package.json.
+		Use this tool instead of npm install, bun add, or editing the protected package.json. The IDE resolves packages for Worker previews and installs them for container previews and builds.
 		CRITICAL INSTRUCTION: You MUST register a dependency before importing it in code. Use dependencies_list to see current dependencies.
 	`,
 	input_schema: {

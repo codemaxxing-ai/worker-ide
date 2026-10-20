@@ -61,12 +61,11 @@ export async function execute(
 	}
 
 	// Check if file already exists
-	try {
-		await fs.stat(`${projectRoot}${imagePath}`);
-		return toolError(ToolErrorCode.NOT_ALLOWED, `File already exists: ${imagePath}. Choose a different path.`);
-	} catch {
-		// File does not exist — proceed
-	}
+	const fileExists = await fs.stat(`${projectRoot}${imagePath}`).then(
+		() => true,
+		() => false,
+	);
+	if (fileExists) return toolError(ToolErrorCode.NOT_ALLOWED, `File already exists: ${imagePath}. Choose a different path.`);
 
 	sendEvent('status', { message: `Generating image: "${prompt}"...` });
 

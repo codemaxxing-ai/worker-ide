@@ -48,6 +48,7 @@ import {
 	upsertSessionMetadata,
 	writePendingChangesData,
 } from './db';
+import { getPendingUserQuestion } from './session-history';
 import { AgentSessionStore } from './session-store';
 import { SessionStreamState } from './session-stream-state';
 import { SessionTurnAgent } from './session-turn-agent';
@@ -804,7 +805,7 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 				toolErrors: session.toolErrors ?? {},
 				debugLogId: undefined,
 				stopRequested: session.stopRequested ?? false,
-				pendingQuestion: undefined,
+				pendingQuestion: getPendingUserQuestion(session.history),
 				needsContinuation: false,
 				doomLoopMessage: undefined,
 				subAgentActivities: {},
@@ -1074,6 +1075,7 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 	}
 
 	async receiveThinkEvents(sessionId: string, events: StreamEvent[]): Promise<void> {
+		this.agentSessionStore.recordToolEvents(sessionId, events);
 		for (const event of events) {
 			await this.sessionStreamState.handleEvent(sessionId, event);
 		}

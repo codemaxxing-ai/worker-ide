@@ -7,7 +7,7 @@ Usage:
 - Do NOT ask the user questions that can be answered by reading code, grepping, globbing, fetching docs, or any other tool.
 - Provide suggested options as a comma-separated string to help guide the user.
 - The user can pick from the options or provide a custom answer.
-- The answer will arrive in the user's next message, so plan accordingly.`;
+- A successful call ends this turn. The answer will arrive in the user's next message; continue once it arrives.`;
 
 export const definition: ToolDefinition = {
 	name: 'user_question',
