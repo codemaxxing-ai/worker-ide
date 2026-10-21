@@ -1,5 +1,7 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+
+import { toolInputSchemas } from '@shared/validation';
 
 import { InlineToolCall } from './tool-call';
 
@@ -68,5 +70,84 @@ describe('Computer tool cards', () => {
 			/>,
 		);
 		expect(screen.getByRole('img', { name: 'photo.png' })).toHaveAttribute('src', 'data:image/png;base64,aGVsbG8=');
+	});
+});
+
+const toolNames = [...Object.keys(toolInputSchemas), 'mcp_custom_search', 'extension_custom_tool'];
+
+describe('shared tool call lifecycle', () => {
+	it.each(toolNames)('allows inspecting %s before arguments or results arrive', (toolName) => {
+		const toggle = vi.fn();
+		const { rerender } = render(
+			<InlineToolCall
+				toolCall={{ type: 'tool-call', toolCallId: 'pending', toolName, arguments: {} }}
+				isStreaming
+				isExpanded={false}
+				onToggleExpand={toggle}
+			/>,
+		);
+		const button = screen.getByRole('button');
+		expect(button).toHaveAttribute('aria-expanded', 'false');
+		fireEvent.click(button);
+		expect(toggle).toHaveBeenCalledOnce();
+		rerender(
+			<InlineToolCall
+				toolCall={{ type: 'tool-call', toolCallId: 'pending', toolName, arguments: { path: '/src/app.tsx', content: 'partial' } }}
+				isStreaming
+				isExpanded
+				onToggleExpand={toggle}
+			/>,
+		);
+		expect(screen.getByText('Arguments')).toBeInTheDocument();
+		expect(screen.getByText(/"content": "partial"/)).toBeInTheDocument();
+		expect(screen.queryByText(/Unsupported tool/)).not.toBeInTheDocument();
+	});
+
+	it.each(toolNames)('shows returned errors for %s as failures with inspectable details', (toolName) => {
+		render(
+			<InlineToolCall
+				toolCall={{ type: 'tool-call', toolCallId: 'failed', toolName, arguments: {} }}
+				toolResult={{ type: 'tool-result', toolCallId: 'failed', toolName, result: JSON.stringify({ error: 'Workspace unavailable' }) }}
+				isExpanded
+				onToggleExpand={() => {}}
+			/>,
+		);
+		expect(screen.getByRole('button').className).toContain('text-error');
+		expect(screen.getByText('Workspace unavailable')).toBeInTheDocument();
+	});
+
+	it('shows valid dynamically registered tool results without calling them unsupported', () => {
+		render(
+			<InlineToolCall
+				toolCall={{ type: 'tool-call', toolCallId: 'dynamic', toolName: 'mcp_custom_search', arguments: { query: 'test' } }}
+				toolResult={{ type: 'tool-result', toolCallId: 'dynamic', toolName: 'mcp_custom_search', result: 'Found one result' }}
+				isExpanded
+				onToggleExpand={() => {}}
+			/>,
+		);
+		expect(screen.getByText('Completed')).toBeInTheDocument();
+		expect(screen.getByText('Found one result')).toBeInTheDocument();
+		expect(screen.getByRole('button').className).not.toContain('text-error');
+	});
+
+	it('shows structured errors even for tools absent from the static schema', () => {
+		render(
+			<InlineToolCall
+				toolCall={{ type: 'tool-call', toolCallId: 'missing', toolName: 'unknown_tool', arguments: {} }}
+				toolErrors={
+					new Map([
+						[
+							'missing',
+							{ toolCallId: 'missing', toolName: 'unknown_tool', errorCode: 'UNKNOWN_TOOL', errorMessage: 'No such tool exists' },
+						],
+					])
+				}
+				isExpanded
+				onToggleExpand={() => {}}
+			/>,
+		);
+		expect(screen.getByText('No such tool exists')).toBeInTheDocument();
+		expect(screen.getByText('[UNKNOWN_TOOL] No such tool exists')).toBeInTheDocument();
+		expect(screen.getByRole('button').className).toContain('text-error');
 	});
 });

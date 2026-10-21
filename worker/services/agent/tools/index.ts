@@ -142,6 +142,7 @@ const EDITING_TOOL_NAMES = new Set(['lint_fix', 'image_generate', 'bash']);
 export const READ_ONLY_TOOL_NAMES = new Set([
 	'read',
 	'ls',
+	'list',
 	'find',
 	'grep',
 	'docs_search',

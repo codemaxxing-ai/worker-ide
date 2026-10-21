@@ -121,6 +121,7 @@ describe('tool registration sync', () => {
 	const externalToolNames = [
 		'read',
 		'ls',
+		'list',
 		'find',
 		'grep',
 		'write',

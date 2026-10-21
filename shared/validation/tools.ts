@@ -125,9 +125,12 @@ export const bashInputSchema = z.object({
 	command: z.string().min(1, 'Command is required'),
 });
 
+const listInputSchema = z.object({ path: z.string(), limit: z.number().optional(), offset: z.number().optional() });
+
 export const toolInputSchemas = {
 	read: z.object({ path: z.string(), offset: z.number().optional(), byteOffset: z.number().optional(), limit: z.number().optional() }),
-	ls: z.object({ path: z.string(), limit: z.number().optional(), offset: z.number().optional() }),
+	ls: listInputSchema,
+	list: listInputSchema,
 	find: z.object({
 		path: z.string().default('/workspace'),
 		pattern: z.string(),

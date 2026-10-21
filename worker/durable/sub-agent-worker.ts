@@ -6,7 +6,7 @@ import { aiModelSchema } from '@shared/validation';
 import { filesystemNamespace } from '../lib/durable-object-namespaces';
 import { runWithProjectStub } from '../lib/project-fs';
 import { toDurableObjectId } from '../lib/project-id';
-import { createSendEventFunction, drainEventQueue } from '../services/agent/event-helpers';
+import { createSendEventFunction, createToolErrorEvent, drainEventQueue } from '../services/agent/event-helpers';
 import { callConfiguredMcpTool, registerConfiguredMcpServers } from '../services/agent/mcp';
 import { isRequestOriginContext } from '../services/agent/request-origin-context';
 import { readAgentsContext } from '../services/agent/system-prompt-builder';
@@ -14,7 +14,7 @@ import { createServerTools, SUB_AGENT_EXCLUDED_TOOLS } from '../services/agent/t
 import { createAdapter as createWorkersAiAdapter } from '../services/agent/workers-ai';
 
 import type { RequestOriginContext } from '../services/agent/request-origin-context';
-import type { ChatResponseResult, ChunkContext, TurnConfig, TurnContext } from '@cloudflare/think';
+import type { ChatResponseResult, ChunkContext, ToolCallResultContext, TurnConfig, TurnContext } from '@cloudflare/think';
 import type { StreamEvent } from '@shared/agent-state';
 import type { AIModelId } from '@shared/constants';
 import type { UIMessage } from 'ai';
@@ -136,6 +136,12 @@ export class SubAgentWorker extends Think<Env, SubAgentState> {
 		await this.forwardParentEvents();
 	}
 
+	override async afterToolCall(context: ToolCallResultContext): Promise<void> {
+		if (context.toolOutput.type !== 'tool-error') return;
+		this.eventQueue.push(createToolErrorEvent(context.toolCallId, context.toolName, context.toolOutput.error));
+		await this.forwardParentEvents();
+	}
+
 	private async forwardParentEvents(): Promise<void> {
 		const events = buildSubAgentParentEvents(drainEventQueue(this.eventQueue), this.state.input?.parentToolCallId);
 		if (events.length === 0) return;
@@ -149,7 +155,21 @@ export class SubAgentWorker extends Think<Env, SubAgentState> {
 export function buildSubAgentParentEvents(events: StreamEvent[], parentToolCallId?: string): StreamEvent[] {
 	return events.flatMap<StreamEvent>((event) => {
 		if (event.type === 'file-changed') return [event];
-		if (event.type !== 'tool-result' || !parentToolCallId) return [];
+		if (!parentToolCallId) return [];
+		if (event.type === 'tool-error')
+			return [
+				{
+					type: 'sub-agent-activity',
+					parentToolCallId,
+					activity: {
+						kind: 'tool-metadata',
+						toolName: event.toolName,
+						title: 'Error',
+						metadata: { error: event.errorMessage, errorCode: event.errorCode },
+					},
+				},
+			];
+		if (event.type !== 'tool-result') return [];
 		return [
 			{
 				type: 'sub-agent-activity',

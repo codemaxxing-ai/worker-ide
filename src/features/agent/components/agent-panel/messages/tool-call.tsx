@@ -77,7 +77,6 @@ export function InlineToolCall({
 	const isCancelled = !toolResult && !isStreaming;
 	const rawResultContent = getToolResultContent(toolResult);
 	const attachment = knownToolName === 'read' ? readAttachment(rawResultContent) : undefined;
-	const isUnknownTool = knownToolName === undefined;
 
 	// Whether tool arguments are still being streamed (empty arguments = still receiving deltas)
 	const isArgumentsStreaming = isStreaming && !isCompleted && Object.keys(toolCall.arguments).length === 0;
@@ -86,11 +85,10 @@ export function InlineToolCall({
 	const structuredMetadata = toolMetadata?.get(toolCall.toolCallId);
 	const metadata = structuredMetadata?.metadata;
 
-	// Structured error data from tool_error events.
-	// Unknown (unsupported/hallucinated) tools are NOT treated as execution
-	// errors — they render with neutral styling instead of the alarming red path.
+	// Dynamic MCP and extension tools can return results without a static UI schema.
 	const structuredError = toolErrors?.get(toolCall.toolCallId);
-	const isError = structuredError !== undefined || isToolError(toolResult);
+	const isError =
+		structuredError !== undefined || isToolError(toolResult) || (typeof metadata?.error === 'string' && metadata.error.length > 0);
 
 	// Extract file paths from tool arguments.
 	// Accept `file_path` (schema-defined), `path` (legacy/search tools), and `filePath` (model sometimes hallucinates this key).
@@ -126,7 +124,7 @@ export function InlineToolCall({
 
 	// Streaming content preview for code/command tools (codemode, bash)
 	const streamingContent =
-		isArgumentsStreaming && CONTENT_STREAMING_TOOLS.has(toolCall.toolName)
+		isExecuting && CONTENT_STREAMING_TOOLS.has(toolCall.toolName)
 			? typeof input.code === 'string'
 				? input.code
 				: typeof input.command === 'string'
@@ -165,23 +163,23 @@ export function InlineToolCall({
 
 	// Build summary text from structured metadata (single code path for both
 	// live-streamed and loaded sessions — no raw-text fallbacks).
-	const resultSummary = isUnknownTool
-		? `Unsupported tool: ${displayToolName}`
+	const metadataSummary = structuredMetadata ? summarizeFromMetadata(knownToolName, structuredMetadata) : undefined;
+	const resultSummary = structuredError
+		? shortenErrorFromStructured(structuredError)
 		: isError
-			? structuredError
-				? shortenErrorFromStructured(structuredError)
-				: 'Failed'
+			? deriveCompletedLabel(knownToolName, rawResultContent, true)
 			: hasEditStats
 				? undefined
-				: structuredMetadata
-					? summarizeFromMetadata(knownToolName, structuredMetadata)
-					: isCompleted
+				: (metadataSummary ??
+					(isCompleted
 						? deriveCompletedLabel(knownToolName, rawResultContent)
 						: isCancelled
 							? 'Cancelled'
 							: isExecuting
-								? 'Running...'
-								: undefined;
+								? isArgumentsStreaming
+									? 'Receiving arguments...'
+									: 'Running...'
+								: undefined));
 
 	// Diagnostics from metadata for expanded view
 	const diagnostics = metadata && Array.isArray(metadata.diagnostics) ? metadata.diagnostics : undefined;
@@ -195,7 +193,7 @@ export function InlineToolCall({
 	const hasDetailContent = rawResultContent !== undefined || structuredError !== undefined || hasDiffContent || codemodeCode !== undefined;
 	// Once the user has opened a pill, keep it expandable so subsequent state
 	// updates (streaming → completed, metadata arriving, etc.) never collapse it.
-	const expandable = isExpanded || (!isUnknownTool && (isCompleted || codemodeCode !== undefined) && hasDetailContent);
+	const expandable = isExpanded || hasDetailContent || isExecuting || Object.keys(input).length > 0;
 
 	return (
 		<div className="flex min-w-0 animate-chat-item flex-col gap-1.5">
@@ -212,16 +210,17 @@ export function InlineToolCall({
 						: undefined
 				}
 				role={expandable ? 'button' : undefined}
+				id={`tool-call-${toolCall.toolCallId}`}
+				aria-expanded={expandable ? isExpanded : undefined}
 				tabIndex={expandable ? 0 : undefined}
 				className={cn(
 					`
 						flex flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden rounded-md
 						px-3 py-1.5 text-xs
 					`,
-					isUnknownTool && 'bg-bg-tertiary text-text-secondary',
-					!isUnknownTool && isCompleted && !isError && 'bg-success/5 text-text-secondary',
-					!isUnknownTool && isError && 'bg-error/5 text-error',
-					!isUnknownTool && !isCompleted && !isError && 'bg-bg-tertiary text-text-secondary',
+					isCompleted && !isError && 'bg-success/5 text-text-secondary',
+					isError && 'bg-error/5 text-error',
+					!isCompleted && !isError && 'bg-bg-tertiary text-text-secondary',
 					expandable &&
 						`
 							cursor-pointer transition-colors
@@ -229,17 +228,9 @@ export function InlineToolCall({
 						`,
 				)}
 			>
-				{expandable ? (
-					<ChevronRight className={cn('size-3 shrink-0 transition-transform', isExpanded && 'rotate-90')} />
-				) : !isCompleted && !isError && !isCancelled ? (
-					<Spinner className="size-3 shrink-0 text-accent" />
-				) : undefined}
-				<span
-					className={cn(
-						'shrink-0',
-						isUnknownTool ? 'text-text-secondary' : isCompleted && !isError ? 'text-success' : isError ? 'text-error' : undefined,
-					)}
-				>
+				{expandable ? <ChevronRight className={cn('size-3 shrink-0 transition-transform', isExpanded && 'rotate-90')} /> : undefined}
+				{isExecuting && !isError && <Spinner className="size-3 shrink-0 text-accent" />}
+				<span className={cn('shrink-0', isCompleted && !isError ? 'text-success' : isError ? 'text-error' : undefined)}>
 					{knownToolName ? <ToolIcon name={knownToolName} /> : <Wrench className="size-3" />}
 				</span>
 				<span className="shrink-0 font-medium capitalize">{displayToolName.replaceAll('_', ' ')}</span>
@@ -321,6 +312,14 @@ export function InlineToolCall({
 					</span>
 				)}
 			</div>
+			{isExpanded && codemodeCode === undefined && (
+				<InlineCodeSection
+					label="Arguments"
+					content={
+						Object.keys(input).length > 0 ? JSON.stringify(input, undefined, 2) : isArgumentsStreaming ? 'Receiving arguments...' : '{}'
+					}
+				/>
+			)}
 			{streamingContent && (
 				<pre
 					ref={streamingPreviewReference}
@@ -354,7 +353,7 @@ export function InlineToolCall({
 							text-2xs/relaxed break-all whitespace-pre-wrap text-text-secondary
 						"
 					>
-						{knownToolName ? getExpandableDetailText(knownToolName, rawResultContent, structuredError) : rawResultContent}
+						{getExpandableDetailText(knownToolName, rawResultContent, structuredError)}
 					</pre>
 				))}
 			{isExpanded && diagnostics && diagnostics.length > 0 && <InlineDiagnosticsList diagnostics={diagnostics} />}

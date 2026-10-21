@@ -1,5 +1,8 @@
+import { wrapLanguageModel } from 'ai';
 import { env } from 'cloudflare:workers';
 import { createWorkersAI } from 'workers-ai-provider';
+
+import { withStreamTimeout } from './stream-timeout';
 
 import type { LanguageModel } from 'ai';
 
@@ -82,7 +85,7 @@ function getSessionAffinity(modelId: string, context: WorkersAiContext): string 
 export function createAdapter(modelId: string, context: WorkersAiContext): LanguageModel {
 	const sessionAffinity = getSessionAffinity(modelId, context);
 
-	return createWorkersAI({
+	const model = createWorkersAI({
 		binding: env.AI,
 		gateway: {
 			id: 'default',
@@ -99,5 +102,16 @@ export function createAdapter(modelId: string, context: WorkersAiContext): Langu
 			'cf-aig-collect-log-payload': 'false',
 		},
 		sessionAffinity,
+	});
+	if (context.generationType !== 'agent') return model;
+	return wrapLanguageModel({
+		model,
+		middleware: {
+			specificationVersion: 'v3',
+			wrapStream: async ({ doStream }) => {
+				const result = await doStream();
+				return { ...result, stream: withStreamTimeout(result.stream, 120_000) };
+			},
+		},
 	});
 }

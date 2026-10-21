@@ -79,6 +79,8 @@ export function createComputerTools(context: ToolExecutorContext, mode: 'code' |
 			},
 		},
 	});
+	// Older conversations and some models use the long directory-listing name.
+	tools.list = { ...tools.ls };
 	for (const name of ['write', 'edit', 'delete']) {
 		const definition = tools[name];
 		if (!definition) continue;

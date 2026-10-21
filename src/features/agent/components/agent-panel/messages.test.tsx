@@ -484,7 +484,7 @@ describe('MessageBubble', () => {
 		expect(screen.getByRole('button', { name: /lint check/i })).toBeInTheDocument();
 	});
 
-	it('renders an unsupported (hallucinated) tool with neutral, non-error styling', () => {
+	it('renders an unfinished dynamic tool with neutral styling', () => {
 		renderWithProviders(
 			<AssistantMessage
 				message={{
@@ -503,7 +503,7 @@ describe('MessageBubble', () => {
 			/>,
 		);
 
-		const summary = screen.getByText('Unsupported tool: file_grep');
+		const summary = screen.getByText('Cancelled');
 		expect(summary).toBeInTheDocument();
 
 		// The row must not use the red error styling reserved for real failures.

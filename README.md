@@ -107,4 +107,6 @@ The agent manages project dependencies through `dependencies_list` and `dependen
 
 Successful `user_question` calls pause the agent turn until the user replies. Unanswered questions return when a session is reopened. Tool metadata and errors are persisted per session, including background sessions, so todo lists and other tool results remain available after completion and reload.
 
+Tool calls can be expanded while their arguments are streaming, including dynamically registered tools. Directory listing accepts both `ls` and `list`. Agent model streams fail after two minutes of provider inactivity; tool execution keeps its separate runtime deadline.
+
 See [Computer workspace](docs/computer-workspace.md) for access patterns, execution limits, review, and recovery rules. See [development and verification](docs/development.md) for Docker setup, test commands, and generated artifacts.

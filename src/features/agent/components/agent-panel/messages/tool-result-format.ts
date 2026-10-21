@@ -34,9 +34,9 @@ export function isReasoningPart(part: MessagePart): part is ReasoningPart {
  * metadata is not available (e.g. loaded sessions where tool_result events
  * were not persisted).
  */
-export function deriveCompletedLabel(toolName: ToolName | undefined, rawContent: string | undefined): string {
+export function deriveCompletedLabel(toolName: ToolName | undefined, rawContent: string | undefined, failed = false): string {
 	// codemode has no structured metadata summary; its label is always the same.
-	if (toolName === 'codemode') return 'Ran code';
+	if (toolName === 'codemode') return failed ? 'Failed' : 'Ran code';
 	if ((toolName === 'exec' || toolName === 'bash') && rawContent) {
 		try {
 			const output: unknown = JSON.parse(rawContent);
@@ -50,7 +50,7 @@ export function deriveCompletedLabel(toolName: ToolName | undefined, rawContent:
 			/* Legacy Bash output may be plain text. */
 		}
 	}
-	return 'Completed';
+	return failed ? 'Failed' : 'Completed';
 }
 
 function isErrorResult(text: string): boolean {
@@ -518,7 +518,7 @@ function formatToolResultDetail(toolName: ToolName, rawResult: string): string {
  * Combines raw result content with structured error info when available.
  */
 export function getExpandableDetailText(
-	toolName: ToolName,
+	toolName: ToolName | undefined,
 	rawResultContent: string | undefined,
 	structuredError: ToolErrorInfo | undefined,
 ): string {
@@ -528,7 +528,7 @@ export function getExpandableDetailText(
 		parts.push(`${prefix}${structuredError.errorMessage}`);
 	}
 	if (rawResultContent) {
-		const formatted = formatToolResultDetail(toolName, rawResultContent);
+		const formatted = toolName ? formatToolResultDetail(toolName, rawResultContent) : rawResultContent;
 		// Avoid duplicating the error message if it's the same as the structured error
 		if (!structuredError || formatted !== parts[0]) {
 			parts.push(formatted);
@@ -581,6 +581,14 @@ export function getToolResultContent(toolResult?: ToolResultPart): string | unde
 }
 export function isToolError(toolResult?: ToolResultPart): boolean {
 	if (toolResult?.isError) return true;
+	if (toolResult?.result) {
+		try {
+			const result: unknown = JSON.parse(toolResult.result);
+			if (isRecord(result) && typeof result.error === 'string' && result.error.length > 0) return true;
+		} catch {
+			// Legacy tool output can be plain text.
+		}
+	}
 	const content = getToolResultContent(toolResult);
 	return content !== undefined && isErrorResult(content);
 }

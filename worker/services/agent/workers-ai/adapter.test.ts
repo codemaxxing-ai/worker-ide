@@ -12,9 +12,11 @@ const { mockCreateWorkersAI, getLastModelSettings } = vi.hoisted(() => {
 		lastModelSettings = settings;
 
 		return {
-			specificationVersion: 'v2',
+			specificationVersion: 'v3',
 			provider: 'workers-ai',
 			modelId,
+			doGenerate: vi.fn(),
+			doStream: vi.fn(),
 		};
 	});
 

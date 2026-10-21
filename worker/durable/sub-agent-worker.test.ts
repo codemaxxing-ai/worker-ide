@@ -32,4 +32,32 @@ describe('sub-agent parent events', () => {
 			},
 		]);
 	});
+
+	it('forwards tool failures so child calls cannot appear successful', () => {
+		expect(
+			buildSubAgentParentEvents(
+				[
+					{
+						type: 'tool-error',
+						toolCallId: 'child-call',
+						toolName: 'write',
+						errorCode: 'NOT_ALLOWED',
+						errorMessage: 'Protected file',
+					},
+				],
+				'parent-call',
+			),
+		).toEqual([
+			{
+				type: 'sub-agent-activity',
+				parentToolCallId: 'parent-call',
+				activity: {
+					kind: 'tool-metadata',
+					toolName: 'write',
+					title: 'Error',
+					metadata: { error: 'Protected file', errorCode: 'NOT_ALLOWED' },
+				},
+			},
+		]);
+	});
 });

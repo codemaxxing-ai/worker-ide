@@ -1,3 +1,5 @@
+import { parsePartialJson } from 'ai';
+
 import { clearSnapshotFromMessages, setSnapshotOnLastCommittedUserMessage } from './session-history';
 import { accumulatePendingChange } from '../services/agent/pending-changes';
 
@@ -173,7 +175,7 @@ export class SessionStreamState {
 				sessionBuffers.set(event.toolCallId, buffer);
 
 				try {
-					const parsed: unknown = JSON.parse(buffer);
+					const { value: parsed } = await parsePartialJson(buffer);
 					if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
 						const current = this.host.getCurrentSession();
 						if (!current) {
@@ -195,7 +197,7 @@ export class SessionStreamState {
 						}
 					}
 				} catch {
-					// Partial JSON - wait for more deltas.
+					// Wait for enough input to form an object.
 				}
 				break;
 			}
@@ -274,7 +276,12 @@ export class SessionStreamState {
 							...existing,
 							tools: [
 								...existing.tools,
-								{ toolName: event.activity.toolName, title: event.activity.title, metadata: event.activity.metadata },
+								{
+									toolName: event.activity.toolName,
+									title: event.activity.title,
+									metadata: event.activity.metadata,
+									isError: typeof event.activity.metadata.error === 'string' && event.activity.metadata.error.length > 0,
+								},
 							],
 						};
 						break;
