@@ -1,4 +1,4 @@
-import { ToolExecutionError } from '@shared/tool-errors';
+import { TOOL_ERROR_LABELS, ToolExecutionError } from '@shared/tool-errors';
 
 import type {
 	FileChangedEvent,
@@ -13,6 +13,7 @@ import type {
 	ToolErrorEvent,
 	UserQuestionEvent,
 } from '@shared/agent-state';
+import type { StepResult, ToolSet } from 'ai';
 
 /** Keep the queue identity stable: tool senders retain a reference to this array. */
 export function drainEventQueue(queue: StreamEvent[]): StreamEvent[] {
@@ -20,13 +21,32 @@ export function drainEventQueue(queue: StreamEvent[]): StreamEvent[] {
 }
 
 export function createToolErrorEvent(toolCallId: string, toolName: string, error: unknown): ToolErrorEvent {
+	const errorMessage = error instanceof Error ? error.message : String(error);
+	const remoteCode = /^\[([A-Z_]+)\]/.exec(errorMessage)?.[1];
 	return {
 		type: 'tool-error',
 		toolCallId,
 		toolName,
-		errorCode: error instanceof ToolExecutionError ? error.code : 'TOOL_EXECUTION_FAILED',
-		errorMessage: error instanceof Error ? error.message : String(error),
+		errorCode:
+			error instanceof ToolExecutionError
+				? error.code
+				: remoteCode && Object.hasOwn(TOOL_ERROR_LABELS, remoteCode)
+					? remoteCode
+					: 'TOOL_EXECUTION_FAILED',
+		errorMessage,
 	};
+}
+
+/** Step content includes validation failures that never invoke the executor hook. */
+export function toolErrorEvents(content: StepResult<ToolSet>['content']): StreamEvent[] {
+	return content.flatMap<StreamEvent>((part) => {
+		if (part.type !== 'tool-error') return [];
+		const error = createToolErrorEvent(part.toolCallId, part.toolName, part.error);
+		return [
+			error,
+			{ type: 'tool-call-end', toolCallId: part.toolCallId, toolName: part.toolName, result: error.errorMessage, isError: true },
+		];
+	});
 }
 
 function statusEvent(message: string): StatusEvent {

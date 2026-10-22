@@ -6,7 +6,7 @@ import { aiModelSchema } from '@shared/validation';
 import { filesystemNamespace } from '../lib/durable-object-namespaces';
 import { runWithProjectStub } from '../lib/project-fs';
 import { toDurableObjectId } from '../lib/project-id';
-import { createSendEventFunction, createToolErrorEvent, drainEventQueue } from '../services/agent/event-helpers';
+import { createSendEventFunction, drainEventQueue, toolErrorEvents } from '../services/agent/event-helpers';
 import { callConfiguredMcpTool, registerConfiguredMcpServers } from '../services/agent/mcp';
 import { isRequestOriginContext } from '../services/agent/request-origin-context';
 import { readAgentsContext } from '../services/agent/system-prompt-builder';
@@ -14,7 +14,7 @@ import { createServerTools, SUB_AGENT_EXCLUDED_TOOLS } from '../services/agent/t
 import { createAdapter as createWorkersAiAdapter } from '../services/agent/workers-ai';
 
 import type { RequestOriginContext } from '../services/agent/request-origin-context';
-import type { ChatResponseResult, ChunkContext, ToolCallResultContext, TurnConfig, TurnContext } from '@cloudflare/think';
+import type { ChatResponseResult, ChunkContext, StepContext, TurnConfig, TurnContext } from '@cloudflare/think';
 import type { StreamEvent } from '@shared/agent-state';
 import type { AIModelId } from '@shared/constants';
 import type { UIMessage } from 'ai';
@@ -136,9 +136,8 @@ export class SubAgentWorker extends Think<Env, SubAgentState> {
 		await this.forwardParentEvents();
 	}
 
-	override async afterToolCall(context: ToolCallResultContext): Promise<void> {
-		if (context.toolOutput.type !== 'tool-error') return;
-		this.eventQueue.push(createToolErrorEvent(context.toolCallId, context.toolName, context.toolOutput.error));
+	override async onStepEnd(context: StepContext): Promise<void> {
+		this.eventQueue.push(...toolErrorEvents(context.content));
 		await this.forwardParentEvents();
 	}
 

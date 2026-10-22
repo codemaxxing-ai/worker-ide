@@ -456,32 +456,9 @@ export default defineConfig({
 `;
 }
 
-/**
- * Simple per-root mutex to prevent concurrent regeneration from producing
- * inconsistent files (e.g. two dependency updates racing).
- */
-const regenerationLocks = new Map<string, Promise<void>>();
-
-/**
- * Regenerate all protected system files on disk.
- *
- * Reads current project name, dependencies, asset settings, and bindings config
- * from disk, then rewrites all five system files to keep them in sync.
- *
- * Serialized per project root to prevent concurrent calls from racing.
- */
+/** Regenerate managed files. Live updates must hold the project mutation queue. */
 export async function regenerateProtectedFiles(projectRoot: string): Promise<void> {
-	const previous = regenerationLocks.get(projectRoot) ?? Promise.resolve();
-	const current = previous.then(() => doRegenerate(projectRoot)).catch(() => doRegenerate(projectRoot));
-	regenerationLocks.set(projectRoot, current);
-	try {
-		await current;
-	} finally {
-		// Clean up if we're still the latest queued operation
-		if (regenerationLocks.get(projectRoot) === current) {
-			regenerationLocks.delete(projectRoot);
-		}
-	}
+	await doRegenerate(projectRoot);
 }
 
 async function doRegenerate(projectRoot: string): Promise<void> {

@@ -14,6 +14,39 @@ class ControlledShell extends ShellWorker {
 }
 
 describe('Computer execution lifecycle without Docker', () => {
+	it.each(['shell', 'container'])('restores managed configuration before releasing a %s execution', async (backend) => {
+		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
+			const shell = new ControlledShell(createExecutionContext(), { HOST: { getWorkspace: () => project.__getWorkspaceStub() } });
+			const computer = new Computer({
+				storage: computerStorage(state.storage),
+				backends: [
+					new WorkerShellBackend({ id: backend, source: { type: 'external-runtime', connect: () => shell }, egress: { mode: 'none' } }),
+				],
+			});
+			Reflect.set(project, 'computerInstance', computer);
+			vi.spyOn(computer, 'push').mockImplementation(async function* () {});
+			vi.spyOn(computer, 'pull').mockImplementation(async function* () {});
+			Reflect.set(project, 'getWorkspaceContainer', () => ({ setInactivityTimeout: async () => {} }));
+			await project.writeFileContent('/package.json', '{"name":"preserved"}');
+			await project.wsSymlink('/package.json', '/alias');
+			shell.setCommand(async () => {
+				using workspace = await project.__getWorkspaceStub();
+				await expect(workspace.fs.writeFile('/alias', 'blocked')).rejects.toThrow('managed by the IDE');
+				// A native process or Git backend can write without the shell adapter.
+				await computer.fs.writeFile('/workspace/package.json', '{}');
+				await computer.fs.writeFile('/workspace/source.ts', 'kept source edit');
+				return { stdout: '', stderr: '', exitCode: 0 };
+			});
+			const result = await project.computerExec('modify configuration', { backend }, 'session');
+			expect(result).toMatchObject({ status: 'failed', exitCode: 1, syncStatus: 'complete' });
+			expect(result.stderr).toContain('IDE-managed files: /package.json');
+			expect(await project.wsReadFile('/package.json')).toBe('{"name":"preserved"}');
+			expect(await project.wsReadFile('/source.ts')).toBe('kept source edit');
+			expect(state.storage.sql.exec('SELECT 1 FROM computer_protected_files').toArray()).toEqual([]);
+			await computer.close();
+		});
+	});
+
 	it('starts a cold container before setting its idle timeout or dispatching a command', async () => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
 			const shell = new ControlledShell(createExecutionContext(), { HOST: { getWorkspace: () => project.__getWorkspaceStub() } });

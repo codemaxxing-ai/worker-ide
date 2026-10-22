@@ -1,24 +1,9 @@
 import { stripIndent } from 'common-tags';
+import { z } from 'zod';
 
-import { ToolExecutionError } from '@shared/tool-errors';
 import { coordinatorNamespace } from '@worker/lib/durable-object-namespaces';
-import { readAssetSettings, regenerateProtectedFiles, writeAssetSettings } from '@worker/lib/protected-files';
 
 import type { SendEventFunction, ToolDefinition, ToolExecutorContext, ToolResult } from '../types';
-import type { AssetSettings, HtmlHandling, NotFoundHandling } from '@shared/types';
-
-const VALID_NOT_FOUND_HANDLING: Record<string, NotFoundHandling> = {
-	none: 'none',
-	'single-page-application': 'single-page-application',
-	'404-page': '404-page',
-};
-
-const VALID_HTML_HANDLING: Record<string, HtmlHandling> = {
-	'auto-trailing-slash': 'auto-trailing-slash',
-	'force-trailing-slash': 'force-trailing-slash',
-	'drop-trailing-slash': 'drop-trailing-slash',
-	none: 'none',
-};
 
 export const definition: ToolDefinition = {
 	name: 'asset_settings_update',
@@ -65,96 +50,12 @@ export async function execute(
 	sendEvent: SendEventFunction,
 	context: ToolExecutorContext,
 ): Promise<ToolResult> {
-	const { projectRoot, projectId } = context;
-
-	sendEvent('status', { message: 'Updating asset settings...' });
-
-	const assetSettings: AssetSettings = await readAssetSettings(projectRoot);
-	const changes: string[] = [];
-
-	// Update not_found_handling
-	if (input.not_found_handling !== undefined) {
-		const parsedNotFound = VALID_NOT_FOUND_HANDLING[input.not_found_handling];
-		if (!parsedNotFound) {
-			throw new ToolExecutionError(
-				'NOT_ALLOWED',
-				`Invalid not_found_handling: "${input.not_found_handling}". Must be one of: none, single-page-application, 404-page`,
-			);
-		}
-		if (parsedNotFound === 'none') {
-			delete assetSettings.not_found_handling;
-		} else {
-			assetSettings.not_found_handling = parsedNotFound;
-		}
-		changes.push(`not_found_handling = ${input.not_found_handling}`);
+	sendEvent('status', { message: `Updating asset settings...` });
+	using result = await context.fsStub.updateManagedConfiguration('asset_settings_update', input, context.sessionId);
+	if (result.title !== 'no changes') {
+		await coordinatorNamespace
+			.getByName(`project:${context.projectId}`)
+			.triggerUpdate({ type: 'full-reload', path: '/wrangler.jsonc', timestamp: Date.now(), targets: [] });
 	}
-
-	// Update html_handling
-	if (input.html_handling !== undefined) {
-		const parsedHtml = VALID_HTML_HANDLING[input.html_handling];
-		if (!parsedHtml) {
-			throw new ToolExecutionError(
-				'NOT_ALLOWED',
-				`Invalid html_handling: "${input.html_handling}". Must be one of: auto-trailing-slash, force-trailing-slash, drop-trailing-slash, none`,
-			);
-		}
-		if (parsedHtml === 'auto-trailing-slash') {
-			delete assetSettings.html_handling;
-		} else {
-			assetSettings.html_handling = parsedHtml;
-		}
-		changes.push(`html_handling = ${input.html_handling}`);
-	}
-
-	// Update run_worker_first
-	if (input.run_worker_first !== undefined) {
-		const value = input.run_worker_first.trim();
-		if (value === 'true') {
-			assetSettings.run_worker_first = true;
-			changes.push('run_worker_first = true');
-		} else if (value === 'false') {
-			delete assetSettings.run_worker_first;
-			changes.push('run_worker_first = false');
-		} else {
-			// Parse as comma-separated patterns
-			const patterns = value
-				.split(',')
-				.map((p) => p.trim())
-				.filter(Boolean);
-
-			for (const pattern of patterns) {
-				if (!pattern.startsWith('/') && !pattern.startsWith('!/')) {
-					throw new ToolExecutionError('NOT_ALLOWED', `Invalid route pattern: "${pattern}". Patterns must begin with / or !/`);
-				}
-			}
-
-			assetSettings.run_worker_first = patterns;
-			changes.push(`run_worker_first = [${patterns.join(', ')}]`);
-		}
-	}
-
-	if (changes.length === 0) {
-		return {
-			title: 'no changes',
-			metadata: { assetSettings },
-			output: 'No settings were provided to update.',
-		};
-	}
-
-	// Write asset settings to wrangler.jsonc
-	const cleanedSettings = Object.keys(assetSettings).length > 0 ? assetSettings : {};
-	await writeAssetSettings(projectRoot, cleanedSettings);
-
-	// Regenerate all protected files to keep them in sync
-	await regenerateProtectedFiles(projectRoot);
-
-	// Trigger full reload so the preview picks up new asset settings
-	const coordinatorStub = coordinatorNamespace.getByName(`project:${projectId}`);
-	await coordinatorStub.triggerUpdate({ type: 'full-reload', path: '/wrangler.jsonc', timestamp: Date.now(), targets: [] });
-
-	return {
-		title: 'asset settings updated',
-		metadata: { assetSettings: cleanedSettings, changes },
-		output: `Updated asset settings:\n${changes.join('\n')}`,
-	};
+	return { title: result.title, metadata: z.record(z.string(), z.unknown()).parse(JSON.parse(result.metadataJson)), output: result.output };
 }

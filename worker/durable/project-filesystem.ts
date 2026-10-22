@@ -9,7 +9,7 @@ import { createAITools } from '@cloudflare/computer/tools';
 import { DurableObject, exports } from 'cloudflare:workers';
 import { z } from 'zod';
 
-import { SNAPSHOT_EXCLUDED_DIRECTORIES } from '@shared/constants';
+import { PROTECTED_SYSTEM_FILES, SNAPSHOT_EXCLUDED_DIRECTORIES } from '@shared/constants';
 import { classifyOrigin } from '@shared/domain';
 import { toolInputSchemas } from '@shared/validation/tools';
 import { WorkerBuildBudget, isWorkerResourceLimit } from '@shared/worker-resource-budget';
@@ -19,6 +19,7 @@ import { selectComputerBackend } from '../lib/computer-backend';
 import { ComputerChanges } from '../lib/computer-changes';
 import { drainComputerOutput } from '../lib/computer-execution';
 import { ComputerMutationQueue, ComputerSynchronizationPending } from '../lib/computer-mutation-queue';
+import { ComputerProtectedFiles } from '../lib/computer-protected-files';
 import { resolveComputerReview } from '../lib/computer-review';
 import { ComputerShellWorkspace } from '../lib/computer-shell-workspace';
 import { restoreComputerSnapshots } from '../lib/computer-snapshots';
@@ -26,24 +27,35 @@ import { computerStorage } from '../lib/computer-storage';
 import { ComputerWorkspace, computerPath, projectPath } from '../lib/computer-workspace';
 import { getDomainConfiguration } from '../lib/domain-configuration';
 import { coordinatorNamespace } from '../lib/durable-object-namespaces';
+import { applyManagedConfiguration } from '../lib/managed-configuration';
 import { nativeBuildSchema } from '../lib/native-build';
 import { collectNativePreviewSource } from '../lib/native-preview-source';
 import { waitForNativeRuntime } from '../lib/native-runtime-readiness';
+import { runWithProjectFs } from '../lib/project-fs';
 import { generateProjectId } from '../lib/project-id';
 import { ProjectRuntimeState } from '../lib/project-runtime-state';
+import {
+	regenerateProtectedFiles,
+	writeDependencies,
+	writeProjectName,
+	writeAssetSettings,
+	writeBindingsConfig,
+} from '../lib/protected-files';
 import { hashSnapshot } from '../lib/snapshot-hash';
 import { withSpan } from '../lib/tracing';
 import { WorkspaceFsAdapter } from '../lib/workspace-fs-adapter';
+import { guardProtectedFile } from '../services/agent/protected-file-guard';
 import { readRuntimeOverride, selectBuildBackend } from '../services/vite-host/runtimes/runtime-selection';
 
 import type { GitAuthor, GitStatusResponse } from './git-service';
+import type { ManagedConfigurationTool } from '../lib/managed-configuration';
 import type { PreviewBootstrap, PreviewBootstrapInputs } from '../lib/preview-bootstrap';
 import type { RequestOriginContext } from '../services/agent/request-origin-context';
 import type { FileInfo, FileStat } from '@cloudflare/shell';
 import type { ComputerExecOptions, ComputerExecResult, ComputerReviewOptions } from '@shared/computer';
 import type { ProjectFilesystemRpc } from '@shared/project-filesystem-rpc';
 import type { RuntimeDecision, RuntimePhase, RuntimeStatus, RuntimeSurface } from '@shared/runtime-status';
-import type { GitBranchInfo, GitCommitEntry, GitFileDiff, GitMergeResult } from '@shared/types';
+import type { AssetSettings, BindingsConfig, GitBranchInfo, GitCommitEntry, GitFileDiff, GitMergeResult } from '@shared/types';
 
 interface SeedFile {
 	path: string;
@@ -104,6 +116,8 @@ const COMPUTER_MUTATIONS = new Set([
 	'restoreSnapshots',
 	'resolveWorkspaceReview',
 	'writeAgentDocument',
+	'updateManagedConfiguration',
+	'updateProjectConfiguration',
 ]);
 
 /**
@@ -435,7 +449,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 				"SELECT sequence, operation FROM computer_mutation_queue WHERE status IN ('running', 'sync-pending') ORDER BY sequence LIMIT 1",
 			)
 			.toArray()[0];
-		return new ComputerShellWorkspace(this.computer, () => {
+		const assertOwner = () => {
 			const current = this.ctx.storage.sql
 				.exec<{ sequence: number; operation: string }>(
 					"SELECT sequence, operation FROM computer_mutation_queue WHERE status IN ('running', 'sync-pending') ORDER BY sequence LIMIT 1",
@@ -443,6 +457,11 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 				.toArray()[0];
 			if (!owner || owner.operation !== 'computerExec' || current?.sequence !== owner.sequence)
 				throw new Error('Runtime writes require the original execution ownership');
+		};
+		return new ComputerShellWorkspace(this.computer, assertOwner, async (path, descendants, followFinalLink) => {
+			assertOwner();
+			await this.assertAgentPath('shell', path, descendants, followFinalLink);
+			assertOwner();
 		});
 	}
 
@@ -499,6 +518,64 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 		if (mode === 'plan' || mode === 'ask') throw new Error(`${mode} mode cannot mutate the project workspace`);
 	}
 
+	private async assertAgentPath(writerId: string | undefined, path: string, descendants = false, followFinalLink = true): Promise<void> {
+		if (writerId === undefined) return;
+		const normalized = projectPath(computerPath(path));
+		const resolved = await this.changes.resolveWritePath(normalized, followFinalLink);
+		for (const protectedPath of PROTECTED_SYSTEM_FILES) {
+			const protectedTarget = await this.changes.resolveWritePath(protectedPath);
+			if (
+				[normalized, resolved].some((target) =>
+					[protectedPath, protectedTarget].some(
+						(protectedEntry) =>
+							target === protectedEntry || (descendants && protectedEntry.startsWith(target === '/' ? '/' : `${target}/`)),
+					),
+				)
+			) {
+				guardProtectedFile(protectedPath);
+			}
+		}
+	}
+
+	/** Keep each configuration read/merge/regeneration under one durable owner. */
+	async updateManagedConfiguration(
+		toolName: ManagedConfigurationTool,
+		input: Record<string, string>,
+		writerId?: string,
+	): Promise<{ title: string; output: string; metadataJson: string }> {
+		this.assertWritable(writerId);
+		return this.mutate('updateManagedConfiguration', [toolName, input, writerId], async () => {
+			this.assertWritable(writerId);
+			if (writerId)
+				for (const path of PROTECTED_SYSTEM_FILES) {
+					await this.captureBaseline(writerId, path);
+					await this.captureBaseline(writerId, await this.changes.resolveWritePath(path));
+				}
+			return runWithProjectFs(new WorkspaceFsAdapter(this.workspace, '/project'), async () => {
+				const result = await applyManagedConfiguration(toolName, input, '/project');
+				return { title: result.title, output: result.output, metadataJson: JSON.stringify(result.metadata) };
+			});
+		});
+	}
+
+	/** Trusted editor settings use the same queue as agent configuration tools. */
+	async updateProjectConfiguration(settings: {
+		name?: string;
+		dependencies?: Record<string, string>;
+		assetSettings?: AssetSettings;
+		bindingsConfig?: BindingsConfig;
+	}): Promise<void> {
+		await this.mutate('updateProjectConfiguration', [settings], () =>
+			runWithProjectFs(new WorkspaceFsAdapter(this.workspace, '/project'), async () => {
+				if (settings.name) await writeProjectName('/project', settings.name);
+				if (settings.dependencies !== undefined) await writeDependencies('/project', settings.dependencies);
+				if (settings.assetSettings !== undefined) await writeAssetSettings('/project', settings.assetSettings);
+				if (settings.bindingsConfig !== undefined) await writeBindingsConfig('/project', settings.bindingsConfig);
+				await regenerateProtectedFiles('/project');
+			}),
+		);
+	}
+
 	async computerExec(command: string, options: ComputerExecOptions, sessionId: string): Promise<ComputerExecResult> {
 		this.assertWritable(sessionId);
 		const identifier = options.id ?? crypto.randomUUID();
@@ -537,6 +614,8 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 				await this.getWorkspaceContainer().setInactivityTimeout(120_000);
 			}
 			if (!previous && options.nativeRuntime) await this.pushNativeSource();
+			const protectedFiles = new ComputerProtectedFiles(this.ctx.storage, this.workspace);
+			if (!previous) await protectedFiles.capture(identifier);
 			this.changes.resume(sessionId);
 			if (!previous) {
 				for (const path of await this.workspace._getAllPaths()) await this.captureBaseline(sessionId, path);
@@ -578,10 +657,20 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 					}
 					await this.getWorkspaceContainer().setInactivityTimeout(120_000);
 				}
+				const restoredPaths = await protectedFiles.restore(identifier);
+				if (restoredPaths.length > 0) {
+					response = {
+						...response,
+						status: 'failed',
+						exitCode: 1,
+						stderr: `${response.stderr}\n[NOT_ALLOWED] Restored IDE-managed files: ${restoredPaths.join(', ')}. Use the dedicated configuration tools.`,
+					};
+				}
 				for (const path of await this.workspace._getAllPaths()) this.markTouched(sessionId, path);
 				await this.changes.finish();
 				response = { ...response, syncStatus: 'complete' };
 				this.ctx.storage.kv.put(key, { status: response.status, sessionId, backend, result: response });
+				protectedFiles.clear(identifier);
 				return response;
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
@@ -660,8 +749,9 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 		this.assertWritable(sessionId);
 		return this.mutate('computerApplyTool', [name, input, sessionId], async () => {
 			this.assertWritable(sessionId);
-			for (const path of await this.workspace._getAllPaths()) await this.captureBaseline(sessionId, path);
 			const parameters = toolInputSchemas[name].parse(input);
+			await this.assertAgentPath(sessionId, parameters.path, name === 'delete', name !== 'delete');
+			for (const path of await this.workspace._getAllPaths()) await this.captureBaseline(sessionId, path);
 			const definition = createAITools({ workspace: this.computer, assets: false })[name];
 			if (!definition.execute) throw new Error(`Computer tool ${name} is unavailable`);
 			const result: unknown = await definition.execute(
@@ -732,6 +822,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	async wsWriteFile(path: string, content: string, writerId?: string): Promise<void> {
 		this.assertWritable(writerId);
 		return this.mutate<Awaited<ReturnType<ProjectFilesystem['wsWriteFile']>>>('wsWriteFile', [path, content, writerId], async () => {
+			await this.assertAgentPath(writerId, path);
 			this.assertWritable(writerId);
 			const target = await this.changes.resolveWritePath(path);
 			if (writerId !== undefined) await this.captureBaseline(writerId, target);
@@ -742,6 +833,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	async wsWriteFileBytes(path: string, data: Uint8Array, writerId?: string): Promise<void> {
 		this.assertWritable(writerId);
 		return this.mutate<Awaited<ReturnType<ProjectFilesystem['wsWriteFileBytes']>>>('wsWriteFileBytes', [path, data, writerId], async () => {
+			await this.assertAgentPath(writerId, path);
 			this.assertWritable(writerId);
 			const target = await this.changes.resolveWritePath(path);
 			if (writerId !== undefined) await this.captureBaseline(writerId, target);
@@ -752,6 +844,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	async wsAppendFile(path: string, content: string, writerId?: string): Promise<void> {
 		this.assertWritable(writerId);
 		return this.mutate<Awaited<ReturnType<ProjectFilesystem['wsAppendFile']>>>('wsAppendFile', [path, content, writerId], async () => {
+			await this.assertAgentPath(writerId, path);
 			this.assertWritable(writerId);
 			const target = await this.changes.resolveWritePath(path);
 			if (writerId !== undefined) await this.captureBaseline(writerId, target);
@@ -771,6 +864,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	async wsMkdir(path: string, recursive: boolean, writerId?: string): Promise<void> {
 		this.assertWritable(writerId);
 		return this.mutate<Awaited<ReturnType<ProjectFilesystem['wsMkdir']>>>('wsMkdir', [path, recursive, writerId], async () => {
+			await this.assertAgentPath(writerId, path);
 			this.assertWritable(writerId);
 			if (writerId !== undefined) await this.captureBaseline(writerId, path);
 			await this.workspace.mkdir(path, { recursive });
@@ -783,6 +877,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	async wsRm(path: string, recursive: boolean, force: boolean, writerId?: string): Promise<void> {
 		this.assertWritable(writerId);
 		return this.mutate<Awaited<ReturnType<ProjectFilesystem['wsRm']>>>('wsRm', [path, recursive, force, writerId], async () => {
+			await this.assertAgentPath(writerId, path, true, false);
 			this.assertWritable(writerId);
 			if (writerId !== undefined) await this.captureTree(writerId, path);
 			await this.workspace.rm(path, { recursive, force });
@@ -792,6 +887,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	async wsCp(source: string, destination: string, recursive: boolean, writerId?: string): Promise<void> {
 		this.assertWritable(writerId);
 		return this.mutate<Awaited<ReturnType<ProjectFilesystem['wsCp']>>>('wsCp', [source, destination, recursive, writerId], async () => {
+			await this.assertAgentPath(writerId, destination, recursive);
 			this.assertWritable(writerId);
 			if (writerId !== undefined) await this.captureTree(writerId, destination);
 			await this.workspace.cp(source, destination, { recursive });
@@ -801,6 +897,8 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	async wsMv(source: string, destination: string, writerId?: string): Promise<void> {
 		this.assertWritable(writerId);
 		return this.mutate<Awaited<ReturnType<ProjectFilesystem['wsMv']>>>('wsMv', [source, destination, writerId], async () => {
+			await this.assertAgentPath(writerId, source, true, false);
+			await this.assertAgentPath(writerId, destination, true, false);
 			this.assertWritable(writerId);
 			if (writerId !== undefined) {
 				await this.captureTree(writerId, source);
@@ -816,6 +914,8 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	async wsSymlink(target: string, linkPath: string, writerId?: string): Promise<void> {
 		this.assertWritable(writerId);
 		return this.mutate<Awaited<ReturnType<ProjectFilesystem['wsSymlink']>>>('wsSymlink', [target, linkPath, writerId], async () => {
+			await this.assertAgentPath(writerId, linkPath, false, false);
+			this.assertWritable(writerId);
 			if (writerId) await this.captureBaseline(writerId, linkPath);
 			await this.workspace.symlink(target, linkPath);
 			if (writerId) this.markTouched(writerId, linkPath);
@@ -824,6 +924,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	async wsChmod(path: string, mode: number, writerId?: string): Promise<void> {
 		this.assertWritable(writerId);
 		await this.mutate('wsChmod', [path, mode, writerId], async () => {
+			await this.assertAgentPath(writerId, path);
 			this.assertWritable(writerId);
 			await this.workspace.chmod(path, mode);
 		});

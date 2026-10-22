@@ -232,12 +232,19 @@ export async function createServerTools(
 ): Promise<ToolSet> {
 	context = { ...context, sessionId: context.sessionId ?? `agent:${context.projectId}` };
 	await context.fsStub.registerComputerSession(context.sessionId ?? `agent:${context.projectId}`, mode, context.requestOriginContext);
-	// Paths whose file_changed event a tool already emitted, so the Code Mode
-	// drain can skip re-emitting them after a sandbox run.
-	const emittedChangePaths = new Set<string>();
+	// Suppress identical notifications, while preserving every later revision.
+	const emittedChanges = new Map<string, Record<string, unknown>>();
 	const trackedSendEvent: SendEventFunction = (type, data) => {
 		if (type === 'file_changed' && typeof data.path === 'string') {
-			emittedChangePaths.add(data.path);
+			const previous = emittedChanges.get(data.path);
+			if (
+				previous &&
+				['action', 'beforeContent', 'afterContent', 'beforeBytes', 'afterBytes', 'entryType', 'beforeEntryType'].every(
+					(key) => previous[key] === data[key],
+				)
+			)
+				return;
+			emittedChanges.set(data.path, data);
 		}
 		sendEvent(type, data);
 	};
@@ -263,7 +270,7 @@ export async function createServerTools(
 	const codeModeTools: Record<string, any> = {};
 	for (const [name, definition] of Object.entries(createComputerTools(context, mode))) {
 		if (isExcluded(name)) continue;
-		const wrapped = wrapCodemodeTool(definition, context, trackedSendEvent, queryChanges, emittedChangePaths, name);
+		const wrapped = wrapCodemodeTool(definition, context, trackedSendEvent, queryChanges, name);
 		codeModeTools[name] = wrapped;
 		llmTools[name] = wrapped;
 	}
@@ -275,7 +282,7 @@ export async function createServerTools(
 			const wrapped = wrapTool(definition, executor, wrapDeps(trackedSendEvent));
 			codeModeTools[name] = wrapped;
 			if (DIRECT_DEPENDENCY_TOOL_NAMES.has(name)) {
-				llmTools[name] = wrapDirectTool(wrapped, context, trackedSendEvent, queryChanges, emittedChangePaths);
+				llmTools[name] = wrapDirectTool(wrapped, context, trackedSendEvent, queryChanges);
 			}
 		}
 	}
@@ -307,14 +314,14 @@ export async function createServerTools(
 			// eslint-disable-next-line unicorn/no-null -- codemode uses null to fully disable sandbox outbound network access
 			globalOutbound: null,
 		});
-		llmTools.codemode = wrapCodemodeTool(tool, context, trackedSendEvent, queryChanges, emittedChangePaths);
+		llmTools.codemode = wrapCodemodeTool(tool, context, trackedSendEvent, queryChanges);
 	} else {
 		// No Code Mode sandbox: expose `tools.*` directly. They run in THIS context
 		// and push their own changes into `queryChanges`, so wrap each with a drain
 		// that surfaces drain-only tools (e.g. dependencies_update) without
 		// double-recording paths the tool already pushed.
 		for (const [name, codeModeTool] of Object.entries(codeModeTools)) {
-			llmTools[name] = wrapDirectTool(codeModeTool, context, trackedSendEvent, queryChanges, emittedChangePaths);
+			llmTools[name] = wrapDirectTool(codeModeTool, context, trackedSendEvent, queryChanges);
 		}
 	}
 
@@ -372,7 +379,6 @@ function wrapCodemodeTool(
 	context: ToolExecutorContext,
 	sendEvent: SendEventFunction,
 	queryChanges: FileChange[],
-	emittedChangePaths: ReadonlySet<string>,
 	computerToolName?: string,
 ): AnyTool {
 	const originalExecute = tool.execute;
@@ -399,7 +405,7 @@ function wrapCodemodeTool(
 				}
 				return output;
 			} finally {
-				await drainWorkspaceChanges(context, sendEvent, queryChanges, emittedChangePaths);
+				await drainWorkspaceChanges(context, sendEvent, queryChanges);
 			}
 		},
 	};
@@ -411,25 +417,20 @@ function wrapCodemodeTool(
  * them only through the drain (e.g. dependencies_update), deduping paths the
  * tool already recorded to avoid double entries.
  */
-function wrapDirectTool(
-	tool: AnyTool,
-	context: ToolExecutorContext,
-	sendEvent: SendEventFunction,
-	queryChanges: FileChange[],
-	emittedChangePaths: ReadonlySet<string>,
-): AnyTool {
+function wrapDirectTool(tool: AnyTool, context: ToolExecutorContext, sendEvent: SendEventFunction, queryChanges: FileChange[]): AnyTool {
 	const originalExecute = tool.execute;
 	if (typeof originalExecute !== 'function') return tool;
 	return {
 		...tool,
 		execute: async (input: unknown, options: unknown) => {
+			const changeIndex = queryChanges.length;
 			try {
 				return await Reflect.apply(originalExecute, tool, [input, options]);
 			} finally {
 				// Snapshot AFTER the tool ran: these paths (including the tool's own
 				// pushes) must not be re-recorded by the drain.
-				const alreadyRecorded = new Set(queryChanges.map((change) => change.path));
-				await drainWorkspaceChanges(context, sendEvent, queryChanges, emittedChangePaths, undefined, alreadyRecorded);
+				const alreadyRecorded = new Set(queryChanges.slice(changeIndex).map((change) => change.path));
+				await drainWorkspaceChanges(context, sendEvent, queryChanges, undefined, alreadyRecorded);
 			}
 		},
 	};

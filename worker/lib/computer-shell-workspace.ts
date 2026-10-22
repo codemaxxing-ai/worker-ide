@@ -4,6 +4,8 @@ import { computerPath } from './computer-workspace';
 
 import type { Workspace } from '@cloudflare/computer';
 
+type MutationGuard = (path: string, descendants?: boolean, followFinalLink?: boolean) => Promise<void>;
+
 type ReadOptions = Parameters<Workspace['fs']['readFile']>[1];
 
 /** Shell paths use the same project mount as state helpers and editor RPC. */
@@ -11,6 +13,7 @@ class ProjectShellFilesystem extends WorkspaceFilesystemStub {
 	constructor(
 		workspace: Workspace,
 		private readonly assertOwner: () => void,
+		private readonly assertMutation: MutationGuard,
 	) {
 		super(workspace);
 	}
@@ -62,32 +65,39 @@ class ProjectShellFilesystem extends WorkspaceFilesystemStub {
 	): ReturnType<WorkspaceFilesystemStub['grep']> {
 		return super.grep(pattern, computerPath(path), options);
 	}
-	writeFile(
+	async writeFile(
 		path: string,
 		content: Parameters<WorkspaceFilesystemStub['writeFile']>[1],
 		options?: Parameters<WorkspaceFilesystemStub['writeFile']>[2],
 	) {
 		this.assertOwner();
+		await this.assertMutation(path);
 		return super.writeFile(computerPath(path), content, options);
 	}
-	mkdir(path: string, options?: Parameters<WorkspaceFilesystemStub['mkdir']>[1]) {
+	async mkdir(path: string, options?: Parameters<WorkspaceFilesystemStub['mkdir']>[1]) {
 		this.assertOwner();
+		await this.assertMutation(path);
 		return super.mkdir(computerPath(path), options);
 	}
-	rm(path: string, options?: Parameters<WorkspaceFilesystemStub['rm']>[1]) {
+	async rm(path: string, options?: Parameters<WorkspaceFilesystemStub['rm']>[1]) {
 		this.assertOwner();
+		await this.assertMutation(path, true, false);
 		return super.rm(computerPath(path), options);
 	}
-	rename(source: string, destination: string) {
+	async rename(source: string, destination: string) {
 		this.assertOwner();
+		await this.assertMutation(source, true, false);
+		await this.assertMutation(destination, true, false);
 		return super.rename(computerPath(source), computerPath(destination));
 	}
-	chmod(path: string, mode: number) {
+	async chmod(path: string, mode: number) {
 		this.assertOwner();
+		await this.assertMutation(path);
 		return super.chmod(computerPath(path), mode);
 	}
-	symlink(target: string, path: string) {
+	async symlink(target: string, path: string) {
 		this.assertOwner();
+		await this.assertMutation(path, false, false);
 		return super.symlink(target.startsWith('/') ? computerPath(target) : target, computerPath(path));
 	}
 }
@@ -116,9 +126,9 @@ class ProjectShellGit extends WorkspaceGitStub {
 export class ComputerShellWorkspace extends WorkspaceStub {
 	private readonly filesystem: ProjectShellFilesystem;
 	private readonly localGit: ProjectShellGit;
-	constructor(workspace: Workspace, assertOwner: () => void) {
+	constructor(workspace: Workspace, assertOwner: () => void, assertMutation: MutationGuard) {
 		super(workspace);
-		this.filesystem = new ProjectShellFilesystem(workspace, assertOwner);
+		this.filesystem = new ProjectShellFilesystem(workspace, assertOwner, assertMutation);
 		this.localGit = new ProjectShellGit(workspace, assertOwner);
 	}
 	get fs() {

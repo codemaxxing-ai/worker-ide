@@ -18,12 +18,6 @@ async function triggerCoordinatorHmr(projectId: string, paths: string[]): Promis
  * After each sandbox run, reflect workspace writes made via `state.*`/`bash`
  * back to the UI (file-change events, preview HMR, snapshots).
  *
- * `emittedChangePaths` only suppresses a duplicate `file_changed` UI event for a
- * path a `tools.*` call already announced this turn — the change itself is
- * ALWAYS recorded into `queryChanges`. Dropping it would leave the review diff
- * stale (showing edits that are already on disk) when a later `state.writeFile`
- * mutates a path a tool already touched.
- *
  * `triggerHmr` is injectable so this can be unit-tested without the coordinator
  * Durable Object; it defaults to the real coordinator HMR push.
  *
@@ -37,7 +31,6 @@ export async function drainWorkspaceChanges(
 	context: ToolExecutorContext,
 	sendEvent: SendEventFunction,
 	queryChanges: FileChange[],
-	emittedChangePaths: ReadonlySet<string>,
 	triggerHmr: (projectId: string, paths: string[]) => Promise<void> = triggerCoordinatorHmr,
 	alreadyRecordedPaths: ReadonlySet<string> = new Set<string>(),
 ): Promise<void> {
@@ -70,24 +63,19 @@ export async function drainWorkspaceChanges(
 			}
 		}
 
-		// Avoid a duplicate UI event when a `tools.*` call in this same turn already
-		// emitted a file_changed for this path — but ALWAYS record the change so the
-		// review queue reflects the final content. A later `state.writeFile` to a
-		// path a tool already touched must not be dropped (it would leave the review
-		// diff stale, showing changes that are already on disk).
-		if (!emittedChangePaths.has(path)) {
-			sendEvent('file_changed', {
-				path,
-				action,
-				beforeContent: change.beforeContent,
-				afterContent,
-				beforeBytes: change.beforeBytes,
-				afterBytes: change.afterBytes,
-				isBinary: change.isBinary,
-				entryType: change.entryType,
-				beforeEntryType: change.beforeEntryType,
-			});
-		}
+		// The sender deduplicates identical revisions, never subsequent writes to a path.
+		sendEvent('file_changed', {
+			path,
+			action,
+			beforeContent: change.beforeContent,
+			afterContent,
+			beforeBytes: change.beforeBytes,
+			afterBytes: change.afterBytes,
+			isBinary: change.isBinary,
+			entryType: change.entryType,
+			beforeEntryType: change.beforeEntryType,
+		});
+
 		// Skip the record only when the tool already pushed this path itself
 		// (no-loader fallback); the UI event and HMR above still fire.
 		if (!alreadyRecordedPaths.has(path)) {

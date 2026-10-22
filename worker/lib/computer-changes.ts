@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer';
 
 import { z } from 'zod';
 
-import { computerPath, projectPath } from './computer-workspace';
+import { resolveWorkspacePath } from './resolve-workspace-path';
 
 import type { WorkspaceLike } from './workspace-fs-adapter';
 
@@ -41,30 +41,8 @@ export class ComputerChanges {
 		);
 	}
 
-	/** Resolve final and parent symlinks, including a missing write destination. */
-	async resolveWritePath(path: string): Promise<string> {
-		let target = projectPath(computerPath(path));
-		let links = 0;
-		for (;;) {
-			const components = target.split('/').filter(Boolean);
-			let parent = '';
-			let redirected = false;
-			for (const [index, component] of components.entries()) {
-				const current = `${parent}/${component}`;
-				const entry = await this.workspace().lstat(current);
-				if (entry?.type === 'symlink') {
-					if (++links > 40) throw new Error(`ELOOP: ${path}`);
-					const link = await this.workspace().readlink(current);
-					const destination = link.startsWith('/') ? link : `${parent}/${link}`;
-					target = projectPath(computerPath(`${destination}/${components.slice(index + 1).join('/')}`));
-					redirected = true;
-					break;
-				}
-				if (!entry) return target;
-				parent = current;
-			}
-			if (!redirected) return target;
-		}
+	async resolveWritePath(path: string, followFinalLink = true): Promise<string> {
+		return resolveWorkspacePath(this.workspace(), path, followFinalLink);
 	}
 
 	private async entry(path: string): Promise<Entry> {
@@ -173,6 +151,16 @@ export class ComputerChanges {
 			.toArray();
 		const result = [];
 		for (const row of rows) {
+			// Reading large baseline content yields. Preserve any newer revision
+			// captured while this drain was assembling its result.
+			const removeDrainedRevision = () =>
+				this.storage.sql.exec(
+					'DELETE FROM agent_writer_change WHERE writer_id = ? AND path = ? AND baseline_entry IS ? AND after_entry IS ?',
+					writerId,
+					row.path,
+					row.baseline_entry,
+					row.after_entry,
+				);
 			// A newly captured row belongs to an operation still holding ownership.
 			if (row.baseline_entry && !row.after_entry) continue;
 			const before: Entry = row.baseline_entry
@@ -182,7 +170,7 @@ export class ComputerChanges {
 					: { type: 'missing' };
 			const after = row.after_entry ? entrySchema.parse(JSON.parse(row.after_entry)) : await this.entry(row.path);
 			if (JSON.stringify(before) === JSON.stringify(after)) {
-				this.storage.sql.exec('DELETE FROM agent_writer_change WHERE writer_id = ? AND path = ?', writerId, row.path);
+				removeDrainedRevision();
 				continue;
 			}
 			const type = after.type === 'missing' ? 'delete' : before.type === 'missing' ? 'create' : 'update';
@@ -200,7 +188,7 @@ export class ComputerChanges {
 				isBinary:
 					before.bytes !== undefined || after.bytes !== undefined || before.bytesPath !== undefined || after.bytesPath !== undefined,
 			});
-			this.storage.sql.exec('DELETE FROM agent_writer_change WHERE writer_id = ? AND path = ?', writerId, row.path);
+			removeDrainedRevision();
 		}
 		return result;
 	}

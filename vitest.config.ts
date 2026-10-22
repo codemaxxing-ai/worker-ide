@@ -62,7 +62,15 @@ export default defineConfig({
 								// re-import its named exports (e.g. `asSchema`). Without this,
 								// workerd's ESM runtime fails to resolve those re-exports when
 								// loading `@cloudflare/codemode` from the worker entry.
-								include: ['ai', '@cloudflare/codemode', '@cloudflare/think', 'agents'],
+								include: [
+									'ai',
+									'@cloudflare/codemode',
+									'@cloudflare/codemode/ai',
+									'@cloudflare/think',
+									'@cloudflare/think/tools/execute',
+									'@cloudflare/shell/workers',
+									'agents',
+								],
 							},
 						},
 					},

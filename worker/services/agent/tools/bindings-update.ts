@@ -1,11 +1,9 @@
 import { stripIndent } from 'common-tags';
+import { z } from 'zod';
 
-import { ToolExecutionError } from '@shared/tool-errors';
 import { coordinatorNamespace } from '@worker/lib/durable-object-namespaces';
-import { readBindingsConfig, regenerateProtectedFiles, writeBindingsConfig } from '@worker/lib/protected-files';
 
 import type { SendEventFunction, ToolDefinition, ToolExecutorContext, ToolResult } from '../types';
-import type { BindingsConfig } from '@shared/types';
 
 export const definition: ToolDefinition = {
 	name: 'bindings_update',
@@ -29,41 +27,12 @@ export async function execute(
 	sendEvent: SendEventFunction,
 	context: ToolExecutorContext,
 ): Promise<ToolResult> {
-	const { projectRoot, projectId } = context;
-
-	sendEvent('status', { message: 'Updating bindings config...' });
-
-	const bindingsConfig: BindingsConfig = await readBindingsConfig(projectRoot);
-	const changes: string[] = [];
-
-	if (input.storage !== undefined) {
-		const value = input.storage.trim().toLowerCase();
-		if (value !== 'true' && value !== 'false') {
-			throw new ToolExecutionError('NOT_ALLOWED', `Invalid storage value: "${input.storage}". Must be "true" or "false"`);
-		}
-		const enabled = value === 'true';
-		bindingsConfig.storage = enabled || undefined;
-		changes.push(`storage = ${enabled ? 'enabled' : 'disabled'}`);
+	sendEvent('status', { message: `Updating bindings config...` });
+	using result = await context.fsStub.updateManagedConfiguration('bindings_update', input, context.sessionId);
+	if (result.title !== 'no changes') {
+		await coordinatorNamespace
+			.getByName(`project:${context.projectId}`)
+			.triggerUpdate({ type: 'full-reload', path: '/wrangler.jsonc', timestamp: Date.now(), targets: [] });
 	}
-
-	if (changes.length === 0) {
-		return {
-			title: 'no changes',
-			metadata: { bindingsConfig },
-			output: 'No bindings were provided to update.',
-		};
-	}
-
-	await writeBindingsConfig(projectRoot, bindingsConfig);
-	await regenerateProtectedFiles(projectRoot);
-
-	// Trigger full reload so the preview picks up new bindings
-	const coordinatorStub = coordinatorNamespace.getByName(`project:${projectId}`);
-	await coordinatorStub.triggerUpdate({ type: 'full-reload', path: '/wrangler.jsonc', timestamp: Date.now(), targets: [] });
-
-	return {
-		title: 'bindings updated',
-		metadata: { bindingsConfig, changes },
-		output: `Updated bindings:\n${changes.join('\n')}`,
-	};
+	return { title: result.title, metadata: z.record(z.string(), z.unknown()).parse(JSON.parse(result.metadataJson)), output: result.output };
 }

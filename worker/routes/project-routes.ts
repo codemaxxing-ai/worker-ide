@@ -11,17 +11,7 @@ import { fs } from '@worker/lib/project-fs';
 import * as schema from '../db/auth-schema';
 import { coordinatorNamespace, projectMetadataNamespace } from '../lib/durable-object-namespaces';
 import { httpError } from '../lib/http-error';
-import {
-	readAssetSettings,
-	readBindingsConfig,
-	readDependencies,
-	readProjectName,
-	regenerateProtectedFiles,
-	writeAssetSettings,
-	writeBindingsConfig,
-	writeDependencies,
-	writeProjectName,
-} from '../lib/protected-files';
+import { readAssetSettings, readBindingsConfig, readDependencies, readProjectName } from '../lib/protected-files';
 import { resolveStorageQuotaForProject } from '../lib/storage-quota';
 import { createZip } from '../lib/zip';
 
@@ -78,24 +68,8 @@ export const projectRoutes = new Hono<AppEnvironment>()
 			throw httpError(HttpErrorCode.VALIDATION_ERROR, parsed.error.message);
 		}
 
-		// Update name in package.json if provided (creates the file if missing)
-		if (parsed.data.name) {
-			await writeProjectName(projectRoot, parsed.data.name);
-		}
-
-		// Update asset settings in wrangler.jsonc if provided
-		if (parsed.data.assetSettings !== undefined) {
-			await writeAssetSettings(projectRoot, parsed.data.assetSettings);
-		}
-
-		// Update bindings config in wrangler.jsonc if provided
-		if (parsed.data.bindingsConfig !== undefined) {
-			await writeBindingsConfig(projectRoot, parsed.data.bindingsConfig);
-		}
-
-		// Regenerate all protected files to keep them in sync
 		if (parsed.data.name || parsed.data.assetSettings !== undefined || parsed.data.bindingsConfig !== undefined) {
-			await regenerateProtectedFiles(projectRoot);
+			await c.get('fsStub').updateProjectConfiguration(parsed.data);
 		}
 
 		// Sync project name to D1 so dashboards and admin UI reflect the update
@@ -181,13 +155,9 @@ export const projectRoutes = new Hono<AppEnvironment>()
 
 	// PUT /api/dependencies - Update dependencies in package.json
 	.put('/dependencies', zValidator('json', dependenciesUpdateSchema), async (c) => {
-		const projectRoot = c.get('projectRoot');
 		const projectId = c.get('projectId');
 		const { dependencies } = c.req.valid('json');
-		await writeDependencies(projectRoot, dependencies);
-
-		// Regenerate all protected files so vite.config.ts, devDependencies, etc. stay in sync
-		await regenerateProtectedFiles(projectRoot);
+		await c.get('fsStub').updateProjectConfiguration({ dependencies });
 
 		// Trigger full reload so the preview rebundles with new dependencies
 		const coordinatorStub = coordinatorNamespace.getByName(`project:${projectId}`);

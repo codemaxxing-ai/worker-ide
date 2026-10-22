@@ -105,8 +105,12 @@ Exec defaults to `auto`: supported text, file, and local Git commands use the ne
 
 The agent manages project dependencies through `dependencies_list` and `dependencies_update`, available directly and through Code Mode. These tools update the IDE-managed manifest without shell execution. Full Worker projects resolve registered packages for both frontend and backend imports without a container. Projects using container previews and builds install registered packages automatically in that runtime.
 
+Dependency and configuration updates hold one durable queue position through their read, update, and regeneration steps. Agent file tools and Code Mode state helpers reject writes to managed configuration, including symlink targets. Shell and container commands preserve managed files through durable baselines; attempted changes are restored before the queue advances and reported as command failures. Ordinary source edits remain available for review.
+
 Successful `user_question` calls pause the agent turn until the user replies. Unanswered questions return when a session is reopened. Tool metadata and errors are persisted per session, including background sessions, so todo lists and other tool results remain available after completion and reload.
 
 Tool calls can be expanded while their arguments are streaming, including dynamically registered tools. Directory listing accepts both `ls` and `list`. Agent model streams fail after two minutes of provider inactivity; tool execution keeps its separate runtime deadline.
+
+Each changed file revision reaches the review UI, and tool execution and input-validation errors are reported at the end of their model step.
 
 See [Computer workspace](docs/computer-workspace.md) for access patterns, execution limits, review, and recovery rules. See [development and verification](docs/development.md) for Docker setup, test commands, and generated artifacts.

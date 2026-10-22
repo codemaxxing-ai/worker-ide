@@ -37,7 +37,7 @@ describe('drainWorkspaceChanges', () => {
 		await stub.wsWriteFile('/.gitignore', 'dist\n', context.sessionId);
 		await stub.wsWriteFile('/.github/workflows/ci.yml', 'name: CI\n', context.sessionId);
 
-		await drainWorkspaceChanges(context, sendEvent, queryChanges, new Set(), triggerHmr);
+		await drainWorkspaceChanges(context, sendEvent, queryChanges, triggerHmr);
 
 		expect(queryChanges.map((change) => change.path).toSorted()).toEqual([
 			'/.github',
@@ -53,7 +53,6 @@ describe('drainWorkspaceChanges', () => {
 		const stub = getFilesystemStub('test-drain-already-emitted');
 		const sessionId = 'session-emitted';
 		// A `tools.*` call earlier this turn already announced /x to the UI.
-		const emittedChangePaths = new Set(['/x.ts']);
 		const context = buildContext(stub, sessionId);
 		const queryChanges: FileChange[] = [];
 		const sendEvent = vi.fn();
@@ -62,14 +61,14 @@ describe('drainWorkspaceChanges', () => {
 		// A later state.writeFile mutates the same path.
 		await stub.wsWriteFile('/x.ts', 'export const x = 2;\n', sessionId);
 
-		await drainWorkspaceChanges(context, sendEvent, queryChanges, emittedChangePaths, triggerHmr);
+		await drainWorkspaceChanges(context, sendEvent, queryChanges, triggerHmr);
 
 		// The change is NOT dropped — the review queue must reflect the final content.
 		expect(queryChanges).toMatchObject([
 			{ path: '/x.ts', action: 'create', beforeContent: undefined, afterContent: 'export const x = 2;\n', isBinary: false },
 		]);
-		// But the duplicate UI event is suppressed.
-		expect(sendEvent).not.toHaveBeenCalled();
+		// Every changed revision reaches the sender for content-aware deduplication.
+		expect(sendEvent).toHaveBeenCalledWith('file_changed', expect.objectContaining({ afterContent: 'export const x = 2;\n' }));
 		// HMR is still triggered for the path.
 		expect(triggerHmr).toHaveBeenCalledWith('test-project', ['/x.ts']);
 	});
@@ -77,7 +76,6 @@ describe('drainWorkspaceChanges', () => {
 	it('emits a file_changed event for a path not already emitted', async () => {
 		const stub = getFilesystemStub('test-drain-fresh-emit');
 		const sessionId = 'session-fresh';
-		const emittedChangePaths = new Set<string>();
 		const context = buildContext(stub, sessionId);
 		const queryChanges: FileChange[] = [];
 		const sendEvent = vi.fn();
@@ -85,7 +83,7 @@ describe('drainWorkspaceChanges', () => {
 
 		await stub.wsWriteFile('/y.ts', 'export const y = 1;\n', sessionId);
 
-		await drainWorkspaceChanges(context, sendEvent, queryChanges, emittedChangePaths, triggerHmr);
+		await drainWorkspaceChanges(context, sendEvent, queryChanges, triggerHmr);
 
 		expect(sendEvent).toHaveBeenCalledWith(
 			'file_changed',
@@ -109,7 +107,7 @@ describe('drainWorkspaceChanges', () => {
 
 		// Seed an existing package.json — this is the pre-edit baseline. The direct
 		// write is unattributed (no writerId), like the initial project scaffold.
-		await stub.writeFileContent('/package.json', '{"dependencies":{}}\n');
+		await stub.writeFileContent('/settings.json', '{"dependencies":{}}\n');
 
 		// Simulate a dependencies_update-style write through the `fs` proxy, bound
 		// with the session as writerId exactly as `wrapTool` re-binds it. The DO
@@ -117,19 +115,19 @@ describe('drainWorkspaceChanges', () => {
 		await runWithProjectStub(
 			stub,
 			async () => {
-				await fs.writeFile(`${PROJECT_ROOT}/package.json`, '{"dependencies":{"react-confetti":"^6.4.0"}}\n');
+				await fs.writeFile(`${PROJECT_ROOT}/settings.json`, '{"dependencies":{"react-confetti":"^6.4.0"}}\n');
 			},
 			PROJECT_ROOT,
 			sessionId,
 		);
 
-		await drainWorkspaceChanges(context, sendEvent, queryChanges, new Set<string>(), triggerHmr);
+		await drainWorkspaceChanges(context, sendEvent, queryChanges, triggerHmr);
 
 		// The diff is an edit with the real baseline — NOT a create with the whole
 		// file as "added" (the bug when the baseline was never attributed).
 		expect(queryChanges).toMatchObject([
 			{
-				path: '/package.json',
+				path: '/settings.json',
 				action: 'edit',
 				beforeContent: '{"dependencies":{}}\n',
 				afterContent: '{"dependencies":{"react-confetti":"^6.4.0"}}\n',
@@ -149,7 +147,7 @@ describe('drainWorkspaceChanges', () => {
 
 		await stub.wsWriteFile('/z.ts', 'export const z = 1;\n', sessionId);
 
-		await drainWorkspaceChanges(context, sendEvent, queryChanges, new Set<string>(), triggerHmr, new Set(['/z.ts']));
+		await drainWorkspaceChanges(context, sendEvent, queryChanges, triggerHmr, new Set(['/z.ts']));
 
 		// No duplicate record — only the tool's original entry remains.
 		expect(queryChanges).toHaveLength(1);
@@ -165,7 +163,7 @@ describe('drainWorkspaceChanges', () => {
 		const sendEvent = vi.fn();
 		const triggerHmr = vi.fn(async () => {});
 
-		await drainWorkspaceChanges(context, sendEvent, queryChanges, new Set<string>(), triggerHmr);
+		await drainWorkspaceChanges(context, sendEvent, queryChanges, triggerHmr);
 
 		expect(queryChanges).toMatchObject([]);
 		expect(sendEvent).not.toHaveBeenCalled();

@@ -209,6 +209,15 @@ export function createMockContext(overrides?: Partial<ToolExecutorContext>): Too
 	};
 	if (!overrides?.fsStub) {
 		Reflect.set(context.fsStub, 'registerComputerSession', async () => {});
+		Reflect.set(
+			context.fsStub,
+			'updateManagedConfiguration',
+			async (name: import('../../../lib/managed-configuration').ManagedConfigurationTool, input: Record<string, string>) => {
+				const { applyManagedConfiguration } = await import('../../../lib/managed-configuration');
+				const result = await applyManagedConfiguration(name, input, context.projectRoot);
+				return { title: result.title, output: result.output, metadataJson: JSON.stringify(result.metadata), [Symbol.dispose]: () => {} };
+			},
+		);
 		Reflect.set(context.fsStub, 'writeAgentDocument', async (kind: 'plan' | 'todos', sessionId: string, content: string) => {
 			const { fs } = await import('@worker/lib/project-fs');
 			const path = kind === 'plan' ? `/.agent/plans/${sessionId}.md` : `/.agent/todo/${sessionId}.json`;

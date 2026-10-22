@@ -9,7 +9,7 @@ import { AgentRunner } from './agent-runner';
 import { filesystemNamespace } from '../lib/durable-object-namespaces';
 import { runWithProjectStub } from '../lib/project-fs';
 import { toDurableObjectId } from '../lib/project-id';
-import { createSendEventFunction, createToolErrorEvent, drainEventQueue } from '../services/agent/event-helpers';
+import { createSendEventFunction, drainEventQueue, toolErrorEvents } from '../services/agent/event-helpers';
 import { registerConfiguredMcpServers } from '../services/agent/mcp';
 import { isRequestOriginContext, type RequestOriginContext } from '../services/agent/request-origin-context';
 import { addFileToSnapshot, deleteDirectoryRecursive, initSnapshot } from '../services/agent/snapshot-manager';
@@ -20,14 +20,7 @@ import { createAdapter as createWorkersAiAdapter } from '../services/agent/worke
 
 import type { SnapshotContext } from '../services/agent/snapshot-manager';
 import type { FileChange } from '../services/agent/types';
-import type {
-	ChatResponseResult,
-	ChunkContext,
-	ThinkSubmissionInspection,
-	ToolCallResultContext,
-	TurnConfig,
-	TurnContext,
-} from '@cloudflare/think';
+import type { ChatResponseResult, ChunkContext, ThinkSubmissionInspection, StepContext, TurnConfig, TurnContext } from '@cloudflare/think';
 import type { StreamEvent } from '@shared/agent-state';
 import type { AIModelId } from '@shared/constants';
 import type { AgentMode, ChatMessage } from '@shared/types';
@@ -221,17 +214,8 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		await this.forwardEvents(events);
 	}
 
-	override async afterToolCall(context: ToolCallResultContext): Promise<void> {
-		if (context.toolOutput.type !== 'tool-error') return;
-		const events = drainEventQueue(this.eventQueue);
-		const error = createToolErrorEvent(context.toolCallId, context.toolName, context.toolOutput.error);
-		events.push(error, {
-			type: 'tool-call-end',
-			toolCallId: context.toolCallId,
-			toolName: context.toolName,
-			result: error.errorMessage,
-			isError: true,
-		});
+	override async onStepEnd(context: StepContext): Promise<void> {
+		const events = [...drainEventQueue(this.eventQueue), ...toolErrorEvents(context.content)];
 		await this.saveSnapshotChanges(events);
 		await this.forwardEvents(events);
 	}
