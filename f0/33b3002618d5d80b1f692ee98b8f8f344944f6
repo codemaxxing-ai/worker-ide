@@ -1,0 +1,23 @@
+worker/durable/sub-agent-worker.ts
+  s_1ed93eb3164262::t_9bb967bb405666 9,17,139-140
+worker/lib/protected-files.ts
+  s_1ed93eb3164262::t_ea3e2ddb7bd246 459,461
+worker/services/agent/tools/drain-workspace-changes.test.ts
+  s_1ed93eb3164262::t_e7184a701fa2ce 40,64,70-71,86,110,118,124,130,150,166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f033b3002618d5d80b1f692ee98b8f8f344944f6",
+  "prompts": {},
+  "sessions": {
+    "s_1ed93eb3164262": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15649-53ee-7232-9845-37711f781576",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
