@@ -40,9 +40,20 @@ describe('native Vite production builds', () => {
 		const api = hc<ApiRoutes>(`${BASE_URL}/p/${projectId}/api`, { headers: { Cookie: cookie } });
 		await api.files.$get({});
 		const runtime = hc<DevelopmentTestRoutes>(`${BASE_URL}/p/${projectId}/api`, { headers: { Cookie: cookie } });
+		const seeded = await runtime.__test['seed-files'].$post({
+			json: {
+				files: [
+					{
+						path: '/vite.config.ts',
+						content: `import react from '@vitejs/plugin-react'; import { defineConfig } from 'vite'; export default defineConfig({ plugins: [react(), { name: 'custom-html', transformIndexHtml(html) { return html.replace('</head>', '<meta name="native-plugin" content="executed"></head>'); } }] });`,
+					},
+				],
+			},
+		});
+		if (!seeded.ok) await throwApiError(seeded, 'Cannot seed custom Vite configuration');
 		const saved = await runtime.__test['computer-exec'].$post({
 			json: {
-				command: `mv worker/index.ts worker/index.mts\ncat > vite.config.ts <<'CONFIGURATION'\nimport react from '@vitejs/plugin-react'; import { defineConfig } from 'vite'; export default defineConfig({ plugins: [react(), { name: 'custom-html', transformIndexHtml(html) { return html.replace('</head>', '<meta name="native-plugin" content="executed"></head>'); } }] });\nCONFIGURATION`,
+				command: 'mv worker/index.ts worker/index.mts',
 			},
 		});
 		if (!saved.ok) await throwApiError(saved, 'Cannot save custom Vite configuration');
@@ -68,14 +79,18 @@ describe('native Vite production builds', () => {
 		const api = hc<ApiRoutes>(`${BASE_URL}/p/${projectId}/api`, { headers: { Cookie: cookie } });
 		await api.files.$get({});
 		const runtime = hc<DevelopmentTestRoutes>(`${BASE_URL}/p/${projectId}/api`, { headers: { Cookie: cookie } });
-		const saved = await runtime.__test['computer-exec'].$post({
+		const saved = await runtime.__test['seed-files'].$post({
 			json: {
-				command: `cat > package.json <<'MANIFEST'\n{"private":true,"type":"module"}\nMANIFEST\ncat > vite.config.ts <<'CONFIGURATION'\nexport default {};\nCONFIGURATION\ncat > index.html <<'HTML'\n<html><head><title>Plain site</title></head><body>Plain site</body></html>\nHTML\ncat > worker/index.ts <<'WORKER'\nexport default { fetch() { return new Response("Bundled Vite"); } };\nWORKER`,
+				files: [
+					{ path: '/package.json', content: '{"private":true,"type":"module"}' },
+					{ path: '/vite.config.ts', content: 'export default {};' },
+					{ path: '/index.html', content: '<html><head><title>Plain site</title></head><body>Plain site</body></html>' },
+					{ path: '/worker/index.ts', content: 'export default { fetch() { return new Response("Bundled Vite"); } };' },
+				],
 			},
 		});
 		if (!saved.ok) await throwApiError(saved, 'Cannot prepare plain site');
-		const prepared = await saved.json();
-		expect(prepared.result.exitCode).toBe(0);
+		expect(await saved.json()).toEqual({ success: true });
 		const response = await runtime.__test['native-build'].$post({});
 		if (!response.ok) await throwApiError(response, 'Plain native build failed');
 		const artifact = await response.json();

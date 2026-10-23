@@ -82,6 +82,27 @@ describe('Computer live runtime', () => {
 		const synchronized = await file.json();
 		expect(synchronized.content).toBe('from container');
 	});
+	it.each([{ backend: 'shell' }, { backend: 'container' }] satisfies { backend: 'shell' | 'container' }[])(
+		'preserves managed configuration after a $backend command attempts to overwrite it',
+		async ({ backend }) => {
+			const api = hc<ApiRoutes>(`${BASE_URL}/p/${projectId}/api`, { headers: { Cookie: cookie } });
+			const runtime = hc<DevelopmentTestRoutes>(`${BASE_URL}/p/${projectId}/api`, { headers: { Cookie: cookie } });
+			const original = await api.file.$get({ query: { path: '/package.json' } });
+			if (!original.ok) await throwApiError(original, 'Cannot read managed manifest');
+			const before = await original.json();
+			const response = await runtime.__test['computer-exec'].$post({
+				json: { backend, command: "printf '{}' > package.json" },
+			});
+			if (!response.ok) await throwApiError(response, 'Cannot execute protected-file check');
+			const data = await response.json();
+			expect(data.result).toMatchObject({ backend, status: 'failed', exitCode: 1, syncStatus: 'complete' });
+			expect(data.result.stderr).toContain('[NOT_ALLOWED]');
+			const restored = await api.file.$get({ query: { path: '/package.json' } });
+			if (!restored.ok) await throwApiError(restored, 'Cannot read restored manifest');
+			const after = await restored.json();
+			expect(after.content).toBe(before.content);
+		},
+	);
 	it('orders two sessions and an editor save through container synchronization, without replaying a completed ID', async () => {
 		const api = hc<ApiRoutes>(`${BASE_URL}/p/${projectId}/api`, { headers: { Cookie: cookie } });
 		const runtime = hc<DevelopmentTestRoutes>(`${BASE_URL}/p/${projectId}/api`, { headers: { Cookie: cookie } });

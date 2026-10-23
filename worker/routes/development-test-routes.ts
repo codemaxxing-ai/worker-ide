@@ -37,6 +37,16 @@ const seedSnapshotSchema = z.object({
  * via the public file API (which now rejects hidden paths).
  */
 export const developmentTestRoutes = new Hono<AppEnvironment>()
+	.post(
+		'/__test/seed-files',
+		zValidator('json', z.object({ files: z.array(z.object({ path: z.string(), content: z.string() })).min(1) })),
+		async (c) => {
+			// Imported-project fixtures may contain custom managed configuration.
+			// Seed it through the trusted workspace API; agent commands retain protection.
+			await c.get('fsStub').writeFiles(c.req.valid('json').files);
+			return c.json({ success: true });
+		},
+	)
 	.post('/__test/seed-snapshot', zValidator('json', seedSnapshotSchema), async (c) => {
 		const projectRoot = c.get('projectRoot');
 		const { label, sessionId, changes } = c.req.valid('json');

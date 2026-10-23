@@ -79,7 +79,7 @@ To verify the pinned image independently of the development server:
 docker build --platform linux/amd64 -f Dockerfile.computer -t worker-ide-computer:0.4.1 .
 ```
 
-On Linux, workerd's gateway and the rootless Docker daemon must share network access. CI keeps the bridge namespace attached to the daemon and runs the dev server and live tests in the daemon's network and mount namespaces while preserving the repository working directory. The mount namespace supplies RootlessKit's DNS resolver. Preserve this arrangement when changing CI; otherwise containers may start but package installation or gateway traffic can fail.
+On Linux, workerd's gateway and the rootless Docker daemon must share network access. CI keeps the bridge namespace attached to the daemon and runs the dev server and live tests in the daemon's network and mount namespaces while preserving the repository working directory. The mount namespace supplies RootlessKit's DNS resolver. CI explicitly preserves the runner's home, Docker connection, credentials, and test settings with `sudo --preserve-env=...`; `sudo-rs` ignores `sudo -E`. Preserve this arrangement when changing CI; otherwise containers may start but package installation or gateway traffic can fail.
 
 When live tests fail, check Docker availability, `/dev/fuse`, DNS from the daemon namespace, and the dev-server startup log. CI captures container state and logs on failure. A workerd heap failure in a full Worker run calls for checking batching, rather than starting Docker. See [Computer workspace](computer-workspace.md) for command deadlines, synchronization behavior, and recovery constraints.
 
