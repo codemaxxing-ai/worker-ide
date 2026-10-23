@@ -1,0 +1,33 @@
+docs/development.md
+  s_1ed93eb3164262::t_11509c71631e29 82
+test/integration/computer.integration.test.ts
+  s_0aae49fe7fb961::t_b918bb482c560b 85-105
+test/integration/native-build.integration.test.ts
+  s_1ed93eb3164262::t_486e05398b5fd2 43-53,56,82,84-89,93
+worker/routes/development-test-routes.ts
+  s_1ed93eb3164262::t_f00042ceee1e35 40-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4c5125cf7bba9dc7ce2f46f18a4fcea1d389f163",
+  "prompts": {},
+  "sessions": {
+    "s_0aae49fe7fb961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16a03-708e-77f0-a7b0-3af36c0c0ac6",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    },
+    "s_1ed93eb3164262": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15649-53ee-7232-9845-37711f781576",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
