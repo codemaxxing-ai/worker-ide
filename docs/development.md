@@ -73,6 +73,8 @@ Keep validation results in the pull request or CI output. A previous passing run
 
 Computer's container cache exclusions require FUSE. Docker Desktop on macOS/WSL supplies it. Linux development and CI use rootless Docker with `/dev/fuse` available; rootful Docker's userspace fallback does not support this configuration.
 
+CI pins Ubuntu 24.04 and Docker 29.9.1 to keep the browser libraries and rootless container runtime reproducible. Playwright caches include the resolved package version, OS release, and architecture. Validate the live integration and browser suites when updating these pins.
+
 To verify the pinned image independently of the development server:
 
 ```bash

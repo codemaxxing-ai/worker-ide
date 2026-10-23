@@ -65,9 +65,10 @@ env:
   COMPUTER_PRESERVED_ENVIRONMENT: HOME,PATH,DOCKER_HOST,DOCKER_CONTEXT,XDG_RUNTIME_DIR,XDG_CONFIG_HOME,XDG_CACHE_HOME,CI,GITHUB_ACTIONS,DO_NOT_TRACK,CLOUDFLARE_API_TOKEN,CLOUDFLARE_ACCOUNT_ID,TEST_BASE_URL
 
 jobs:
+  # Keep browser libraries and the rootless container host on the validated OS.
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
 
     steps:
@@ -92,7 +93,7 @@ jobs:
 
   typecheck:
     name: Typecheck
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
 
     steps:
@@ -124,7 +125,7 @@ jobs:
 
   knip:
     name: Knip
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
 
     steps:
@@ -149,7 +150,7 @@ jobs:
 
   test:
     name: Unit Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -180,7 +181,7 @@ jobs:
 
   test-worker:
     name: Worker Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -208,7 +209,7 @@ jobs:
 
   test-react:
     name: React Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -233,7 +234,7 @@ jobs:
 
   test-storybook:
     name: Storybook Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -256,7 +257,9 @@ jobs:
       - name: Get Playwright version
         id: playwright-version
         run: |
-          PLAYWRIGHT_VERSION=$(bun pm pkg get devDependencies.playwright)
+          PLAYWRIGHT_VERSION=$(bun -p 'require("playwright/package.json").version')
+          PLAYWRIGHT_PLATFORM=$(. /etc/os-release; printf '%s-%s-%s' "$ID" "$VERSION_ID" "$(uname -m)")
+          echo "PLAYWRIGHT_PLATFORM=$PLAYWRIGHT_PLATFORM" >> "$GITHUB_OUTPUT"
           echo "PLAYWRIGHT_VERSION=$PLAYWRIGHT_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Cache Playwright
@@ -264,7 +267,7 @@ jobs:
         id: playwright-cache
         with:
           path: '~/.cache/ms-playwright'
-          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright-version.outputs.PLAYWRIGHT_VERSION }}
+          key: playwright-chromium-${{ steps.playwright-version.outputs.PLAYWRIGHT_PLATFORM }}-${{ steps.playwright-version.outputs.PLAYWRIGHT_VERSION }}
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -279,8 +282,8 @@ jobs:
 
   integration-tests:
     name: Integration Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -310,6 +313,7 @@ jobs:
           # Keep dockerd in the bridge namespace shared with workerd's gateway.
           DOCKERD_ROOTLESS_ROOTLESSKIT_DETACH_NETNS: 'false'
         with:
+          version: v29.9.1
           rootless: true
           set-host: true
           # GitHub runners have no user systemd session for container cgroups.
@@ -379,9 +383,18 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Run integration tests
+        timeout-minutes: 8
         run: sudo --preserve-env="$COMPUTER_PRESERVED_ENVIRONMENT" nsenter --target "$COMPUTER_DOCKER_PID" --net --mount --wd="$GITHUB_WORKSPACE" --setuid "$(id -u)" --setgid "$(id -g)" env "PATH=$PATH" bun run test:integration
         env:
           TEST_BASE_URL: 'https://localhost:3000'
+
+      - name: Upload integration runtime log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-runtime-log
+          path: ${{ runner.temp }}/worker-ide-dev.log
+          if-no-files-found: warn
 
       - name: Show runtime diagnostics
         if: failure()
@@ -389,9 +402,9 @@ jobs:
           head -n 100 "$RUNNER_TEMP/worker-ide-dev.log" || true
           tail -n 100 "$RUNNER_TEMP/worker-ide-dev.log" || true
           while read -r container; do
-            docker inspect --format '{{json .State}}' "$container" || true
-            docker logs --tail 100 "$container" || true
-          done < <(docker ps -a --filter name=workerd-worker-ide-DurableObjectFilesystem --format '{{.ID}}')
+            timeout 10 docker inspect --format '{{json .State}}' "$container" || true
+            timeout 10 docker logs --tail 100 "$container" || true
+          done < <(timeout 10 docker ps -a --filter name=workerd-worker-ide-DurableObjectFilesystem --format '{{.ID}}')
 
       - name: Stop dev server
         if: always()
@@ -402,7 +415,7 @@ jobs:
 
   e2e-browsers:
     name: E2E Tests (${{ matrix.browser }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -429,7 +442,9 @@ jobs:
       - name: Get Playwright version
         id: playwright-version
         run: |
-          PLAYWRIGHT_VERSION=$(bun pm pkg get devDependencies.playwright)
+          PLAYWRIGHT_VERSION=$(bun -p 'require("playwright/package.json").version')
+          PLAYWRIGHT_PLATFORM=$(. /etc/os-release; printf '%s-%s-%s' "$ID" "$VERSION_ID" "$(uname -m)")
+          echo "PLAYWRIGHT_PLATFORM=$PLAYWRIGHT_PLATFORM" >> "$GITHUB_OUTPUT"
           echo "PLAYWRIGHT_VERSION=$PLAYWRIGHT_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Cache Playwright
@@ -437,7 +452,7 @@ jobs:
         id: playwright-cache
         with:
           path: '~/.cache/ms-playwright'
-          key: playwright-e2e-${{ matrix.browser }}-${{ runner.os }}-${{ steps.playwright-version.outputs.PLAYWRIGHT_VERSION }}
+          key: playwright-e2e-${{ matrix.browser }}-${{ steps.playwright-version.outputs.PLAYWRIGHT_PLATFORM }}-${{ steps.playwright-version.outputs.PLAYWRIGHT_VERSION }}
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -458,6 +473,7 @@ jobs:
           # Keep dockerd in the bridge namespace shared with workerd's gateway.
           DOCKERD_ROOTLESS_ROOTLESSKIT_DETACH_NETNS: 'false'
         with:
+          version: v29.9.1
           rootless: true
           set-host: true
           # GitHub runners have no user systemd session for container cgroups.
@@ -531,25 +547,9 @@ jobs:
 
       - name: Run E2E tests
         id: e2e
+        timeout-minutes: 12
         run: |
           sudo --preserve-env="$COMPUTER_PRESERVED_ENVIRONMENT" nsenter --target "$COMPUTER_DOCKER_PID" --net --mount --wd="$GITHUB_WORKSPACE" --setuid "$(id -u)" --setgid "$(id -g)" env "PATH=$PATH" xvfb-run --auto-servernum -- bunx playwright test --project "${{ matrix.browser }}" --reporter=line,html --max-failures=1
-
-      - name: Show runtime diagnostics
-        if: failure()
-        run: |
-          head -n 100 "$RUNNER_TEMP/worker-ide-dev.log" || true
-          tail -n 100 "$RUNNER_TEMP/worker-ide-dev.log" || true
-          while read -r container; do
-            docker inspect --format '{{json .State}}' "$container" || true
-            docker logs --tail 100 "$container" || true
-          done < <(docker ps -a --filter name=workerd-worker-ide-DurableObjectFilesystem --format '{{.ID}}')
-
-      - name: Stop dev server
-        if: always()
-        run: |
-          if [ -n "$DEV_SERVER_PID" ]; then
-            kill $DEV_SERVER_PID || true
-          fi
 
       - name: Upload Playwright Test Report
         uses: actions/upload-artifact@v4
@@ -559,11 +559,29 @@ jobs:
           path: |
             playwright-report/
             test-results/
+            ${{ runner.temp }}/worker-ide-dev.log
           if-no-files-found: error
+
+      - name: Show runtime diagnostics
+        if: failure()
+        run: |
+          head -n 100 "$RUNNER_TEMP/worker-ide-dev.log" || true
+          tail -n 100 "$RUNNER_TEMP/worker-ide-dev.log" || true
+          while read -r container; do
+            timeout 10 docker inspect --format '{{json .State}}' "$container" || true
+            timeout 10 docker logs --tail 100 "$container" || true
+          done < <(timeout 10 docker ps -a --filter name=workerd-worker-ide-DurableObjectFilesystem --format '{{.ID}}')
+
+      - name: Stop dev server
+        if: always()
+        run: |
+          if [ -n "$DEV_SERVER_PID" ]; then
+            kill $DEV_SERVER_PID || true
+          fi
 
   e2e:
     name: E2E Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: e2e-browsers
     if: ${{ always() }}
     timeout-minutes: 1
