@@ -1,0 +1,19 @@
+.github/workflows/ci.yml
+  s_0aae49fe7fb961::t_84ace31fce838d 63-65,333-335,345,355,382,481-483,496,506,535
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7d02ec2ccd85e83183d8dfeb17cbff49634583cb",
+  "prompts": {},
+  "sessions": {
+    "s_0aae49fe7fb961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16a03-708e-77f0-a7b0-3af36c0c0ac6",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
