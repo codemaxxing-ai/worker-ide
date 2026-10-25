@@ -1,0 +1,23 @@
+README.md
+  s_45f8737182387d::t_143cd9048c1bef 72
+src/hooks/use-push-notifications.test.tsx
+  s_45f8737182387d::t_83af3688dfca80 428,435,437,439-442,448,452,457
+src/hooks/use-push-notifications.ts
+  s_45f8737182387d::t_eb703152367c8e 179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1e79261bedfdf3632a3dcf064b2df633ad31d130",
+  "prompts": {},
+  "sessions": {
+    "s_45f8737182387d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1747e-b5d4-7fd0-9c58-9428e7e30f67",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
