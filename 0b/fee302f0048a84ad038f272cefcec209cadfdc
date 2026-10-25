@@ -1,0 +1,37 @@
+.github/workflows/ci.yml
+  s_8946ecfd8d788f::t_8a25c02ffae389 290-297,438,483-490,612
+README.md
+  s_8946ecfd8d788f::t_38de454601405a 117-118
+test/agent-runtime/fixture.ts
+  s_8946ecfd8d788f::t_48365aee8233ef 7,25-62,118-155,248-257
+test/agent-runtime/lifecycle.test.ts
+  s_8946ecfd8d788f::t_d52262d17261d2 112-138
+worker/durable/agent-runner-lifecycle.test.ts
+  s_8946ecfd8d788f::t_bece52958b766a 32-49
+worker/durable/agent-runner.ts
+  s_45f8737182387d::t_84874fa2044e4c 605,1087-1103,1114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0bfee302f0048a84ad038f272cefcec209cadfdc",
+  "prompts": {},
+  "sessions": {
+    "s_45f8737182387d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1747e-b5d4-7fd0-9c58-9428e7e30f67",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    },
+    "s_8946ecfd8d788f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1740c-73e4-7262-bed2-2431adff5ea0",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
