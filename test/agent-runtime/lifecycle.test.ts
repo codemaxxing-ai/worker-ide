@@ -82,13 +82,20 @@ async function createProject() {
 	return z.object({ projectId: z.string() }).parse(await request('/project')).projectId;
 }
 
-async function waitForStatus(projectId: string, status: string) {
-	await vi.waitFor(
+async function waitForStatus(projectId: string, status: 'completed' | 'error' | 'aborted', timeout = 4000) {
+	const terminal = await vi.waitFor(
 		async () => {
-			expect(await request('/state', projectId)).toMatchObject({ status, stopRequested: false });
+			const state = z
+				.object({ status: z.string(), stopRequested: z.boolean() })
+				.passthrough()
+				.parse(await request('/state', projectId));
+			expect(state.status).not.toBe('running');
+			expect(state.stopRequested).toBe(false);
+			return state;
 		},
-		{ timeout: 4000, interval: 25 },
+		{ timeout, interval: 25 },
 	);
+	expect(terminal).toMatchObject({ status, stopRequested: false });
 }
 
 async function waitForToolInput(projectId: string) {
@@ -129,12 +136,14 @@ describe('production agent lifecycle in the current Workers runtime', () => {
 	it('handles a TODO update and 16,000 edit argument chunks without exhausting the RPC budget', async () => {
 		const projectId = await createProject();
 		await request('/submit', projectId, { messageId: 'message', prompt: 'burst-edit' });
-		await waitForStatus(projectId, 'completed');
+		// This exercises request volume, not runner throughput. Keep the strict
+		// RPC assertions below while allowing slower CI CPUs to consume the burst.
+		await waitForStatus(projectId, 'completed', 20_000);
 		expect(await request('/file', projectId)).toEqual({ content: 'x'.repeat(16_000) });
 		const traffic = z.object({ streamBatches: z.number(), protocolBroadcasts: z.number() }).parse(await request('/traffic', projectId));
 		expect(traffic.streamBatches).toBeLessThan(100);
 		expect(traffic.protocolBroadcasts).toBe(0);
-	});
+	}, 30_000);
 
 	it('writes a file through the provider, scheduled Think facet, and Computer tools', async () => {
 		const projectId = await createProject();
