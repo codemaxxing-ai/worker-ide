@@ -287,6 +287,14 @@ jobs:
           path: '~/.cache/ms-playwright'
           key: playwright-chromium-${{ steps.playwright-version.outputs.PLAYWRIGHT_PLATFORM }}-${{ steps.playwright-version.outputs.PLAYWRIGHT_VERSION }}
 
+      - name: Use the primary Ubuntu package mirror
+        run: |
+          for apt_source_file in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
+            if [ -f "$apt_source_file" ]; then
+              sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' "$apt_source_file"
+            fi
+          done
+
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: bunx playwright install --with-deps chromium
@@ -427,7 +435,7 @@ jobs:
       - name: Stop dev server
         if: always()
         run: |
-          if [ -n "$DEV_SERVER_PID" ]; then
+          if [ -n "${DEV_SERVER_PID:-}" ]; then
             kill $DEV_SERVER_PID || true
           fi
 
@@ -471,6 +479,14 @@ jobs:
         with:
           path: '~/.cache/ms-playwright'
           key: playwright-e2e-${{ matrix.browser }}-${{ steps.playwright-version.outputs.PLAYWRIGHT_PLATFORM }}-${{ steps.playwright-version.outputs.PLAYWRIGHT_VERSION }}
+
+      - name: Use the primary Ubuntu package mirror
+        run: |
+          for apt_source_file in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
+            if [ -f "$apt_source_file" ]; then
+              sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' "$apt_source_file"
+            fi
+          done
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -593,7 +609,7 @@ jobs:
       - name: Stop dev server
         if: always()
         run: |
-          if [ -n "$DEV_SERVER_PID" ]; then
+          if [ -n "${DEV_SERVER_PID:-}" ]; then
             kill $DEV_SERVER_PID || true
           fi
 

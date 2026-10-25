@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import { AI_MODELS, CODE_MODE_SYSTEM_PROMPT, DEFAULT_AI_MODEL } from '@shared/constants';
 
+import { SessionEventBatcher } from './session-event-batcher';
 import {
 	buildSessionTurnInstructions,
 	getTerminalSubmissionResult,
@@ -33,9 +34,12 @@ describe('session turn lifecycle', () => {
 		const host = {
 			eventQueue: [],
 			saveSnapshotChanges: async () => {},
-			forwardEvents: async (batch: StreamEvent[]) => {
-				events.push(...batch);
-			},
+			eventBatcher: new SessionEventBatcher(
+				async (batch) => {
+					events.push(...batch);
+				},
+				() => {},
+			),
 		};
 		const input = { path: '/app.tsx', content: 'hello' };
 		const model = new MockLanguageModelV3({
@@ -112,7 +116,10 @@ describe('session turn lifecycle', () => {
 			state: { activeTurn: { submissionId: 'submission-1' } },
 			eventQueue: [],
 			saveSnapshotChanges: async () => {},
-			forwardEvents: async () => {},
+			eventBatcher: new SessionEventBatcher(
+				async () => {},
+				() => {},
+			),
 			getMessages: vi.fn(),
 			setState: vi.fn(),
 		};
@@ -137,7 +144,7 @@ describe('session turn lifecycle', () => {
 			forwardEvents: vi.fn(async () => {}),
 			listSubmissions: async () => [],
 			requireConfiguration: () => ({ sessionId: 'session' }),
-			parentAgent: async () => ({ completeThinkTurn }),
+			getParentStub: async () => ({ completeThinkTurn }),
 			setState: vi.fn(),
 			deleteEmptySnapshot: vi.fn(() => cleanup),
 			ctx: { waitUntil: vi.fn() },

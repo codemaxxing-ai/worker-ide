@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { toHex } from '../../shared/project-id';
 import { AgentRunner as ApplicationAgentRunner, SessionTurnAgent } from '../../worker/durable';
 
-import type { AgentSessionState } from '../../shared/agent-state';
+import type { AgentSessionState, StreamEvent } from '../../shared/agent-state';
 import type { ChatMessage } from '../../shared/types';
 
 export * from '../../worker/durable';
@@ -22,6 +22,44 @@ Reflect.set(fixtureEnvironment, 'AI', {
 });
 
 export class AgentRunner extends ApplicationAgentRunner {
+	private streamBatches = 0;
+	private protocolBroadcasts = 0;
+	private rejectCompletions = false;
+
+	override async completeThinkTurn(...parameters: Parameters<ApplicationAgentRunner['completeThinkTurn']>): Promise<void> {
+		if (this.rejectCompletions) throw new Error('Simulated exhausted completion RPC');
+		await super.completeThinkTurn(...parameters);
+	}
+
+	blockCompletionForTest(): void {
+		this.rejectCompletions = true;
+	}
+
+	async restoreCompletionForTest(): Promise<void> {
+		this.rejectCompletions = false;
+		await this.reconcileRunningSession();
+	}
+
+	async hasRecoveryWatchForTest(): Promise<boolean> {
+		const schedules = await this.listSchedules();
+		return schedules.some((schedule) => schedule.callback === 'reconcileRunningSession');
+	}
+
+	override async receiveThinkEvents(sessionId: string, events: StreamEvent[]): Promise<void> {
+		this.streamBatches++;
+		if (this.streamBatches > 500) throw new Error('Test RPC budget exhausted');
+		await super.receiveThinkEvents(sessionId, events);
+	}
+
+	override async _cf_broadcastToSubAgent(...parameters: Parameters<ApplicationAgentRunner['_cf_broadcastToSubAgent']>): Promise<void> {
+		this.protocolBroadcasts++;
+		await super._cf_broadcastToSubAgent(...parameters);
+	}
+
+	readTestTraffic() {
+		return { streamBatches: this.streamBatches, protocolBroadcasts: this.protocolBroadcasts };
+	}
+
 	readTestState(): AgentSessionState | undefined {
 		return this.state.currentSession;
 	}
@@ -75,6 +113,44 @@ export class FixtureAI extends WorkerEntrypoint {
 				}
 				if (prompt === 'fail') {
 					controller.error(new Error('Simulated provider failure'));
+					return;
+				}
+				if (prompt === 'burst-edit' && !finishedTool) {
+					send({
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											id: 'todos',
+											type: 'function',
+											function: {
+												name: 'todos_update',
+												arguments: JSON.stringify({
+													todos: [{ id: 'edit', content: 'Edit the file', status: 'in_progress', priority: 'high' }],
+												}),
+											},
+										},
+									],
+								},
+							},
+						],
+					});
+					send({
+						choices: [
+							{ delta: { tool_calls: [{ index: 1, id: 'long-edit', type: 'function', function: { name: 'edit', arguments: '' } }] } },
+						],
+					});
+					const argumentsValue = JSON.stringify({
+						path: '/workspace/source.txt',
+						edits: [{ oldText: 'baseline', newText: 'x'.repeat(16_000) }],
+					});
+					for (const character of argumentsValue)
+						send({ choices: [{ delta: { tool_calls: [{ index: 1, function: { arguments: character } }] } }] });
+					send({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] });
+					controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+					controller.close();
 					return;
 				}
 				if (finishedTool || prompt === 'hello' || prompt === 'recall') {
@@ -169,6 +245,16 @@ export default {
 			return new Response('evicted');
 		}
 		if (url.pathname === '/state') return Response.json(await parent.readTestState());
+		if (url.pathname === '/traffic') return Response.json(await parent.readTestTraffic());
+		if (url.pathname === '/block-completion') {
+			await parent.blockCompletionForTest();
+			return Response.json({ blocked: true });
+		}
+		if (url.pathname === '/restore-completion') {
+			await parent.restoreCompletionForTest();
+			return Response.json({ restored: true });
+		}
+		if (url.pathname === '/recovery-watch') return Response.json({ scheduled: await parent.hasRecoveryWatchForTest() });
 		if (url.pathname === '/submission')
 			return Response.json(await parent.inspectTestSubmission(sessionId, url.searchParams.get('message') ?? 'message'));
 		if (url.pathname === '/fork') {

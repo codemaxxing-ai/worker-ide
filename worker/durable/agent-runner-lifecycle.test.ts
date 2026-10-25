@@ -29,6 +29,24 @@ async function createTestAgent(name: string, sessionId: string): Promise<Durable
 }
 
 describe('agent runner turn completion', () => {
+	it('flushes pending text before completion instead of appending it again afterward', async () => {
+		const stub = await createTestAgent('agent:buffered-completion-test', 'buffered-session');
+		await stub.loadSession('buffered-session');
+		await stub.receiveThinkEvents('buffered-session', [{ type: 'text-delta', delta: 'Buffered response' }]);
+		const history: ChatMessage[] = [
+			{ id: 'request', role: 'user', parts: [{ type: 'text', content: 'Hello' }] },
+			{ id: 'response', role: 'assistant', parts: [{ type: 'text', content: 'Buffered response' }] },
+		];
+		await stub.completeThinkTurn('buffered-session', 'request', history, 'completed');
+		await new Promise((resolve) => setTimeout(resolve, 75));
+		await runInDurableObject(stub, (instance) => {
+			expect(instance.state.currentSession?.messages).toEqual([]);
+			expect(instance.state.currentSession?.status).toBe('completed');
+		});
+		using session = await stub.readSession('buffered-session');
+		expect(session?.history).toEqual(history);
+	});
+
 	it.each([true, false])('persists rich tool results and errors through completion (selected: %s)', async (selected) => {
 		const sessionId = `tool-session-${selected}`;
 		const stub = await createTestAgent(`agent:tool-metadata-${selected}`, sessionId);

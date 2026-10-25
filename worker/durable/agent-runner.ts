@@ -602,6 +602,7 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 		this.requestOriginContext = isRequestOriginContext(persistedRequestOriginContext) ? persistedRequestOriginContext : undefined;
 		this.refreshReviewState();
 		await this.refreshSessionsList();
+		if (this.state.currentSession?.status === 'running') await this.scheduleEvery(30, 'reconcileRunningSession');
 	}
 
 	private async getSoulPrompt(): Promise<string> {
@@ -1083,6 +1084,23 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 
 	async beginThinkTurn(sessionId: string, submissionId: string): Promise<void> {
 		this.turnCoordinator.beginThinkTurn(sessionId, submissionId);
+		await this.scheduleEvery(30, 'reconcileRunningSession');
+	}
+
+	async reconcileRunningSession(_payload?: unknown, schedule?: { id: string }): Promise<void> {
+		const current = this.state.currentSession;
+		if (current?.status !== 'running') {
+			if (schedule) await this.cancelSchedule(schedule.id);
+			return;
+		}
+		// A turn can exhaust its subrequest budget before notifying this parent.
+		// This alarm has its own budget and can finish the durable handoff.
+		const sessionAgent = await this.subAgent(SessionTurnAgent, current.sessionId);
+		await sessionAgent.reconcileSessionTurn();
+		const reconciled = this.state.currentSession;
+		if (reconciled?.sessionId === current.sessionId && reconciled.status !== 'running') {
+			console.info('[AgentRunner] Reconciled terminal session', { sessionId: current.sessionId, status: reconciled.status });
+		}
 	}
 
 	async completeThinkTurn(
@@ -1093,6 +1111,7 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 		error?: string,
 		activeSubmissions: Array<{ submissionId: string; status: 'pending' | 'running' }> = [],
 	): Promise<void> {
+		this.sessionStreamState.disposeSession(sessionId);
 		await this.turnCoordinator.completeThinkTurn(sessionId, submissionId, history, status, error, activeSubmissions);
 	}
 

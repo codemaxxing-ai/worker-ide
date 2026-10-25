@@ -6,6 +6,7 @@ import { AGENT_SYSTEM_PROMPT, DEFAULT_AI_MODEL, MCP_SERVERS } from '@shared/cons
 import { aiModelSchema } from '@shared/validation';
 
 import { AgentRunner } from './agent-runner';
+import { SessionEventBatcher } from './session-event-batcher';
 import { clearSnapshotFromMessages } from './session-history';
 import { filesystemNamespace } from '../lib/durable-object-namespaces';
 import { runWithProjectStub } from '../lib/project-fs';
@@ -76,6 +77,14 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 	private queryChanges = [];
 	private eventAbortController = new AbortController();
 	private completionPromise?: Promise<void>;
+	private parentStub?: Promise<DurableObjectStub<AgentRunner>>;
+	private eventBatcher = this.createEventBatcher();
+
+	override broadcast(_message: string | ArrayBuffer | ArrayBufferView, _without?: string[]): void {
+		// This internal facet has no UI clients. Think persists its transcript
+		// independently; the parent transports our batched application events.
+		// Relaying the unused Think protocol would consume RPCs for every token.
+	}
 
 	override async onStart(): Promise<void> {
 		await super.onStart();
@@ -119,10 +128,12 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 	}
 
 	override async beforeTurn(context: TurnContext): Promise<TurnConfig> {
+		this.parentStub = undefined;
+		this.eventBatcher = this.createEventBatcher();
 		const configuration = this.requireConfiguration();
 		const turnConfiguration = this.requireActiveTurn();
 		if (!context.continuation) {
-			const parent = await this.parentAgent(AgentRunner);
+			const parent = await this.getParentStub();
 			await parent.beginThinkTurn(configuration.sessionId, turnConfiguration.submissionId);
 		}
 		const filesystemId = toDurableObjectId(filesystemNamespace, configuration.projectId);
@@ -237,13 +248,14 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 			}
 		}
 		await this.saveSnapshotChanges(events);
-		await this.forwardEvents(events);
+		await this.eventBatcher.enqueue(events);
 	}
 
 	override async onStepEnd(context: StepContext): Promise<void> {
 		const events = [...drainEventQueue(this.eventQueue), ...toolErrorEvents(context.content)];
 		await this.saveSnapshotChanges(events);
-		await this.forwardEvents(events);
+		await this.eventBatcher.enqueue(events);
+		await this.eventBatcher.flush();
 	}
 
 	override async onChatResponse(result: ChatResponseResult): Promise<void> {
@@ -251,7 +263,8 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		if (!activeTurn || activeTurn.submissionId !== result.requestId) return;
 		const remainingEvents = drainEventQueue(this.eventQueue);
 		await this.saveSnapshotChanges(remainingEvents);
-		await this.forwardEvents(remainingEvents);
+		await this.eventBatcher.enqueue(remainingEvents);
+		await this.eventBatcher.flush();
 		// The SDK finalizes its submission ledger after this callback. In particular,
 		// an aborted provider stream can report an error here while its submission is
 		// correctly marked aborted. Publish terminal state only from onSubmissionStatus.
@@ -265,6 +278,11 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		}
 
 		if (submission.status === 'pending' || this.state.activeSubmissionId !== submission.submissionId) return;
+		await this.eventBatcher.flush().catch((error) => {
+			// Preserve terminal state even when live updates failed. The parent's
+			// scheduled reconciliation can deliver it from a fresh invocation.
+			console.error('[SessionTurnAgent] Streaming events failed before completion:', error);
+		});
 		const terminal = getTerminalSubmissionResult(submission);
 		const history = uiMessagesToChatMessages(await this.getMessages());
 		this.setState({
@@ -331,7 +349,31 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 
 	async receiveSubAgentEvents(events: StreamEvent[]): Promise<void> {
 		await this.saveSnapshotChanges(events);
-		await this.forwardEvents(events);
+		await this.eventBatcher.enqueue(events);
+	}
+
+	async reconcileSessionTurn(): Promise<void> {
+		this.parentStub = undefined;
+		if (this.state.pendingCompletion) {
+			await this.completePendingTurn();
+			return;
+		}
+		await this.reconcileActiveSubmission();
+	}
+
+	private createEventBatcher(): SessionEventBatcher {
+		return new SessionEventBatcher(
+			(events) => this.forwardEvents(events),
+			(promise) => this.ctx.waitUntil(promise),
+		);
+	}
+
+	private getParentStub(): Promise<DurableObjectStub<AgentRunner>> {
+		this.parentStub ??= this.parentAgent(AgentRunner).catch((error) => {
+			this.parentStub = undefined;
+			throw error;
+		});
+		return this.parentStub;
 	}
 
 	private requireConfiguration(): SessionTurnConfiguration {
@@ -351,7 +393,7 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 	private async forwardEvents(events: StreamEvent[]): Promise<void> {
 		if (events.length === 0) return;
 		const configuration = this.requireConfiguration();
-		const parent = await this.parentAgent(AgentRunner);
+		const parent = await this.getParentStub();
 		await parent.receiveThinkEvents(configuration.sessionId, events);
 	}
 
@@ -421,7 +463,7 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 				return { submissionId: submission.submissionId, status };
 			});
 		const configuration = this.requireConfiguration();
-		const parent = await this.parentAgent(AgentRunner);
+		const parent = await this.getParentStub();
 		await parent.completeThinkTurn(
 			configuration.sessionId,
 			completion.submissionId,

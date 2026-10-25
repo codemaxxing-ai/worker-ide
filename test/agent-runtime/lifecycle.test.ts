@@ -109,6 +109,33 @@ async function waitForToolInput(projectId: string) {
 }
 
 describe('production agent lifecycle in the current Workers runtime', () => {
+	it('reconciles a completed child from a fresh invocation when its completion RPC failed', async () => {
+		const projectId = await createProject();
+		await request('/block-completion', projectId);
+		await request('/submit', projectId, { messageId: 'message', prompt: 'hello' });
+		await vi.waitFor(
+			async () => {
+				expect(await request('/submission', projectId)).toMatchObject({ status: 'completed' });
+			},
+			{ timeout: 4000 },
+		);
+		expect(await request('/state', projectId)).toMatchObject({ status: 'running' });
+		expect(await request('/recovery-watch', projectId)).toEqual({ scheduled: true });
+		await request('/restore-completion', projectId);
+		await waitForStatus(projectId, 'completed');
+		expect(await request('/session', projectId)).toMatchObject({ status: 'completed' });
+	});
+
+	it('handles a TODO update and 16,000 edit argument chunks without exhausting the RPC budget', async () => {
+		const projectId = await createProject();
+		await request('/submit', projectId, { messageId: 'message', prompt: 'burst-edit' });
+		await waitForStatus(projectId, 'completed');
+		expect(await request('/file', projectId)).toEqual({ content: 'x'.repeat(16_000) });
+		const traffic = z.object({ streamBatches: z.number(), protocolBroadcasts: z.number() }).parse(await request('/traffic', projectId));
+		expect(traffic.streamBatches).toBeLessThan(100);
+		expect(traffic.protocolBroadcasts).toBe(0);
+	});
+
 	it('writes a file through the provider, scheduled Think facet, and Computer tools', async () => {
 		const projectId = await createProject();
 		expect(await request('/submit', projectId, { messageId: 'message', prompt: 'write' })).toMatchObject({ started: true });
