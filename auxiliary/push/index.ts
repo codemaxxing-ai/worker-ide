@@ -77,11 +77,14 @@ export default class PushWorker extends WorkerEntrypoint<PushWorkerEnvironment> 
 	async getVapidPublicKey(): Promise<string> {
 		return this.env.VAPID_PUBLIC_KEY;
 	}
-	async registerSubscription(userId: string, subscription: PushSubscriptionInfo): Promise<void> {
+	async registerSubscription(userId: string, subscription: PushSubscriptionInfo): Promise<{ enabled: boolean }> {
 		const endpointHash = await this.hashEndpoint(subscription.endpoint);
 		const key = `${userId}/${endpointHash}`;
-		const stored: PushSubscriptionInfo = { ...subscription, notificationsEnabled: true };
+		const preference = await this.getNotificationPreference(userId, subscription.endpoint);
+		const enabled = subscription.notificationsEnabled ?? preference?.enabled ?? true;
+		const stored: PushSubscriptionInfo = { ...subscription, notificationsEnabled: enabled };
 		await this.env.KV_PUSH_SUBSCRIPTION.put(key, JSON.stringify(stored));
+		return { enabled };
 	}
 	async unregisterSubscription(userId: string, endpoint: string): Promise<void> {
 		const endpointHash = await this.hashEndpoint(endpoint);
@@ -95,13 +98,22 @@ export default class PushWorker extends WorkerEntrypoint<PushWorkerEnvironment> 
 		if (!raw) return undefined;
 		try {
 			const parsed: unknown = JSON.parse(raw);
-			if (typeof parsed === 'object' && parsed !== null && 'notificationsEnabled' in parsed) {
-				// eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- validated above
-				const subscription = parsed as PushSubscriptionInfo;
-				return { enabled: subscription.notificationsEnabled !== false };
-			}
-			// Legacy entries without the flag default to enabled
-			return { enabled: true };
+			if (
+				!parsed ||
+				typeof parsed !== 'object' ||
+				!('endpoint' in parsed) ||
+				typeof parsed.endpoint !== 'string' ||
+				!parsed.endpoint ||
+				!('key' in parsed) ||
+				typeof parsed.key !== 'string' ||
+				!parsed.key ||
+				!('auth' in parsed) ||
+				typeof parsed.auth !== 'string' ||
+				!parsed.auth
+			)
+				return undefined;
+			// Legacy subscriptions without a preference remain enabled.
+			return { enabled: !('notificationsEnabled' in parsed) || parsed.notificationsEnabled !== false };
 		} catch {
 			return undefined;
 		}

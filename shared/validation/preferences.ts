@@ -15,6 +15,7 @@ export const pushSubscriptionBodySchema = z.object({
 	endpoint: z.string().min(1),
 	key: z.string().min(1),
 	auth: z.string().min(1),
+	enabled: z.boolean().optional(),
 });
 
 export const pushUnsubscribeBodySchema = z.object({

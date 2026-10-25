@@ -421,13 +421,14 @@ export const userRoutes = new Hono<AuthedEnvironment>()
 		const { userId } = c.get('session');
 		const body = c.req.valid('json');
 
-		await c.env.PUSH.registerSubscription(userId, {
+		const preference = await c.env.PUSH.registerSubscription(userId, {
 			endpoint: body.endpoint,
 			key: body.key,
 			auth: body.auth,
+			notificationsEnabled: body.enabled,
 		});
 
-		return c.json({ ok: true });
+		return c.json({ ok: true, enabled: preference.enabled });
 	})
 
 	// DELETE /api/user/push-subscription — Unregister a push subscription
@@ -454,7 +455,7 @@ export const userRoutes = new Hono<AuthedEnvironment>()
 		}
 
 		const preference = await c.env.PUSH.getNotificationPreference(userId, endpoint);
-		return c.json({ enabled: preference?.enabled ?? false });
+		return c.json({ registered: preference !== undefined, enabled: preference?.enabled ?? false });
 	})
 
 	// PUT /api/user/push-notification-preference — Set preference for a device

@@ -1,5 +1,13 @@
 // Handle incoming push notifications
 
+globalThis.addEventListener('pushsubscriptionchange', (event) => {
+	event.waitUntil(
+		globalThis.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+			for (const client of clientList) client.postMessage('push-state-changed');
+		}),
+	);
+});
+
 function buildDeepLinkPath(deepLink) {
 	if (!deepLink?.projectId || !deepLink?.target) return undefined;
 

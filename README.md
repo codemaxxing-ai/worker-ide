@@ -65,6 +65,12 @@ Session verification keeps the existing session and device identity; it refreshe
 
 The auth schema includes `worker/migrations/d1-auth/0024_session-authentication.sql`; apply D1 migrations with `mise exec -- bun run db:migrate:local` locally or `mise exec -- bun run db:migrate:remote` for deployment. Existing sessions fall back to their original creation timestamp. Routine session renewal does not refresh verification freshness.
 
+## Push notifications
+
+After notification permission is granted, the IDE automatically restores missing service worker, browser push, and server registrations on opening a project, returning to the tab, or reconnecting. Existing disabled device preferences remain disabled. Browser permission prompts require clicking the notification bell.
+
+The bell also reconciles permission and service worker changes, preference updates from other tabs, and external subscription or server changes every 30 seconds while the page is visible. Changes received during an in-flight operation trigger another check before settling the displayed state.
+
 ## Scripts
 
 | Script             | Description                                                             |

@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { userRoutes } from './user-routes';
 import * as schema from '../db/auth-schema';
@@ -206,5 +206,44 @@ describe('user session routes', () => {
 			.from(schema.session)
 			.where(eq(schema.session.id, otherSessionId));
 		expect(remainingSession).toEqual([{ id: otherSessionId }]);
+	});
+});
+
+describe('user push registration routes', () => {
+	it.each([
+		{ preference: undefined, registered: false, enabled: false },
+		{ preference: { enabled: false }, registered: true, enabled: false },
+		{ preference: { enabled: true }, registered: true, enabled: true },
+	])('distinguishes a missing registration from a disabled device: $registered / $enabled', async ({ preference, registered, enabled }) => {
+		const getNotificationPreference = vi.fn(async () => preference);
+		const response = await createApp({ id: 'session', userId: 'user' }).request(
+			'https://example.com/user/push-notification-preference?endpoint=device',
+			{},
+			{ ...env, PUSH: { getNotificationPreference } },
+		);
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ registered, enabled });
+		expect(getNotificationPreference).toHaveBeenCalledWith('user', 'device');
+	});
+
+	it.each([undefined, false, true])('forwards explicit registration preference: %s', async (enabled) => {
+		const registerSubscription = vi.fn(async () => ({ enabled: enabled ?? false }));
+		const response = await createApp({ id: 'session', userId: 'user' }).request(
+			'https://example.com/user/push-subscription',
+			{
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ endpoint: 'device', key: 'key', auth: 'auth', enabled }),
+			},
+			{ ...env, PUSH: { registerSubscription } },
+		);
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ ok: true, enabled: enabled ?? false });
+		expect(registerSubscription).toHaveBeenCalledWith('user', {
+			endpoint: 'device',
+			key: 'key',
+			auth: 'auth',
+			notificationsEnabled: enabled,
+		});
 	});
 });

@@ -1480,9 +1480,11 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 					target: deepLinkTarget,
 				},
 			};
-			env.PUSH.notifyUser(userId, enrichedNotification).catch((error: unknown) => {
-				console.error('[AgentRunner] Failed to send push notification:', error);
-			});
+			this.ctx.waitUntil(
+				env.PUSH.notifyUser(userId, enrichedNotification).catch((error: unknown) => {
+					console.error('[AgentRunner] Failed to send push notification:', error);
+				}),
+			);
 		} catch {
 			// Push service binding may not be available in dev
 		}
