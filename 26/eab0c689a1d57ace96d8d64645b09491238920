@@ -1,0 +1,41 @@
+README.md
+  s_45f8737182387d::t_951f3e52f4aeba 68-71
+auxiliary/push/index.ts
+  s_45f8737182387d::t_8bffda600af2a3 80,83-85,87,101-116
+auxiliary/push/subscription-registration.test.ts
+  s_45f8737182387d::t_57f6fde5ede092 1-84
+shared/validation/preferences.ts
+  s_45f8737182387d::t_effea27fa3227f 18
+src/hooks/use-push-notifications.test.tsx
+  s_45f8737182387d::t_dd4ab14170128c 96-97,112,115,144-151,210-375
+src/hooks/use-push-notifications.ts
+  s_45f8737182387d::t_105f69cbf3740d 1,5,30-35,37-50,60-61,63-71,73-74,76-77,79-91,94,98-108,115,131,135,140,150-151,153,160-161,172-173,176,180,187-188,192-195,199
+src/lib/push-service-worker.test.ts
+  s_45f8737182387d::t_eeab790305ebfb 1-79
+src/lib/push-subscription.test.ts
+  s_45f8737182387d::t_e543ca5724c231 1-75
+src/lib/push-subscription.ts
+  s_45f8737182387d::t_bcc7b94976130f 1-38
+worker/durable/agent-runner.ts
+  s_45f8737182387d::t_5f52a7cab0772c 1483-1487
+worker/routes/user-routes.test.ts
+  s_45f8737182387d::t_1216003778163e 5,211-249
+worker/routes/user-routes.ts
+  s_45f8737182387d::t_e77e24063f9bdf 424,428,431,458
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "26eab0c689a1d57ace96d8d64645b09491238920",
+  "prompts": {},
+  "sessions": {
+    "s_45f8737182387d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1747e-b5d4-7fd0-9c58-9428e7e30f67",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
