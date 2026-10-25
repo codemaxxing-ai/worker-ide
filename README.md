@@ -69,7 +69,7 @@ The auth schema includes `worker/migrations/d1-auth/0024_session-authentication.
 
 After notification permission is granted, the IDE automatically restores missing service worker, browser push, and server registrations on opening a project, returning to the tab, or reconnecting. Existing disabled device preferences remain disabled. Browser permission prompts require clicking the notification bell.
 
-The bell also reconciles permission and service worker changes, preference updates from other tabs, and external subscription or server changes every 30 seconds while the page is visible. Changes received during an in-flight operation trigger another check before settling the displayed state.
+The bell also synchronizes after permission or service worker changes and preference updates from other tabs. Changes received during an in-flight operation trigger another check before settling the displayed state.
 
 ## Scripts
 

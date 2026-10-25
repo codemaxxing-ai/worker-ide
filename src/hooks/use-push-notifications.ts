@@ -18,7 +18,6 @@ interface UsePushNotificationsResult {
 
 const userApi = createUserApiClient();
 const PUSH_STATE_CHANNEL = 'worker-ide-push-state';
-const PUSH_STATE_CHECK_INTERVAL_MS = 30_000;
 
 function isPushSupported(): boolean {
 	return 'serviceWorker' in navigator && 'PushManager' in globalThis && 'Notification' in globalThis;
@@ -173,16 +172,11 @@ export function usePushNotifications(): UsePushNotificationsResult {
 		const handleServiceWorkerMessage = (event: MessageEvent<unknown>) => {
 			if (event.data === 'push-state-changed') void syncPushState();
 		};
-		const checkVisibleState = () => {
-			if (document.visibilityState === 'visible') void syncPushState();
-		};
-		const interval = setInterval(checkVisibleState, PUSH_STATE_CHECK_INTERVAL_MS);
-
 		try {
 			channelReference.current = new BroadcastChannel(PUSH_STATE_CHANNEL);
 			channelReference.current.addEventListener('message', handleWindowFocus);
 		} catch {
-			// Periodic checks also cover browsers without BroadcastChannel.
+			// Focus and visibility events cover browsers without BroadcastChannel.
 		}
 
 		window.addEventListener('focus', handleWindowFocus);
@@ -209,7 +203,6 @@ export function usePushNotifications(): UsePushNotificationsResult {
 		return () => {
 			cancelled = true;
 			mountedReference.current = false;
-			clearInterval(interval);
 			channelReference.current?.close();
 			channelReference.current = undefined;
 			window.removeEventListener('focus', handleWindowFocus);

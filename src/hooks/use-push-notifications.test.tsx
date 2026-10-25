@@ -425,35 +425,36 @@ describe('usePushNotifications', () => {
 		expect(pushSubscriptionPost).toHaveBeenCalledOnce();
 	});
 
-	it('periodically reconciles external server preference changes while the page is visible', async () => {
+	it('does not schedule checks or make requests just because time passes', async () => {
 		vi.useFakeTimers();
 		notificationPermission = 'granted';
 		getSubscriptionMock.mockResolvedValue(createSubscription());
 		const { result, unmount } = renderHook(() => usePushNotifications());
 		await act(async () => {});
 		expect(result.current.isEnabled).toBe(true);
-		pushNotificationPreferenceGet.mockResolvedValue({ ok: true, json: async () => ({ registered: true, enabled: false }) });
+		expect(vi.getTimerCount()).toBe(0);
 		await act(async () => {
-			await vi.advanceTimersByTimeAsync(30_000);
+			await vi.advanceTimersByTimeAsync(5 * 60_000);
 		});
-		expect(result.current.isEnabled).toBe(false);
+		expect(getSubscriptionMock).toHaveBeenCalledOnce();
+		expect(pushNotificationPreferenceGet).toHaveBeenCalledOnce();
+		expect(pushSubscriptionPost).not.toHaveBeenCalled();
+		expect(result.current.isEnabled).toBe(true);
 		expect(result.current.isSubscribed).toBe(true);
 		unmount();
 		expect(vi.getTimerCount()).toBe(0);
 	});
 
-	it('checks again on becoming visible and does not poll a hidden page', async () => {
-		vi.useFakeTimers();
+	it('reconciles on returning to the page without checking when it becomes hidden', async () => {
 		notificationPermission = 'granted';
 		getSubscriptionMock.mockResolvedValue(createSubscription());
 		const { result } = renderHook(() => usePushNotifications());
-		await act(async () => {});
-		expect(result.current.isEnabled).toBe(true);
+		await waitFor(() => expect(result.current.isEnabled).toBe(true));
 		const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
 		pushNotificationPreferenceGet.mockClear();
 		pushNotificationPreferenceGet.mockResolvedValue({ ok: true, json: async () => ({ registered: true, enabled: false }) });
 		await act(async () => {
-			await vi.advanceTimersByTimeAsync(60_000);
+			document.dispatchEvent(new Event('visibilitychange'));
 		});
 		expect(pushNotificationPreferenceGet).not.toHaveBeenCalled();
 		visibility.mockReturnValue('visible');
