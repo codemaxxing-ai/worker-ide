@@ -1,0 +1,57 @@
+.github/workflows/ci.yml
+  s_8946ecfd8d788f::t_817cb263f5a2ed 210-227
+README.md
+  s_a6a43c915799d1::t_9b873ab787924c 70-88,113,117-118
+bun.lock
+  s_8946ecfd8d788f::t_4bf45796581ffa 95
+docs/development.md
+  s_8946ecfd8d788f::t_6c0ec382b62cbc 31,50-51,54
+knip.json
+  s_8946ecfd8d788f::t_7e49ea48d374ba 7
+package.json
+  s_8946ecfd8d788f::t_33abf81dde533f 93,153
+test/agent-runtime/fixture.ts
+  s_8946ecfd8d788f::t_e493aa16920276 1-189
+test/agent-runtime/lifecycle.test.ts
+  s_a6a43c915799d1::t_4d1fc4bb561d5d 1-207
+test/agent-runtime/vitest.config.ts
+  s_8946ecfd8d788f::t_367fbaf3c1d05b 1-11
+worker/durable/agent-runner.ts
+  s_8946ecfd8d788f::t_8a7fe829001a96 1500,1506-1509
+worker/durable/session-store.ts
+  s_8946ecfd8d788f::t_187e6b0e60b5a6 142
+worker/durable/session-turn-agent.test.ts
+  s_a6a43c915799d1::t_a39afba648af38 110,116,119-121,123
+worker/durable/session-turn-agent.ts
+  s_8946ecfd8d788f::t_3d9b86ddbf1296 50,95,97-110,255-257,301
+worker/services/agent/workers-ai/adapter.ts
+  s_8946ecfd8d788f::t_b2844d2f398244 5,112
+worker/services/agent/workers-ai/stream-timeout.test.ts
+  s_8946ecfd8d788f::t_69717f985e4ab9 6-41
+worker/services/agent/workers-ai/stream-timeout.ts
+  s_8946ecfd8d788f::t_8e5e10d7ecc9fe 1-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a4be152037605e4b5bbf41983992dd916cc2843b",
+  "prompts": {},
+  "sessions": {
+    "s_8946ecfd8d788f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1740c-73e4-7262-bed2-2431adff5ea0",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    },
+    "s_a6a43c915799d1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17417-f77d-7952-98ef-41e48010aba3",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
