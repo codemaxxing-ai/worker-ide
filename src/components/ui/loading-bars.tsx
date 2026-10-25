@@ -1,8 +1,13 @@
-import { motion } from 'motion/react';
-
 import { cn } from '@/lib/utils';
 
+import type { CSSProperties } from 'react';
+
 const BAR_COUNT = 5;
+
+interface LoadingBarStyle extends CSSProperties {
+	'--loading-bar-height': string;
+	'--loading-bar-peak-height': string;
+}
 
 interface LoadingBarsProperties {
 	className?: string;
@@ -11,18 +16,19 @@ interface LoadingBarsProperties {
 export function LoadingBars({ className }: LoadingBarsProperties) {
 	return (
 		<div className={cn('flex h-7 items-end gap-[3px]', className)} role="status" aria-label="Loading">
-			{Array.from({ length: BAR_COUNT }, (_, index) => (
-				<motion.div
-					key={index}
-					className="w-[3px] rounded-full bg-accent"
-					animate={{
-						height: [8 + index * 3, 16 + index * 2, 8 + index * 3],
-						opacity: [0.3, 1, 0.3],
-					}}
-					transition={{ duration: 1, repeat: Infinity, delay: index * 0.12, ease: 'easeInOut' }}
-					style={{ height: 8 + index * 3 }}
-				/>
-			))}
+			{Array.from({ length: BAR_COUNT }, (_, index) => {
+				// CSS keeps the loop independent of Motion's inherited initial={false}.
+				const style = {
+					'--loading-bar-height': `${8 + index * 3}px`,
+					'--loading-bar-peak-height': `${16 + index * 2}px`,
+					height: 'var(--loading-bar-height)',
+					opacity: 0.3,
+					animation: 'loading-bar 1s ease-in-out infinite',
+					animationDelay: `${index * 0.12}s`,
+				} satisfies LoadingBarStyle;
+
+				return <div key={index} className="w-[3px] rounded-full bg-accent" style={style} />;
+			})}
 			<span className="sr-only">Loading...</span>
 		</div>
 	);

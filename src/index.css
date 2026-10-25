@@ -333,6 +333,59 @@ body {
 	}
 }
 
+@keyframes spinner-dash {
+	0% {
+		stroke-dasharray: 90 10;
+		stroke-dashoffset: 0;
+	}
+	16.6% {
+		stroke-dasharray: 56.6 43.4;
+		stroke-dashoffset: -33.3;
+	}
+	33.3% {
+		stroke-dasharray: 90 10;
+		stroke-dashoffset: -33.3;
+	}
+	50% {
+		stroke-dasharray: 56.6 43.4;
+		stroke-dashoffset: -66.6;
+	}
+	66.6% {
+		stroke-dasharray: 90 10;
+		stroke-dashoffset: -66.6;
+	}
+	83.3% {
+		stroke-dasharray: 56.6 43.4;
+		stroke-dashoffset: -100;
+	}
+	100% {
+		stroke-dasharray: 90 10;
+		stroke-dashoffset: -100;
+	}
+}
+
+@keyframes loading-bar {
+	0%,
+	100% {
+		height: var(--loading-bar-height);
+		opacity: 0.3;
+	}
+	50% {
+		height: var(--loading-bar-peak-height);
+		opacity: 1;
+	}
+}
+
+@keyframes speech-dot {
+	0%,
+	100% {
+		opacity: 0.2;
+	}
+	50% {
+		opacity: 0.8;
+	}
+}
+
 @keyframes pulse {
 	0%,
 	100% {
