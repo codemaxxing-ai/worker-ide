@@ -1,0 +1,39 @@
+README.md
+  s_8946ecfd8d788f::t_a4489568a7bf7f 114-115
+shared/agent-state.ts
+  s_8946ecfd8d788f::t_edb009e83b885b 115
+worker/durable/agent-turn-coordinator.test.ts
+  s_8946ecfd8d788f::t_99c61482135d63 62-66,75,83,134-145,147-158,160-173
+worker/durable/agent-turn-coordinator.ts
+  s_8946ecfd8d788f::t_4bf84cefd8cad8 130,132-165
+worker/durable/project-filesystem.ts
+  s_8946ecfd8d788f::t_01da337bbb6771 700-702
+worker/durable/session-stream-state.test.ts
+  s_8946ecfd8d788f::t_5dadc8feb88586 27,36,40,44-71
+worker/durable/session-stream-state.ts
+  s_8946ecfd8d788f::t_4aea0074d2c5c1 154,160,181,297-316
+worker/durable/session-turn-agent.test.ts
+  s_8946ecfd8d788f::t_9636ef4e7faa9d 1,3-4,13,19,31-151
+worker/durable/session-turn-agent.ts
+  s_8946ecfd8d788f::t_9564c09685be98 9,201-210,235-236,241,245,303,307-319,321,324,327,409-411,426,438-457
+worker/lib/computer-exec.test.ts
+  s_8946ecfd8d788f::t_43eafea4d9b6b8 17-27
+worker/services/agent/workers-ai/stream-timeout.ts
+  s_8946ecfd8d788f::t_21990d16d9cb3b 2,4-7,9-17,28,34,41-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "be05b88f94fc61993ed904e8d9eb7a7227532bfc",
+  "prompts": {},
+  "sessions": {
+    "s_8946ecfd8d788f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1740c-73e4-7262-bed2-2431adff5ea0",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
