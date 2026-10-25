@@ -120,7 +120,7 @@ Tool calls can be expanded while their arguments are streaming, including dynami
 
 Stopping aborts inference and cancels queued turns without waiting for workspace execution cancellation or empty-snapshot cleanup. Workspace mutations retain FIFO ownership through synchronization. Complete tool inputs update the displayed arguments even when a provider omits incremental argument events.
 
-Streaming deltas are coalesced before crossing the session-to-parent RPC boundary; the internal session facet does not broadcast a second, unused client stream. The parent checks running submissions every 30 seconds so a failed completion notification cannot leave the UI running indefinitely.
+Streaming deltas are coalesced before crossing the session-to-parent RPC boundary; the internal session facet does not broadcast a second, unused client stream. The host Worker allows 100,000 subrequests per invocation to provide headroom for agent tools and streaming RPCs. The parent checks running submissions every 30 seconds so a failed completion notification cannot leave the UI running indefinitely.
 
 Think's durable submission status determines the session's terminal status. A new session facet receives existing conversation history before its first submission, including reverted conversations. The `test:agent` CI suite exercises the production bundle, parent/session RPC, scheduling, provider parsing, and file tools with controlled AI responses; it covers completion, cancellation, stalled requests, failure recovery, and conversation continuity without Docker or live AI credentials.
 
