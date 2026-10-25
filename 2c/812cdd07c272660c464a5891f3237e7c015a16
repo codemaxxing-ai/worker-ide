@@ -1,0 +1,21 @@
+src/components/ui/spinner.stories.tsx
+  s_6af8ed754bcabe::t_c935b95f85dbb7 1-6,32-43,48-84
+src/components/ui/spinner.tsx
+  s_6af8ed754bcabe::t_16c2dd4191668d 5-6,22,26-27,29,38,43-52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2c812cdd07c272660c464a5891f3237e7c015a16",
+  "prompts": {},
+  "sessions": {
+    "s_6af8ed754bcabe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1740f-f0b2-7e03-8f80-2ebfb3fc4543",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
