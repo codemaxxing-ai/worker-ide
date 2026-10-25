@@ -90,6 +90,8 @@ When live tests fail, check Docker availability, `/dev/fuse`, DNS from the daemo
 
 ## Generated artifacts and deployment
 
+CI lets an in-progress `main` run finish while retaining the newest pending update, so repeated pushes cannot starve deployment. Pull request checks still cancel superseded runs. Deployments remain gated on successful CI and run serially.
+
 [scripts/deploy.ts](../scripts/deploy.ts) is the shared local and CI deployment sequence. The host Worker uses the compatibility flags in [wrangler.jsonc](../wrangler.jsonc), currently `nodejs_compat`; preserve the deployable configuration instead of copying broad experimental flags from runtime examples.
 
 | Artifact                                                  | Generator                                                                 |

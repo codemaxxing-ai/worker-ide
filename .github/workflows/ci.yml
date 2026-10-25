@@ -52,7 +52,9 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Let validated main builds reach deployment even while new work is pushed.
+  # Pull requests can still discard superseded checks.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 defaults:
   run:
