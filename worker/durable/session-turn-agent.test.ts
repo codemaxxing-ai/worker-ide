@@ -107,20 +107,20 @@ describe('session turn lifecycle', () => {
 		expect(host.getMessages).not.toHaveBeenCalled();
 	});
 
-	it('does not finalize an old response when another turn starts while history is loading', async () => {
+	it('leaves terminal status to the submission ledger when the stream callback reports an error', async () => {
 		const host = {
 			state: { activeTurn: { submissionId: 'submission-1' } },
 			eventQueue: [],
 			saveSnapshotChanges: async () => {},
 			forwardEvents: async () => {},
-			getMessages: async () => {
-				host.state.activeTurn = { submissionId: 'submission-2' };
-				return [];
-			},
+			getMessages: vi.fn(),
 			setState: vi.fn(),
 		};
-		await Reflect.apply(SessionTurnAgent.prototype.onChatResponse, host, [{ requestId: 'submission-1', status: 'completed' }]);
+		await Reflect.apply(SessionTurnAgent.prototype.onChatResponse, host, [
+			{ requestId: 'submission-1', status: 'error', error: 'Stream error' },
+		]);
 		expect(host.setState).not.toHaveBeenCalled();
+		expect(host.getMessages).not.toHaveBeenCalled();
 	});
 
 	it('publishes terminal state before an empty snapshot can acquire the workspace mutation queue', async () => {

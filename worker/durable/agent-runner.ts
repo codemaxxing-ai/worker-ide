@@ -1497,12 +1497,16 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 			throw new Error('Workers AI binding (AI) is not configured.');
 		}
 		const sessionAgent = await this.subAgent(SessionTurnAgent, sessionId);
-		await sessionAgent.configureSessionTurn({
+		const { needsHistory } = await sessionAgent.configureSessionTurn({
 			projectId: this.getProjectId(),
 			organizationId: this.projectOrganizationId,
 			sessionId,
 			requestOriginContext: this.requestOriginContext,
 		});
+		if (needsHistory) {
+			const session = await this.agentSessionStore.read(sessionId);
+			await sessionAgent.initializeHistory(session?.history ?? []);
+		}
 		return sessionAgent;
 	}
 

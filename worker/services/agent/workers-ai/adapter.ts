@@ -2,7 +2,7 @@ import { wrapLanguageModel } from 'ai';
 import { env } from 'cloudflare:workers';
 import { createWorkersAI } from 'workers-ai-provider';
 
-import { withStreamTimeout } from './stream-timeout';
+import { withStreamStartTimeout, withStreamTimeout } from './stream-timeout';
 
 import type { LanguageModel } from 'ai';
 
@@ -109,7 +109,7 @@ export function createAdapter(modelId: string, context: WorkersAiContext): Langu
 		middleware: {
 			specificationVersion: 'v3',
 			wrapStream: async ({ doStream, params: parameters }) => {
-				const result = await doStream();
+				const result = await withStreamStartTimeout(doStream, 120_000, parameters.abortSignal);
 				return { ...result, stream: withStreamTimeout(result.stream, 120_000, parameters.abortSignal) };
 			},
 		},

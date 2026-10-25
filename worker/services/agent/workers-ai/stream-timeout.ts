@@ -1,3 +1,45 @@
+/** Release the turn queue even if the provider ignores abort before returning headers. */
+export function withStreamStartTimeout<Result extends { stream: ReadableStream<unknown> }>(
+	start: () => PromiseLike<Result>,
+	timeoutMs: number,
+	signal?: AbortSignal,
+): Promise<Result> {
+	return new Promise<Result>((resolve, reject) => {
+		let settled = false;
+		const timeout = setTimeout(() => fail(new Error('The model did not respond within two minutes. Please try again.')), timeoutMs);
+		const cleanup = () => {
+			settled = true;
+			clearTimeout(timeout);
+			signal?.removeEventListener('abort', abort);
+		};
+		const fail = (error: unknown) => {
+			if (settled) return;
+			cleanup();
+			reject(error);
+		};
+		const abort = () => fail(signal?.reason ?? new DOMException('Cancelled by user', 'AbortError'));
+		signal?.addEventListener('abort', abort, { once: true });
+		if (signal?.aborted) {
+			abort();
+			return;
+		}
+		try {
+			void start().then((result) => {
+				if (settled) {
+					// Discard a response that arrives after cancellation without blocking
+					// on the same unresponsive transport again.
+					void result.stream.cancel().catch(() => {});
+					return;
+				}
+				cleanup();
+				resolve(result);
+			}, fail);
+		} catch (error) {
+			fail(error);
+		}
+	});
+}
+
 /** Bound provider inactivity without including time spent executing tools. */
 export function withStreamTimeout<Value>(stream: ReadableStream<Value>, timeoutMs: number, signal?: AbortSignal): ReadableStream<Value> {
 	const reader = stream.getReader();

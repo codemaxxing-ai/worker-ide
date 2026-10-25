@@ -47,6 +47,7 @@ interface ActiveTurnConfiguration extends TurnExecutionConfiguration {
 
 interface SessionTurnState {
 	configuration?: SessionTurnConfiguration;
+	historyInitialized?: boolean;
 	activeSubmissionId?: string;
 	activeTurn?: ActiveTurnConfiguration;
 	activeSnapshot?: {
@@ -91,8 +92,22 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		await this.reconcileActiveSubmission();
 	}
 
-	configureSessionTurn(configuration: SessionTurnConfiguration): void {
+	async configureSessionTurn(configuration: SessionTurnConfiguration): Promise<{ needsHistory: boolean }> {
 		this.setState({ ...this.state, configuration });
+		if (this.state.historyInitialized) return { needsHistory: false };
+		const messages = await this.getMessages();
+		if (messages.length === 0) return { needsHistory: true };
+		this.setState({ ...this.state, historyInitialized: true });
+		return { needsHistory: false };
+	}
+
+	async initializeHistory(messages: ChatMessage[]): Promise<void> {
+		if (this.state.historyInitialized) return;
+		const existingMessages = await this.getMessages();
+		if (existingMessages.length === 0 && messages.length > 0) {
+			await this.addMessages(messages.map((message) => chatMessageToUiMessage(message)));
+		}
+		this.setState({ ...this.state, historyInitialized: true });
 	}
 
 	override getModel(): AIModelId {
@@ -237,18 +252,9 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		const remainingEvents = drainEventQueue(this.eventQueue);
 		await this.saveSnapshotChanges(remainingEvents);
 		await this.forwardEvents(remainingEvents);
-		const history = uiMessagesToChatMessages(await this.getMessages());
-		if (this.state.activeTurn?.submissionId !== activeTurn.submissionId) return;
-		this.setState({
-			...this.state,
-			pendingCompletion: {
-				submissionId: activeTurn.submissionId,
-				history,
-				status: result.status,
-				error: result.error,
-			},
-		});
-		await this.completePendingTurn();
+		// The SDK finalizes its submission ledger after this callback. In particular,
+		// an aborted provider stream can report an error here while its submission is
+		// correctly marked aborted. Publish terminal state only from onSubmissionStatus.
 	}
 
 	override async onSubmissionStatus(submission: ThinkSubmissionInspection): Promise<void> {
@@ -259,11 +265,6 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		}
 
 		if (submission.status === 'pending' || this.state.activeSubmissionId !== submission.submissionId) return;
-		if (this.state.pendingCompletion?.submissionId === submission.submissionId) {
-			await this.completePendingTurn();
-			return;
-		}
-
 		const terminal = getTerminalSubmissionResult(submission);
 		const history = uiMessagesToChatMessages(await this.getMessages());
 		this.setState({
@@ -297,6 +298,7 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		if (messages.length > 0) {
 			await this.addMessages(messages.map((message) => chatMessageToUiMessage(message)));
 		}
+		this.setState({ ...this.state, historyInitialized: true });
 	}
 
 	async cancelSubmissionById(submissionId: string): Promise<void> {

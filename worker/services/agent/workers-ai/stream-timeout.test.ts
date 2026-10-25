@@ -3,7 +3,42 @@ import { MockLanguageModelV3 } from 'ai/test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { withStreamTimeout } from './stream-timeout';
+import { withStreamStartTimeout, withStreamTimeout } from './stream-timeout';
+
+describe('provider request deadline', () => {
+	afterEach(() => vi.useRealTimers());
+
+	it('releases an aborted request and disposes a late response without awaiting transport cancellation', async () => {
+		vi.useFakeTimers();
+		const abort = new AbortController();
+		const pending = Promise.withResolvers<{ stream: ReadableStream<string> }>();
+		const request = withStreamStartTimeout(() => pending.promise, 120_000, abort.signal);
+		const stopped = expect(request).rejects.toThrow('Stopped');
+		abort.abort(new Error('Stopped'));
+		await stopped;
+		expect(vi.getTimerCount()).toBe(0);
+		const cancel = vi.fn(() => new Promise<void>(() => {}));
+		pending.resolve({ stream: new ReadableStream({ cancel }) });
+		await Promise.resolve();
+		expect(cancel).toHaveBeenCalledOnce();
+	});
+
+	it('bounds the request before any stream exists', async () => {
+		vi.useFakeTimers();
+		const failure = expect(withStreamStartTimeout(() => new Promise(() => {}), 120_000)).rejects.toThrow('did not respond');
+		await vi.advanceTimersByTimeAsync(120_001);
+		await failure;
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it('does not dispatch an already-aborted request', async () => {
+		const abort = new AbortController();
+		abort.abort(new Error('Stopped'));
+		const start = vi.fn(async () => ({ stream: new ReadableStream() }));
+		await expect(withStreamStartTimeout(start, 120_000, abort.signal)).rejects.toThrow('Stopped');
+		expect(start).not.toHaveBeenCalled();
+	});
+});
 
 describe('provider stream inactivity', () => {
 	afterEach(() => vi.useRealTimers());

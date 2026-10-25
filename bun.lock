@@ -92,6 +92,7 @@
         "knip": "^5.88.1",
         "lint-staged": "^16.4.0",
         "lucide-react": "^0.563.0",
+        "miniflare": "5.20260921.0-alpha",
         "minimatch": "^10.2.6",
         "motion": "^12.43.0",
         "playwright": "^1.62.1",

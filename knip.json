@@ -4,6 +4,7 @@
 		"container/native-runtime.ts",
 		"auxiliary/*/index.ts",
 		"scripts/*.ts",
+		"test/agent-runtime/fixture.ts",
 		"drizzle-d1.config.ts",
 		"drizzle-do-agent.config.ts",
 		"src/lib/fouc-prevention.js",

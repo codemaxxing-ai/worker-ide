@@ -67,24 +67,25 @@ The auth schema includes `worker/migrations/d1-auth/0024_session-authentication.
 
 ## Scripts
 
-| Script             | Description                                                            |
-| ------------------ | ---------------------------------------------------------------------- |
-| `dev`              | Vite dev server with Cloudflare Worker (port 3000)                     |
-| `build`            | Production build via Turborepo                                         |
-| `deploy`           | Build and deploy to Cloudflare                                         |
-| `typecheck`        | Run all TypeScript type checks (app, node, worker, scripts)            |
-| `lint`             | Check formatting (Prettier) and lint (ESLint)                          |
-| `format`           | Auto-fix formatting and lint issues                                    |
-| `test:unit`        | Unit tests (Node env)                                                  |
-| `test:worker`      | Worker tests (workerd env via `@cloudflare/vitest-pool-workers`)       |
-| `test:react`       | React component tests (jsdom env)                                      |
-| `test:e2e`         | Build editor and run Playwright tests in Chromium, Firefox and WebKit  |
-| `test:integration` | Integration tests against a live server (`TEST_BASE_URL`)              |
-| `test:storybook`   | Storybook component tests                                              |
-| `knip`             | Check for unused dependencies and files                                |
-| `knip:audit`       | Report unused exports and types ([audit guidance](docs/knip-audit.md)) |
-| `storybook`        | Storybook dev server (port 6006)                                       |
-| `cf-typegen`       | Generate worker type bindings (`worker-configuration.d.ts`)            |
+| Script             | Description                                                             |
+| ------------------ | ----------------------------------------------------------------------- |
+| `dev`              | Vite dev server with Cloudflare Worker (port 3000)                      |
+| `build`            | Production build via Turborepo                                          |
+| `deploy`           | Build and deploy to Cloudflare                                          |
+| `typecheck`        | Run all TypeScript type checks (app, node, worker, scripts)             |
+| `lint`             | Check formatting (Prettier) and lint (ESLint)                           |
+| `format`           | Auto-fix formatting and lint issues                                     |
+| `test:unit`        | Unit tests (Node env)                                                   |
+| `test:worker`      | Worker tests (workerd env via `@cloudflare/vitest-pool-workers`)        |
+| `test:agent`       | Production-build agent lifecycle tests with the current Workers runtime |
+| `test:react`       | React component tests (jsdom env)                                       |
+| `test:e2e`         | Build editor and run Playwright tests in Chromium, Firefox and WebKit   |
+| `test:integration` | Integration tests against a live server (`TEST_BASE_URL`)               |
+| `test:storybook`   | Storybook component tests                                               |
+| `knip`             | Check for unused dependencies and files                                 |
+| `knip:audit`       | Report unused exports and types ([audit guidance](docs/knip-audit.md))  |
+| `storybook`        | Storybook dev server (port 6006)                                        |
+| `cf-typegen`       | Generate worker type bindings (`worker-configuration.d.ts`)             |
 
 ## Path Aliases
 
@@ -109,9 +110,11 @@ Dependency and configuration updates hold one durable queue position through the
 
 Successful `user_question` calls pause the agent turn until the user replies. Unanswered questions return when a session is reopened. Tool metadata and errors are persisted per session, including background sessions, so todo lists and other tool results remain available after completion and reload.
 
-Tool calls can be expanded while their arguments are streaming, including dynamically registered tools. Directory listing accepts both `ls` and `list`. Agent model streams fail after two minutes of provider inactivity; tool execution keeps its separate runtime deadline.
+Tool calls can be expanded while their arguments are streaming, including dynamically registered tools. Directory listing accepts both `ls` and `list`. Agent model requests and streams fail after two minutes without a response or provider activity; tool execution keeps its separate runtime deadline.
 
 Stopping aborts inference and cancels queued turns without waiting for workspace execution cancellation or empty-snapshot cleanup. Workspace mutations retain FIFO ownership through synchronization. Complete tool inputs update the displayed arguments even when a provider omits incremental argument events.
+
+Think's durable submission status determines the session's terminal status. A new session facet receives existing conversation history before its first submission, including reverted conversations. The `test:agent` CI suite exercises the production bundle, parent/session RPC, scheduling, provider parsing, and file tools with controlled AI responses; it covers completion, cancellation, stalled requests, failure recovery, and conversation continuity without Docker or live AI credentials.
 
 Each changed file revision reaches the review UI, and tool execution and input-validation errors are reported at the end of their model step.
 

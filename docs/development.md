@@ -28,6 +28,7 @@ The editor runs at `https://localhost:3000`; signed previews use `*.content.loca
 | --------------------------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `mise exec -- bun run test:unit --run`        | Node                                                                  | Installed dependencies                                                      |
 | `mise exec -- bun run test:worker --run`      | workerd with controlled runtime doubles                               | Local sockets and access to Wrangler's log directory; no Docker             |
+| `mise exec -- bun run test:agent`             | Production Worker bundle in the current Miniflare runtime             | Local sockets; builds automatically; no Docker or live AI credentials       |
 | `mise exec -- bun run test:react --run`       | jsdom                                                                 | Installed dependencies                                                      |
 | `mise exec -- bun run test:integration --run` | Live application server and real Computer runtimes                    | Docker, migrated local database, and a running dev server                   |
 | `mise exec -- bun run test:e2e`               | Built editor in Playwright Chromium, Firefox, and WebKit; live Worker | Docker and installed browsers; starts a local server when needed outside CI |
@@ -46,9 +47,11 @@ mise exec -- bun run test:worker --run worker/lib/computer-exec.test.ts
 mise exec -- bun run test:react --run src/features/agent/components/agent-panel/messages.test.tsx
 ```
 
+The older Worker Vitest pool cannot execute the session facets used in production. `test:agent` runs them through the production bundle with the current Miniflare runtime and deployment compatibility flags. Its test-only entrypoint supplies a controlled Workers AI transport and disables the external documentation connection; the application agent classes, scheduler, provider adapter, and workspace tools run unchanged. Keep this suite in CI when changing the agent SDK, session state, cancellation, or conversation persistence.
+
 ## Required checks
 
-[AGENTS.md](../AGENTS.md#definition-of-done) defines the repository's completion requirements. Run formatting, typechecking, Knip, and all six test commands above. Add appropriate regression coverage for significant behavior changes and check the README when changing setup or public behavior.
+[AGENTS.md](../AGENTS.md#definition-of-done) defines the repository's completion requirements. Run formatting, typechecking, Knip, and all test commands above. Add appropriate regression coverage for significant behavior changes and check the README when changing setup or public behavior.
 
 ```bash
 mise exec -- bun run format

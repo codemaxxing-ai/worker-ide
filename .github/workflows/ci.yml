@@ -207,6 +207,24 @@ jobs:
       - name: Run Worker tests
         run: bun run test:worker --run
 
+  test-agent:
+    name: Agent Lifecycle Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup runtimes
+        uses: jdx/mise-action@v4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run production agent lifecycle tests
+        run: bun run test:agent
+
   test-react:
     name: React Tests
     runs-on: ubuntu-24.04

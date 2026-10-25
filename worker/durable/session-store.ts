@@ -139,7 +139,7 @@ export class AgentSessionStore {
 			toolMetadata: toolMetadata ? JSON.stringify(toolMetadata) : undefined,
 			toolErrors: toolErrors ? JSON.stringify(toolErrors) : undefined,
 			status: patch.status ?? existing.status,
-			errorMessage: patch.errorMessage ?? existing.errorMessage,
+			errorMessage: Object.hasOwn(patch, 'errorMessage') ? patch.errorMessage : existing.errorMessage,
 			stopRequested: (patch.stopRequested ?? existing.stopRequested) ? 1 : 0,
 		});
 	}
