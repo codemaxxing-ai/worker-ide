@@ -111,6 +111,8 @@ Successful `user_question` calls pause the agent turn until the user replies. Un
 
 Tool calls can be expanded while their arguments are streaming, including dynamically registered tools. Directory listing accepts both `ls` and `list`. Agent model streams fail after two minutes of provider inactivity; tool execution keeps its separate runtime deadline.
 
+Stopping aborts inference and cancels queued turns without waiting for workspace execution cancellation or empty-snapshot cleanup. Workspace mutations retain FIFO ownership through synchronization. Complete tool inputs update the displayed arguments even when a provider omits incremental argument events.
+
 Each changed file revision reaches the review UI, and tool execution and input-validation errors are reported at the end of their model step.
 
 See [Computer workspace](docs/computer-workspace.md) for access patterns, execution limits, review, and recovery rules. See [development and verification](docs/development.md) for Docker setup, test commands, and generated artifacts.

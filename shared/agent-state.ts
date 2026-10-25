@@ -112,6 +112,7 @@ export interface ToolCallStartEvent {
 	type: 'tool-call-start';
 	toolCallId: string;
 	toolName: string;
+	arguments?: Record<string, unknown>;
 }
 export interface ToolCallArgumentsDeltaEvent {
 	type: 'tool-call-args-delta';

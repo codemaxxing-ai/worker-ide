@@ -14,6 +14,17 @@ class ControlledShell extends ShellWorker {
 }
 
 describe('Computer execution lifecycle without Docker', () => {
+	it('ignores delayed cancellation from an earlier turn in the same session', async () => {
+		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
+			await project.beginComputerSessionTurn('session', 'old-turn', 'code');
+			await project.beginComputerSessionTurn('session', 'new-turn', 'code');
+			await project.cancelComputerSessionExecutions('session', 'old-turn');
+			expect(state.storage.kv.get('computer-session-cancelled:session')).toBeUndefined();
+			await project.cancelComputerSessionExecutions('session', 'new-turn');
+			expect(state.storage.kv.get('computer-session-cancelled:session')).toBe(true);
+		});
+	});
+
 	it.each(['shell', 'container'])('restores managed configuration before releasing a %s execution', async (backend) => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
 			const shell = new ControlledShell(createExecutionContext(), { HOST: { getWorkspace: () => project.__getWorkspaceStub() } });

@@ -6,6 +6,7 @@ import { AGENT_SYSTEM_PROMPT, DEFAULT_AI_MODEL, MCP_SERVERS } from '@shared/cons
 import { aiModelSchema } from '@shared/validation';
 
 import { AgentRunner } from './agent-runner';
+import { clearSnapshotFromMessages } from './session-history';
 import { filesystemNamespace } from '../lib/durable-object-namespaces';
 import { runWithProjectStub } from '../lib/project-fs';
 import { toDurableObjectId } from '../lib/project-id';
@@ -197,6 +198,16 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 				events.push({ type: 'tool-call-args-delta', toolCallId: chunk.id, delta: chunk.delta });
 				break;
 			}
+			case 'tool-call': {
+				const input: unknown = chunk.input;
+				events.push({
+					type: 'tool-call-start',
+					toolCallId: chunk.toolCallId,
+					toolName: chunk.toolName,
+					arguments: input && typeof input === 'object' && !Array.isArray(input) ? Object.fromEntries(Object.entries(input)) : {},
+				});
+				break;
+			}
 			case 'tool-result': {
 				events.push({
 					type: 'tool-call-end',
@@ -221,14 +232,17 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 	}
 
 	override async onChatResponse(result: ChatResponseResult): Promise<void> {
+		const activeTurn = this.state.activeTurn;
+		if (!activeTurn || activeTurn.submissionId !== result.requestId) return;
 		const remainingEvents = drainEventQueue(this.eventQueue);
 		await this.saveSnapshotChanges(remainingEvents);
 		await this.forwardEvents(remainingEvents);
 		const history = uiMessagesToChatMessages(await this.getMessages());
+		if (this.state.activeTurn?.submissionId !== activeTurn.submissionId) return;
 		this.setState({
 			...this.state,
 			pendingCompletion: {
-				submissionId: this.requireActiveTurn().submissionId,
+				submissionId: activeTurn.submissionId,
 				history,
 				status: result.status,
 				error: result.error,
@@ -286,26 +300,31 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 	}
 
 	async cancelSubmissionById(submissionId: string): Promise<void> {
-		try {
-			await this.cancelWorkspaceCommands();
-		} finally {
-			await this.cancelSubmission(submissionId, 'Cancelled by user');
-		}
+		await this.cancelSubmission(submissionId, 'Cancelled by user');
 	}
 
 	async cancelActiveSubmissions(): Promise<void> {
-		try {
-			await this.cancelWorkspaceCommands();
-		} finally {
-			const submissions = await this.listSubmissions({ status: ['pending', 'running'] });
-			for (const submission of submissions) await this.cancelSubmission(submission.submissionId, 'Cancelled by user');
+		const submissions = await this.listSubmissions({ status: ['pending', 'running'] });
+		const runningSubmission = submissions.find((submission) => submission.status === 'running');
+		if (runningSubmission) {
+			// Workspace cancellation must not delay aborting inference or publishing its terminal state.
+			this.ctx.waitUntil(
+				this.cancelWorkspaceCommands(runningSubmission.submissionId).catch((error) => {
+					console.error('[SessionTurnAgent] Failed to cancel workspace commands:', error);
+				}),
+			);
 		}
+		// Remove pending work first so stopping the active turn cannot start the next one.
+		for (const submission of submissions.filter((submission) => submission.status === 'pending')) {
+			await this.cancelSubmission(submission.submissionId, 'Cancelled by user');
+		}
+		if (runningSubmission) await this.cancelSubmission(runningSubmission.submissionId, 'Cancelled by user');
 	}
 
-	private async cancelWorkspaceCommands(): Promise<void> {
+	private async cancelWorkspaceCommands(submissionId: string): Promise<void> {
 		const configuration = this.requireConfiguration();
 		const identifier = toDurableObjectId(filesystemNamespace, configuration.projectId);
-		await filesystemNamespace.get(identifier).cancelComputerSessionExecutions(configuration.sessionId);
+		await filesystemNamespace.get(identifier).cancelComputerSessionExecutions(configuration.sessionId, submissionId);
 	}
 
 	async receiveSubAgentEvents(events: StreamEvent[]): Promise<void> {
@@ -387,12 +406,9 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		if (!completion) return;
 
 		const snapshot = this.getSnapshotContext();
-		if (snapshot && snapshot.savedPaths.size === 0) {
-			const configuration = this.requireConfiguration();
-			const filesystemId = toDurableObjectId(filesystemNamespace, configuration.projectId);
-			const filesystemStub = filesystemNamespace.get(filesystemId);
-			await runWithProjectStub(filesystemStub, () => deleteDirectoryRecursive(snapshot.directory), '/project', configuration.sessionId);
-			await this.forwardEvents([{ type: 'snapshot-deleted', id: snapshot.id }]);
+		const emptySnapshot = snapshot?.savedPaths.size === 0 ? snapshot : undefined;
+		if (emptySnapshot) {
+			await this.forwardEvents([{ type: 'snapshot-deleted', id: emptySnapshot.id }]);
 		}
 
 		const submissions = await this.listSubmissions({ status: ['pending', 'running'] });
@@ -407,7 +423,7 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		await parent.completeThinkTurn(
 			configuration.sessionId,
 			completion.submissionId,
-			completion.history,
+			emptySnapshot ? clearSnapshotFromMessages(completion.history, emptySnapshot.id) : completion.history,
 			completion.status,
 			completion.error,
 			activeSubmissions,
@@ -419,6 +435,26 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 			activeSnapshot: undefined,
 			pendingCompletion: undefined,
 		});
+		if (emptySnapshot) {
+			// An execution can retain the mutation queue while it synchronizes. Cleanup
+			// must not keep the session running behind that queue.
+			this.ctx.waitUntil(
+				this.deleteEmptySnapshot(emptySnapshot).catch((error) => {
+					console.error('[SessionTurnAgent] Failed to clean up empty snapshot:', error);
+				}),
+			);
+		}
+	}
+
+	private async deleteEmptySnapshot(snapshot: SnapshotContext): Promise<void> {
+		const configuration = this.requireConfiguration();
+		const filesystemId = toDurableObjectId(filesystemNamespace, configuration.projectId);
+		await runWithProjectStub(
+			filesystemNamespace.get(filesystemId),
+			() => deleteDirectoryRecursive(snapshot.directory),
+			'/project',
+			configuration.sessionId,
+		);
 	}
 
 	private async reconcileActiveSubmission(): Promise<void> {

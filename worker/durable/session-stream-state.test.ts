@@ -24,6 +24,7 @@ function createHarness() {
 		doomLoopMessage: undefined,
 		subAgentActivities: {},
 	};
+	const recordToolCall = vi.fn();
 	const stream = new SessionStreamState({
 		getCurrentSession: () => current,
 		updateSessionState: (_sessionId, patch) => {
@@ -32,14 +33,42 @@ function createHarness() {
 		readSession: async () => {},
 		getSessionInitiatorUserId: () => {},
 		sendPushNotification: vi.fn(),
-		recordToolCall: vi.fn(),
+		recordToolCall,
 		recordTurnComplete: vi.fn(),
 		recordUsage: vi.fn(),
 	});
-	return { stream, getCurrent: () => current };
+	return { stream, getCurrent: () => current, recordToolCall };
 }
 
 describe('streamed tool arguments', () => {
+	it.each([false, true])('uses complete arguments without duplicating the tool (input start: %s)', async (started) => {
+		const { stream, getCurrent, recordToolCall } = createHarness();
+		if (started) {
+			await stream.handleEvent('session', { type: 'tool-call-start', toolCallId: 'write-1', toolName: 'write' });
+			await stream.handleEvent('session', { type: 'tool-call-args-delta', toolCallId: 'write-1', delta: '{"path":"/old' });
+		}
+		await stream.handleEvent('session', {
+			type: 'tool-call-start',
+			toolCallId: 'write-1',
+			toolName: 'write',
+			arguments: { path: '/app.tsx', content: 'hello' },
+		});
+		expect(getCurrent().messages[0]?.parts).toEqual([
+			{ type: 'tool-call', toolCallId: 'write-1', toolName: 'write', arguments: { path: '/app.tsx', content: 'hello' } },
+		]);
+		expect(recordToolCall).toHaveBeenCalledOnce();
+	});
+
+	it('continues updating tool arguments after another user message is queued', async () => {
+		const { stream, getCurrent } = createHarness();
+		await stream.handleEvent('session', { type: 'tool-call-start', toolCallId: 'write-1', toolName: 'write' });
+		await stream.handleEvent('session', { type: 'tool-call-args-delta', toolCallId: 'write-1', delta: '{"path":"/' });
+		getCurrent().messages.push({ id: 'queued', role: 'user', parts: [{ type: 'text', content: 'Next task' }], createdAt: 1 });
+		await stream.handleEvent('session', { type: 'tool-call-args-delta', toolCallId: 'write-1', delta: 'app.tsx"}' });
+		expect(getCurrent().messages[0]?.parts[0]).toMatchObject({ arguments: { path: '/app.tsx' } });
+		expect(getCurrent().messages[1]?.id).toBe('queued');
+	});
+
 	it('marks sub-agent result errors as failed activity', async () => {
 		const { stream, getCurrent } = createHarness();
 		await stream.handleEvent('session', {

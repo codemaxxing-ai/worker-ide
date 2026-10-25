@@ -697,7 +697,9 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 		await this.computer.runtime.killExec(identifier, { backend: record.backend, signal: 'SIGKILL' });
 	}
 
-	async cancelComputerSessionExecutions(sessionId: string): Promise<void> {
+	async cancelComputerSessionExecutions(sessionId: string, submissionId?: string): Promise<void> {
+		// A delayed cancellation RPC must not stop a newer turn in the same session.
+		if (submissionId && this.ctx.storage.kv.get(`computer-session-turn:${sessionId}`) !== submissionId) return;
 		this.ctx.storage.kv.put(`computer-session-cancelled:${sessionId}`, true);
 		for (const [key, record] of this.ctx.storage.kv.list<{ sessionId: string; backend: string; status: string }>({
 			prefix: 'computer-execution:',

@@ -59,6 +59,11 @@ function createHarness(messages: ChatMessage[] = []) {
 			calls.push('cancel-active');
 		}),
 	};
+	const sessionStore = {
+		read: vi.fn(async () => {}),
+		persistHistory: vi.fn(async (_sessionId: string, _history: ChatMessage[], _stopRequested?: boolean) => {}),
+		writeMetadata: vi.fn(),
+	};
 	const coordinator = new AgentTurnCoordinator({
 		getCurrentSession: () => current,
 		updateSessionState: (_sessionId, patch) => {
@@ -67,11 +72,7 @@ function createHarness(messages: ChatMessage[] = []) {
 		},
 		getConfiguredTurnAgent: async () => turnAgent,
 		getTurnAgent: async () => turnAgent,
-		getSessionStore: () => ({
-			read: async () => {},
-			persistHistory: async () => {},
-			writeMetadata: () => {},
-		}),
+		getSessionStore: () => sessionStore,
 		getReviewQueue: () => ({ syncSessionPendingChanges: () => {} }),
 		refreshReviewState: () => {},
 		refreshSessionsList: async () => {},
@@ -79,7 +80,7 @@ function createHarness(messages: ChatMessage[] = []) {
 		markCompletion: () => {},
 		pruneOldSessions: async () => {},
 	});
-	return { coordinator, currentSession: () => current, turnAgent, calls };
+	return { coordinator, currentSession: () => current, turnAgent, calls, sessionStore };
 }
 
 const turnConfiguration: TurnExecutionConfiguration = { mode: 'code', model: DEFAULT_AI_MODEL };
@@ -130,11 +131,46 @@ describe('agent turn coordination', () => {
 
 	it('marks a run as stopping before asking Think to cancel it', async () => {
 		const harness = createHarness();
+		harness.turnAgent.cancelActiveSubmissions.mockImplementation(async () => {
+			expect(harness.currentSession().stopRequested).toBe(true);
+			expect(harness.currentSession().statusText).toBe('Stopping...');
+		});
 		await harness.coordinator.abortRun('session-1');
 
-		expect(harness.currentSession().stopRequested).toBe(true);
-		expect(harness.currentSession().statusText).toBe('Stopping...');
-		expect(harness.calls).toEqual(['update-state', 'cancel-active']);
+		expect(harness.currentSession()).toMatchObject({ status: 'aborted', stopRequested: false, statusText: undefined });
+	});
+
+	it('persists the live messages when a stale parent has no active child submission', async () => {
+		const message = userMessage('first', 'committed');
+		const harness = createHarness([message]);
+		await harness.coordinator.abortRun('session-1');
+		expect(harness.sessionStore.persistHistory).toHaveBeenCalledWith('session-1', [message], false);
+		expect(harness.sessionStore.writeMetadata).toHaveBeenCalledWith('session-1', { status: 'aborted', stopRequested: false });
+		expect(harness.currentSession().historyVersion).toBe(1);
+	});
+
+	it('restores a retryable stop control when cancellation fails', async () => {
+		const harness = createHarness();
+		harness.turnAgent.cancelActiveSubmissions.mockRejectedValueOnce(new Error('Disconnected'));
+		await expect(harness.coordinator.abortRun('session-1')).rejects.toThrow('Disconnected');
+		expect(harness.currentSession()).toMatchObject({ status: 'running', stopRequested: false, statusText: 'Working...' });
+		expect(harness.sessionStore.persistHistory).not.toHaveBeenCalled();
+	});
+
+	it('keeps a newer turn running when it starts before cancellation returns', async () => {
+		const harness = createHarness();
+		harness.turnAgent.cancelActiveSubmissions.mockImplementation(async () => {
+			await harness.coordinator.submitMessage(
+				'session-1',
+				userMessage('new', 'committed'),
+				DEFAULT_AI_MODEL,
+				turnConfiguration,
+				harness.currentSession(),
+			);
+		});
+		await harness.coordinator.abortRun('session-1');
+		expect(harness.currentSession().status).toBe('running');
+		expect(harness.sessionStore.persistHistory).not.toHaveBeenCalled();
 	});
 
 	it('replaces retry history before submitting the restarted turn', async () => {

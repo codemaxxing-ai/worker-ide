@@ -151,12 +151,13 @@ export class SessionStreamState {
 			}
 			case 'tool-call-start': {
 				this.flushContentDelta(sessionId);
+				if (this.updateToolCallArguments(sessionId, event.toolCallId, event.arguments)) break;
 				const messages = this.appendToStreamingAssistantMessage(sessionId, (parts) => {
 					parts.push({
 						type: 'tool-call',
 						toolCallId: event.toolCallId,
 						toolName: event.toolName,
-						arguments: {},
+						arguments: event.arguments ?? {},
 					});
 				});
 				if (messages) {
@@ -177,24 +178,7 @@ export class SessionStreamState {
 				try {
 					const { value: parsed } = await parsePartialJson(buffer);
 					if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-						const current = this.host.getCurrentSession();
-						if (!current) {
-							break;
-						}
-						const messages = [...current.messages];
-						const last = messages.at(-1);
-						if (last?.role === 'assistant') {
-							const parts = [...last.parts];
-							const partIndex = parts.findLastIndex((part) => part.type === 'tool-call' && part.toolCallId === event.toolCallId);
-							if (partIndex !== -1 && parts[partIndex]?.type === 'tool-call') {
-								parts[partIndex] = {
-									...parts[partIndex],
-									arguments: Object.fromEntries(Object.entries(parsed)),
-								};
-								messages[messages.length - 1] = { ...last, parts };
-								this.host.updateSessionState(sessionId, { messages });
-							}
-						}
+						this.updateToolCallArguments(sessionId, event.toolCallId, Object.fromEntries(Object.entries(parsed)));
 					}
 				} catch {
 					// Wait for enough input to form an object.
@@ -308,6 +292,26 @@ export class SessionStreamState {
 				break;
 			}
 		}
+	}
+
+	private updateToolCallArguments(sessionId: string, toolCallId: string, argumentsValue?: Record<string, unknown>): boolean {
+		const current = this.host.getCurrentSession();
+		if (!current || current.sessionId !== sessionId) return false;
+		for (let messageIndex = current.messages.length - 1; messageIndex >= 0; messageIndex--) {
+			const message = current.messages[messageIndex];
+			if (message.role !== 'assistant') continue;
+			const partIndex = message.parts.findLastIndex((part) => part.type === 'tool-call' && part.toolCallId === toolCallId);
+			const part = message.parts[partIndex];
+			if (part?.type !== 'tool-call') continue;
+			if (argumentsValue === undefined) return true;
+			const parts = [...message.parts];
+			parts[partIndex] = { ...part, arguments: argumentsValue };
+			const messages = [...current.messages];
+			messages[messageIndex] = { ...message, parts };
+			this.host.updateSessionState(sessionId, { messages });
+			return true;
+		}
+		return false;
 	}
 
 	disposeSession(sessionId: string): void {

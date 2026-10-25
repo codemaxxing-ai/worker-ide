@@ -127,9 +127,42 @@ export class AgentTurnCoordinator {
 	}
 
 	async abortRun(sessionId: string): Promise<void> {
+		const previous = this.dependencies.getCurrentSession();
 		this.dependencies.updateSessionState(sessionId, { stopRequested: true, statusText: 'Stopping...' });
-		const sessionAgent = await this.dependencies.getTurnAgent(sessionId);
-		await sessionAgent.cancelActiveSubmissions();
+		try {
+			const sessionAgent = await this.dependencies.getTurnAgent(sessionId);
+			await sessionAgent.cancelActiveSubmissions();
+		} catch (error) {
+			const current = this.dependencies.getCurrentSession();
+			if (current?.sessionId === sessionId && current.stopRequested) {
+				this.dependencies.updateSessionState(sessionId, { stopRequested: false, statusText: previous?.statusText });
+			}
+			throw error;
+		}
+		// An evicted or already-terminal child may have no active submissions left
+		// to emit a completion hook. Reconcile the parent's stale running state.
+		await this.withSessionMutationLock(sessionId, async () => {
+			const current = this.dependencies.getCurrentSession();
+			if (current?.sessionId !== sessionId || !current.stopRequested) return;
+			const sessionStore = this.dependencies.getSessionStore();
+			const persisted = await sessionStore.read(sessionId);
+			const latest = this.dependencies.getCurrentSession();
+			if (latest?.sessionId !== sessionId || !latest.stopRequested) return;
+			const history = [...new Map([...(persisted?.history ?? []), ...latest.messages].map((message) => [message.id, message])).values()];
+			await sessionStore.persistHistory(sessionId, history, false);
+			if (!this.dependencies.getCurrentSession()?.stopRequested) return;
+			sessionStore.writeMetadata(sessionId, { status: 'aborted', stopRequested: false });
+			this.dependencies.getReviewQueue().syncSessionPendingChanges(sessionId, latest.pendingChanges);
+			this.dependencies.refreshReviewState();
+			this.dependencies.updateSessionState(sessionId, {
+				status: 'aborted',
+				statusText: undefined,
+				stopRequested: false,
+				messages: [],
+				historyVersion: latest.historyVersion + 1,
+			});
+			await this.dependencies.refreshSessionsList();
+		});
 	}
 
 	beginThinkTurn(sessionId: string, submissionId: string): void {

@@ -108,9 +108,9 @@ export function createAdapter(modelId: string, context: WorkersAiContext): Langu
 		model,
 		middleware: {
 			specificationVersion: 'v3',
-			wrapStream: async ({ doStream }) => {
+			wrapStream: async ({ doStream, params: parameters }) => {
 				const result = await doStream();
-				return { ...result, stream: withStreamTimeout(result.stream, 120_000) };
+				return { ...result, stream: withStreamTimeout(result.stream, 120_000, parameters.abortSignal) };
 			},
 		},
 	});
