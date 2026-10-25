@@ -111,6 +111,24 @@ body,
 	overscroll-behavior-y: none;
 }
 
+/* Keep the installed window canvas black while body retains the page theme. */
+html {
+	background-color: #000;
+}
+
+/* Paint Android's gesture area above page content, including full-screen dialogs. */
+:root[data-platform='android']::after {
+	--system-bar-height: env(safe-area-max-inset-bottom, env(safe-area-inset-bottom, 0px));
+	content: '';
+	position: fixed;
+	inset-inline: 0;
+	bottom: calc(env(safe-area-inset-bottom, 0px) - var(--system-bar-height));
+	height: var(--system-bar-height);
+	z-index: 1000;
+	background-color: #000;
+	pointer-events: none;
+}
+
 /* Window Controls Overlay (PWA installed with display_override: window-controls-overlay) */
 @utility wco-titlebar {
 	-webkit-app-region: drag;

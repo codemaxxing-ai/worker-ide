@@ -17,14 +17,14 @@ export const appDocumentMetadata = {
 	socialImageType: 'image/png',
 	socialImageUrl: 'https://codemaxxing.app/meta/app-og.png',
 	socialImageWidth: 1200,
-	themeColor: '#f14602',
+	themeColor: '#000000',
 	title: meta.title,
 	twitterCard: 'summary_large_image',
 	viewport: 'width=device-width, initial-scale=1.0, viewport-fit=cover',
 } as const;
 
 export const appManifestMetadata = {
-	background_color: '#ffffff',
+	background_color: '#000000',
 	description: appDocumentMetadata.description,
 	display: 'standalone',
 	display_override: ['window-controls-overlay'],
