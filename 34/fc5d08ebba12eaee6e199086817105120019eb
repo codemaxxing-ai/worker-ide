@@ -1,0 +1,19 @@
+test/agent-runtime/lifecycle.test.ts
+  s_8946ecfd8d788f::t_70f109965e73c0 85-86,88-94,96,98,139-141,146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "34fc5d08ebba12eaee6e199086817105120019eb",
+  "prompts": {},
+  "sessions": {
+    "s_8946ecfd8d788f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1740c-73e4-7262-bed2-2431adff5ea0",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
