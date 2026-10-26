@@ -291,7 +291,7 @@ jobs:
 
       - name: Use the primary Ubuntu package mirror
         run: |
-          for apt_source_file in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
+          for apt_source_file in /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
             if [ -f "$apt_source_file" ]; then
               sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' "$apt_source_file"
             fi
@@ -484,7 +484,7 @@ jobs:
 
       - name: Use the primary Ubuntu package mirror
         run: |
-          for apt_source_file in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
+          for apt_source_file in /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
             if [ -f "$apt_source_file" ]; then
               sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' "$apt_source_file"
             fi
