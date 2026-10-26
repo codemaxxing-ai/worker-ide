@@ -90,7 +90,7 @@ async function summarizeContent(
 	const { output } = await generateText({
 		model,
 		messages: [{ role: 'user' as const, content: userMessage }],
-		system: systemPrompt,
+		instructions: systemPrompt,
 		maxOutputTokens: 4096,
 		output: summaryOutput,
 	});

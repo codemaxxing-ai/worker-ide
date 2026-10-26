@@ -2,6 +2,8 @@
 
 A browser-based full-stack development environment built on Cloudflare Workers. User projects are stored in Durable Object-backed filesystems with Git history backed by Cloudflare Artifacts, transformed on-the-fly with esbuild-wasm, and previewed with HMR. Includes an AI coding assistant powered by the Cloudflare Agents SDK and Workers AI.
 
+Model calls use `createAI` with AI SDK 7. The `agents-models` dependency is an npm alias for the official `agents@0.30.1` package, used only for its model provider; `agents@0.20.1` remains the session runtime because later releases remove the experimental session APIs this application uses. Gateway metadata, payload logging controls, session affinity, and provider timeouts are preserved.
+
 See the [contributor documentation](docs/index.md) for architecture, workspace patterns, development guidance, and design decisions.
 
 ## Architecture

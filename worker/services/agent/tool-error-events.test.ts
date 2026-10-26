@@ -1,5 +1,5 @@
 import { streamText, tool } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
@@ -15,7 +15,7 @@ describe('tool failures in step results', () => {
 		{ toolName: 'write', input: '{"path":42}' },
 		{ toolName: 'write', input: '{"path":"/package.json"}' },
 	])('finishes $toolName with $input exactly once', async ({ toolName, input }) => {
-		const model = new MockLanguageModelV3({
+		const model = new MockLanguageModelV4({
 			doStream: async () => ({
 				stream: new ReadableStream({
 					start(controller) {

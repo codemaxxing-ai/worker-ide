@@ -1,5 +1,5 @@
-import { generateText, stepCountIs, streamText, tool } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { generateText, isStepCount, streamText, tool } from 'ai';
+import { MockLanguageModelV4 } from 'ai/test';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
@@ -42,7 +42,7 @@ describe('session turn lifecycle', () => {
 			),
 		};
 		const input = { path: '/app.tsx', content: 'hello' };
-		const model = new MockLanguageModelV3({
+		const model = new MockLanguageModelV4({
 			doStream: async () => ({
 				stream: new ReadableStream({
 					start(controller) {
@@ -160,7 +160,7 @@ describe('session turn lifecycle', () => {
 		const sendEvent = createMockSendEvent();
 		const tools = await createServerTools(sendEvent, createMockContext(), [], 'code');
 		let modelCalls = 0;
-		const model = new MockLanguageModelV3({
+		const model = new MockLanguageModelV4({
 			doGenerate: async () => {
 				modelCalls++;
 				return {
@@ -182,7 +182,7 @@ describe('session turn lifecycle', () => {
 			},
 		});
 
-		const result = await generateText({ model, tools, prompt: 'Ask me to choose a color.', stopWhen: [stepCountIs(5), shouldWaitForUser] });
+		const result = await generateText({ model, tools, prompt: 'Ask me to choose a color.', stopWhen: [isStepCount(5), shouldWaitForUser] });
 
 		expect(modelCalls).toBe(invalidFirstCall ? 2 : 1);
 		expect(result.toolResults[0]?.toolName).toBe('user_question');

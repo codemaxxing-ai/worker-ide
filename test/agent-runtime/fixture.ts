@@ -93,13 +93,13 @@ const startedModelRequests = new Set<string>();
 export class FixtureAI extends WorkerEntrypoint {
 	async run(_model: string, rawInput: unknown) {
 		const input = inputSchema.parse(rawInput);
-		if (!input.stream) return { response: 'Lifecycle test' };
+		if (!input.stream) return Response.json({ response: 'Lifecycle test' });
 		const prompt = String(input.messages.findLast((message) => message.role === 'user')?.content);
 		startedModelRequests.add(prompt);
 		if (prompt === 'stall-start') await new Promise((resolve) => setTimeout(resolve, 60_000));
 		const finishedTool = input.messages.at(-1)?.role === 'tool';
 		let heartbeat: ReturnType<typeof setInterval> | undefined;
-		return new ReadableStream<Uint8Array>({
+		const stream = new ReadableStream<Uint8Array>({
 			start(controller) {
 				const send = (value: unknown) => controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(value)}\n\n`));
 				if (prompt === 'stall') {
@@ -192,6 +192,7 @@ export class FixtureAI extends WorkerEntrypoint {
 				return new Promise<void>(() => {});
 			},
 		});
+		return new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } });
 	}
 }
 

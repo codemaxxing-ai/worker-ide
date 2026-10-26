@@ -74,7 +74,7 @@ export async function generateSessionTitle(userMessage: string, context?: Sessio
 		const { output } = await generateText({
 			model,
 			messages: [{ role: 'user' as const, content: userMessage.slice(0, 500) }],
-			system: SYSTEM_PROMPT,
+			instructions: SYSTEM_PROMPT,
 			maxOutputTokens: 500,
 			output: titleOutput,
 		});

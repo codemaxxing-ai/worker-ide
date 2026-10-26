@@ -1,19 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 type ModelSettings = {
-	extraHeaders?: Record<string, string>;
+	headers?: Record<string, string>;
 	sessionAffinity?: string;
 };
 
-const { mockCreateWorkersAI, getLastModelSettings } = vi.hoisted(() => {
+const { mockCreateAI, getLastModelSettings } = vi.hoisted(() => {
 	let lastModelSettings: ModelSettings | undefined;
 
 	const modelFactory = vi.fn((modelId: string, settings?: ModelSettings) => {
 		lastModelSettings = settings;
 
 		return {
-			specificationVersion: 'v3',
-			provider: 'workers-ai',
+			specificationVersion: 'v4',
+			provider: 'cloudflare',
 			modelId,
 			doGenerate: vi.fn(),
 			doStream: vi.fn(),
@@ -22,7 +22,7 @@ const { mockCreateWorkersAI, getLastModelSettings } = vi.hoisted(() => {
 
 	return {
 		getLastModelSettings: (): ModelSettings => lastModelSettings ?? {},
-		mockCreateWorkersAI: vi.fn(() => modelFactory),
+		mockCreateAI: vi.fn(() => modelFactory),
 	};
 });
 
@@ -32,8 +32,8 @@ vi.mock('cloudflare:workers', () => ({
 	},
 }));
 
-vi.mock('workers-ai-provider', () => ({
-	createWorkersAI: mockCreateWorkersAI,
+vi.mock('agents-models/models/ai-sdk', () => ({
+	createAI: mockCreateAI,
 }));
 
 const { createAdapter } = await import('./adapter');
@@ -52,9 +52,15 @@ describe('createAdapter', () => {
 			userId: 'user-1',
 		});
 
+		expect(mockCreateAI).toHaveBeenCalledWith({
+			binding: expect.any(Object),
+			id: 'default',
+			metadata: { app: 'worker-ide', type: 'agent', project_id: 'project 1', org_id: 'org-1', user_id: 'user-1' },
+		});
+
 		expect(getLastModelSettings()).toMatchObject({
 			sessionAffinity: 'agent:project-1:session-1:cf-meta-llama-3-1-8b-instruct',
-			extraHeaders: {
+			headers: {
 				'cf-aig-collect-log-payload': 'false',
 			},
 		});

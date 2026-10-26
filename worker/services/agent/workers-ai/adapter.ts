@@ -1,9 +1,10 @@
+import { createAI } from 'agents-models/models/ai-sdk';
 import { wrapLanguageModel } from 'ai';
 import { env } from 'cloudflare:workers';
-import { createWorkersAI } from 'workers-ai-provider';
 
 import { withStreamStartTimeout, withStreamTimeout } from './stream-timeout';
 
+import type { WorkersAIModelId } from 'agents-models/models/ai-sdk';
 import type { LanguageModel } from 'ai';
 
 const MAX_AFFINITY_COMPONENT_LENGTH = 80;
@@ -77,28 +78,26 @@ function getSessionAffinity(modelId: string, context: WorkersAiContext): string 
 }
 
 /**
- * Create a Vercel AI SDK v6 language model for Workers AI.
+ * Create a Vercel AI SDK v7 language model for Workers AI.
  *
  * @param modelId - Workers AI model ID
  * @param context - Metadata context for AI Gateway tracking
  */
-export function createAdapter(modelId: string, context: WorkersAiContext): LanguageModel {
+export function createAdapter(modelId: WorkersAIModelId, context: WorkersAiContext): LanguageModel {
 	const sessionAffinity = getSessionAffinity(modelId, context);
 
-	const model = createWorkersAI({
+	const model = createAI({
 		binding: env.AI,
-		gateway: {
-			id: 'default',
-			metadata: {
-				app: 'worker-ide',
-				type: context.generationType,
-				project_id: context.projectId ?? '',
-				org_id: context.organizationId ?? '',
-				user_id: context.userId ?? '',
-			},
+		id: 'default',
+		metadata: {
+			app: 'worker-ide',
+			type: context.generationType,
+			project_id: context.projectId ?? '',
+			org_id: context.organizationId ?? '',
+			user_id: context.userId ?? '',
 		},
 	})(modelId, {
-		extraHeaders: {
+		headers: {
 			'cf-aig-collect-log-payload': 'false',
 		},
 		sessionAffinity,
@@ -107,7 +106,7 @@ export function createAdapter(modelId: string, context: WorkersAiContext): Langu
 	return wrapLanguageModel({
 		model,
 		middleware: {
-			specificationVersion: 'v3',
+			specificationVersion: 'v4',
 			wrapStream: async ({ doStream, params: parameters }) => {
 				const result = await withStreamStartTimeout(doStream, 120_000, parameters.abortSignal);
 				return { ...result, stream: withStreamTimeout(result.stream, 120_000, parameters.abortSignal) };

@@ -1,5 +1,5 @@
 import { streamText, tool, wrapLanguageModel } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
@@ -125,7 +125,7 @@ describe('provider stream inactivity', () => {
 		const abort = new AbortController();
 		const onAbort = vi.fn();
 		const execute = vi.fn(async () => 'saved');
-		const model = new MockLanguageModelV3({
+		const model = new MockLanguageModelV4({
 			doStream: async () => ({
 				stream: new ReadableStream({
 					start(controller) {
@@ -141,7 +141,7 @@ describe('provider stream inactivity', () => {
 			model: wrapLanguageModel({
 				model,
 				middleware: {
-					specificationVersion: 'v3',
+					specificationVersion: 'v4',
 					wrapStream: async ({ doStream, params: parameters }) => {
 						const response = await doStream();
 						return { ...response, stream: withStreamTimeout(response.stream, 120_000, parameters.abortSignal) };
@@ -162,7 +162,7 @@ describe('provider stream inactivity', () => {
 	});
 
 	it('allows a tool to run longer than the provider inactivity deadline', async () => {
-		const model = new MockLanguageModelV3({
+		const model = new MockLanguageModelV4({
 			doStream: async () => ({
 				stream: new ReadableStream({
 					start(controller) {
@@ -185,7 +185,7 @@ describe('provider stream inactivity', () => {
 			model: wrapLanguageModel({
 				model,
 				middleware: {
-					specificationVersion: 'v3',
+					specificationVersion: 'v4',
 					wrapStream: async ({ doStream }) => {
 						const response = await doStream();
 						return { ...response, stream: withStreamTimeout(response.stream, 20) };

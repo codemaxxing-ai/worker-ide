@@ -758,7 +758,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 			if (!definition.execute) throw new Error(`Computer tool ${name} is unavailable`);
 			const result: unknown = await definition.execute(
 				{ ...parameters, path: computerPath(parameters.path) },
-				{ toolCallId: crypto.randomUUID(), messages: [] },
+				{ toolCallId: crypto.randomUUID(), messages: [], context: undefined },
 			);
 			for (const path of await this.workspace._getAllPaths()) this.markTouched(sessionId, path);
 			return result;
