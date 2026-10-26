@@ -1,0 +1,27 @@
+README.md
+  s_8946ecfd8d788f::t_4397e465376435 117-118
+shared/constants/agent.ts
+  s_8946ecfd8d788f::t_ed683e5dd72b20 94,111,118-121,124
+test/integration/computer.integration.test.ts
+  s_8946ecfd8d788f::t_bcb9a6ecc01e7c 85-149
+worker/services/agent/protected-file-guard.ts
+  s_8946ecfd8d788f::t_da5db0c82bc06d 18
+worker/services/agent/tools/test-run.ts
+  s_8946ecfd8d788f::t_9d48d12611a229 30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "36d7c7a9a2dcbd4b75481c9ed8396fa2ee206e7e",
+  "prompts": {},
+  "sessions": {
+    "s_8946ecfd8d788f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1740c-73e4-7262-bed2-2431adff5ea0",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
