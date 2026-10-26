@@ -114,6 +114,8 @@ The agent manages project dependencies through `dependencies_list` and `dependen
 
 Dependency and configuration updates hold one durable queue position through their read, update, and regeneration steps. Agent file tools and Code Mode state helpers reject writes to managed configuration, including symlink targets. Shell and container commands preserve managed files through durable baselines; attempted changes are restored before the queue advances and reported as command failures. Ordinary source edits remain available for review.
 
+Project DOM tests run with Vitest in the container. Register `jsdom` or `happy-dom` through `dependencies_update`, select it with a `// @vitest-environment jsdom` (or `happy-dom`) directive in each DOM test file, and run `bun run test -- <test-file>` through `exec`. Run `bun install` first if the registered dependencies are not installed. The protected `vitest.config.ts` stays unchanged. The lightweight `test_run` tool provides a separate Worker harness with no DOM or Vitest configuration support.
+
 Successful `user_question` calls pause the agent turn until the user replies. Unanswered questions return when a session is reopened. Tool metadata and errors are persisted per session, including background sessions, so todo lists and other tool results remain available after completion and reload.
 
 Tool calls can be expanded while their arguments are streaming, including dynamically registered tools. Directory listing accepts both `ls` and `list`. Agent model requests and streams fail after two minutes without a response or provider activity; tool execution keeps its separate runtime deadline.

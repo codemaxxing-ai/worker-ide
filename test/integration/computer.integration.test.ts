@@ -82,6 +82,71 @@ describe('Computer live runtime', () => {
 		const synchronized = await file.json();
 		expect(synchronized.content).toBe('from container');
 	});
+
+	it('runs a React DOM test with a per-file environment while preserving managed Vitest configuration', async () => {
+		const api = hc<ApiRoutes>(`${BASE_URL}/p/${projectId}/api`, { headers: { Cookie: cookie } });
+		const runtime = hc<DevelopmentTestRoutes>(`${BASE_URL}/p/${projectId}/api`, { headers: { Cookie: cookie } });
+		const dependenciesResponse = await api.dependencies.$get({});
+		if (!dependenciesResponse.ok) await throwApiError(dependenciesResponse, 'Cannot read test dependencies');
+		const { dependencies } = await dependenciesResponse.json();
+		const update = await api.dependencies.$put({ json: { dependencies: { ...dependencies, jsdom: '26.1.0' } } });
+		if (!update.ok) await throwApiError(update, 'Cannot register the DOM test environment');
+		const original = await api.file.$get({ query: { path: '/vitest.config.ts' } });
+		if (!original.ok) await throwApiError(original, 'Cannot read managed Vitest configuration');
+		const before = await original.json();
+		for (const file of [
+			{
+				path: '/src/theme-toggle.tsx',
+				content: `import React, { useState } from 'react';
+export function ThemeToggle() {
+  const [dark, setDark] = useState(false);
+  return <button onClick={() => setDark(!dark)}>{dark ? 'Dark' : 'Light'}</button>;
+}
+`,
+			},
+			{
+				path: '/test/theme-toggle.test.tsx',
+				content: `// @vitest-environment jsdom
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { expect, it } from 'vitest';
+import { ThemeToggle } from '../src/theme-toggle';
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+it('switches the theme after a click', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<ThemeToggle />));
+    expect(container.textContent).toBe('Light');
+    await act(async () => container.querySelector('button')!.click());
+    expect(container.textContent).toBe('Dark');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+`,
+			},
+		]) {
+			const response = await api.file.$put({ json: file });
+			if (!response.ok) await throwApiError(response, `Cannot write ${file.path}`);
+		}
+		const response = await runtime.__test['computer-exec'].$post({
+			json: { backend: 'container', command: 'bun install --ignore-scripts && bun run test -- test/theme-toggle.test.tsx' },
+		});
+		if (!response.ok) await throwApiError(response, 'Cannot run the DOM test');
+		const data = await response.json();
+		expect(data.result.exitCode, `${data.result.stdout}\n${data.result.stderr}`).toBe(0);
+		expect(data.result).toMatchObject({ backend: 'container', status: 'completed', syncStatus: 'complete' });
+		expect(data.result.stdout).toContain('1 passed');
+		const restored = await api.file.$get({ query: { path: '/vitest.config.ts' } });
+		if (!restored.ok) await throwApiError(restored, 'Cannot read Vitest configuration after the test');
+		const after = await restored.json();
+		expect(after.content).toBe(before.content);
+	});
+
 	it.each([{ backend: 'shell' }, { backend: 'container' }] satisfies { backend: 'shell' | 'container' }[])(
 		'preserves managed configuration after a $backend command attempts to overwrite it',
 		async ({ backend }) => {

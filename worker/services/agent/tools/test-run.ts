@@ -27,6 +27,7 @@ Usage:
 - The test harness provides describe(), it(), and expect() globally — no imports needed in test files.
 - expect(value) supports: .toBe(), .toEqual(), .toBeTruthy(), .toBeFalsy(), .toBeUndefined(), .toBeNull(), .toContain(), .toThrow(), .toHaveLength(), .toBeGreaterThan(), .toBeLessThan(), .toMatch(), and .not for negation.
 - Tests run server-side in an isolated V8 sandbox (Cloudflare WorkerLoader), not in the browser.
+- This tool does not run Vitest, read vitest.config.ts, or provide a DOM or Vitest APIs such as vi.mock. For React/DOM or full Vitest tests, use exec with backend "container". Register missing packages through dependencies_update, add // @vitest-environment jsdom (or happy-dom) to each DOM test file, and run bun run test -- <test-file>. Install the registered dependencies with bun install first if needed. Leave the protected vitest.config.ts unchanged.
 - Each test file runs independently. Results include pass/fail counts and error details.
 
 Example test file (test/math.test.ts):
