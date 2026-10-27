@@ -149,7 +149,7 @@
 		"format": "prettier --write . && eslint --cache --format=stylish --fix .",
 		"test": "vitest",
 		"test:unit": "vitest --project unit",
-		"test:worker": "bun scripts/test-worker.ts",
+		"test:worker": "vitest --project worker --maxWorkers=1",
 		"test:agent": "bun run build && vitest run --config test/agent-runtime/vitest.config.ts",
 		"test:react": "vitest --project react",
 		"test:integration": "vitest run --config test/integration/vitest.config.ts",

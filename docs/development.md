@@ -44,7 +44,7 @@ Keep the compatibility date within the runtime versions supplied by the Cloudfla
 
 E2E builds the editor and serves its frontend files through a [browser fixture](../test/e2e/built-editor.ts) that preserves the live Worker's response policy. APIs, authentication, and hosted project runtimes remain live. This tests the production frontend without replacing the backend or security headers.
 
-Full Worker runs use [test-worker.ts](../scripts/test-worker.ts) to start fresh batches below workerd's heap limit. Large preview-runtime integrations and D1 fixture suites run in separate processes. Targeted runs and watch mode use Vitest directly through the same script:
+The Cloudflare Vitest plugin starts a fresh runtime for each test file, isolating storage and module state. Worker tests use one concurrent runtime to limit memory use, while a single Vitest process reuses transformed modules across files. Targeted runs and watch mode use the same command:
 
 ```bash
 mise exec -- bun run test:worker --run worker/lib/computer-exec.test.ts
@@ -90,7 +90,7 @@ docker build --platform linux/amd64 -f Dockerfile.computer -t worker-ide-compute
 
 On Linux, workerd's gateway and the rootless Docker daemon must share network access. CI keeps the bridge namespace attached to the daemon and runs the dev server and live tests in the daemon's network and mount namespaces while preserving the repository working directory. The mount namespace supplies RootlessKit's DNS resolver. CI explicitly preserves the runner's home, Docker connection, credentials, and test settings with `sudo --preserve-env=...`; `sudo-rs` ignores `sudo -E`. Preserve this arrangement when changing CI; otherwise containers may start but package installation or gateway traffic can fail.
 
-When live tests fail, check Docker availability, `/dev/fuse`, DNS from the daemon namespace, and the dev-server startup log. CI captures container state and logs on failure. A workerd heap failure in a full Worker run calls for checking batching, rather than starting Docker. See [Computer workspace](computer-workspace.md) for command deadlines, synchronization behavior, and recovery constraints.
+When live tests fail, check Docker availability, `/dev/fuse`, DNS from the daemon namespace, and the dev-server startup log. CI captures container state and logs on failure. For a workerd heap failure, check the failing fixture and its dependency graph; each Worker test file already has a fresh isolate. See [Computer workspace](computer-workspace.md) for command deadlines, synchronization behavior, and recovery constraints.
 
 ## Generated artifacts and deployment
 
