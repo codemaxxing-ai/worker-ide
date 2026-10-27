@@ -1,0 +1,57 @@
+README.md
+  s_0986050cb13eaf::t_7538f014cfe81a 100-109
+playwright.config.ts
+  s_68483996b45c03::t_6ab22e6af682a5 15,29-39
+test/browser-launch.test.ts
+  s_68483996b45c03::t_5f745c447bc3e1 1-44
+test/browser-launch.ts
+  s_68483996b45c03::t_9544cc7922c13c 1-30
+test/e2e/helpers.ts
+  s_68483996b45c03::t_45650a3684e214 5-6,18-23,91-99,131,135-137,140
+test/e2e/runtime-handover.test.ts
+  s_0986050cb13eaf::t_221cc91daa793e 16,21-23
+test/e2e/test-fixtures.ts
+  s_0986050cb13eaf::t_de4f270f52c5ab 4-7,11-27,35
+test/e2e/vinext-preview.test.ts
+  s_68483996b45c03::t_82323ccf82bfdd 1,43-47,54-55
+test/integration/helpers.ts
+  s_0986050cb13eaf::t_a370115aaaedb4 1-2,4-5,82-87
+vite.config.ts
+  s_68483996b45c03::t_a6e39c37342150 318-320
+vitest.config.ts
+  s_68483996b45c03::t_e98b120686be8f 40
+worker/durable/computer-canonical.test.ts
+  s_0986050cb13eaf::t_fc7cddc9978a43 11-26
+worker/durable/project-filesystem.ts
+  s_0986050cb13eaf::t_a851afbff21d00 1058-1065
+worker/http/development-test-cleanup.test.ts
+  s_68483996b45c03::t_aebdffa82e7999 1-85
+worker/http/development-test-cleanup.ts
+  s_68483996b45c03::t_e633c39b7e79d0 1-48
+worker/http/development.ts
+  s_68483996b45c03::t_8bcd998b5a75fe 9,203
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c6e1577ed4525ec253631e0a138954f23014b405",
+  "prompts": {},
+  "sessions": {
+    "s_0986050cb13eaf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17ad2-5654-7ea1-bbc5-da323bd2e866",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    },
+    "s_68483996b45c03": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17aa5-f83e-7d91-86b1-cded27080774",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
