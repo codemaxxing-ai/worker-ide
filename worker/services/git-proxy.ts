@@ -69,8 +69,9 @@ export async function handleGitProxy(request: Request, environment: Env): Promis
 	let remote: string;
 	let artifactsToken: string;
 	try {
-		const repo = await environment.ARTIFACTS.get(repoNameForProject(projectId));
-		remote = repo.remote;
+		using repo = await environment.ARTIFACTS.get(repoNameForProject(projectId));
+		const metadata = await repo.info();
+		remote = metadata.remote;
 		const minted = await repo.createToken(scope, 300);
 		artifactsToken = minted.plaintext;
 	} catch {

@@ -8,7 +8,6 @@
  */
 import * as esbuild from 'esbuild-wasm';
 
-// @ts-expect-error -- WASM module import resolved to WebAssembly.Module by Cloudflare at deploy time
 import esbuildWasm from '../../../vendor/esbuild.wasm';
 
 let initialized = false;

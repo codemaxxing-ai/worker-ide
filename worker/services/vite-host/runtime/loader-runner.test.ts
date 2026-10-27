@@ -1,6 +1,8 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
+import { WORKERS_COMPATIBILITY_DATE } from '@shared/constants';
+
 import { getServerEntrypoint } from './loader-runner';
 
 describe('getServerEntrypoint', () => {
@@ -9,7 +11,7 @@ describe('getServerEntrypoint', () => {
 			loader: env.LOADER,
 			cacheKey: 'vite-host-test:trivial:v1',
 			moduleSet: {
-				compatibilityDate: '2025-01-01',
+				compatibilityDate: WORKERS_COMPATIBILITY_DATE,
 				mainModule: 'index.js',
 				modules: {
 					'index.js': `import { greeting } from "./greeting.js";

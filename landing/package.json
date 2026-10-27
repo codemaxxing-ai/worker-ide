@@ -45,6 +45,7 @@
 		"wrangler": "^4.134.0"
 	},
 	"overrides": {
+		"workerd": "1.20261027.1",
 		"@cloudflare/vite-plugin": "1.55.0"
 	}
 }

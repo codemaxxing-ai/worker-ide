@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'scripts/**'
+      - 'patches/**'
       - 'wrangler.jsonc'
       - 'Dockerfile.computer'
       - '.dockerignore'
@@ -29,6 +30,7 @@ on:
     branches: [main]
     paths:
       - 'scripts/**'
+      - 'patches/**'
       - 'wrangler.jsonc'
       - 'Dockerfile.computer'
       - '.dockerignore'

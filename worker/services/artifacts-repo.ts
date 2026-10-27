@@ -29,11 +29,15 @@ function tokenSecret(token: string): string {
  * Return a handle to the project's Artifacts repo, creating it (with default
  * branch `main`) if it does not yet exist.
  */
-export async function ensureArtifactsRepo(environment: Env, projectId: string): Promise<{ name: string; remote: string }> {
+export async function ensureArtifactsRepo(
+	environment: Pick<Env, 'ARTIFACTS'>,
+	projectId: string,
+): Promise<{ name: string; remote: string }> {
 	const name = repoNameForProject(projectId);
 	try {
-		const repo = await environment.ARTIFACTS.get(name);
-		return { name: repo.name, remote: repo.remote };
+		using repo = await environment.ARTIFACTS.get(name);
+		const metadata = await repo.info();
+		return { name: metadata.name, remote: metadata.remote };
 	} catch {
 		// The repo does not exist (or get is momentarily unavailable). Try to
 		// create it; if creation races/fails because it now exists, re-get.
@@ -42,8 +46,9 @@ export async function ensureArtifactsRepo(environment: Env, projectId: string): 
 			return { name: created.name, remote: created.remote };
 		} catch (createError) {
 			try {
-				const repo = await environment.ARTIFACTS.get(name);
-				return { name: repo.name, remote: repo.remote };
+				using repo = await environment.ARTIFACTS.get(name);
+				const metadata = await repo.info();
+				return { name: metadata.name, remote: metadata.remote };
 			} catch {
 				throw createError;
 			}
@@ -56,12 +61,12 @@ export async function ensureArtifactsRepo(environment: Env, projectId: string): 
  * secret (suitable for Git Basic auth) and its ISO 8601 expiry.
  */
 export async function mintArtifactsToken(
-	environment: Env,
+	environment: Pick<Env, 'ARTIFACTS'>,
 	projectId: string,
 	scope: 'read' | 'write',
 	ttlSeconds = 300,
 ): Promise<{ secret: string; expiresAt: string }> {
-	const repo = await environment.ARTIFACTS.get(repoNameForProject(projectId));
+	using repo = await environment.ARTIFACTS.get(repoNameForProject(projectId));
 	const token = await repo.createToken(scope, ttlSeconds);
 	return { secret: tokenSecret(token.plaintext), expiresAt: token.expiresAt };
 }

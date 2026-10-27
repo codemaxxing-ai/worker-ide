@@ -17,17 +17,12 @@ const noopSpan: TracingSpan = {
 };
 
 /**
- * Fallback tracing handle for execution contexts where the module-level
- * `cloudflare:workers` `tracing` global is not bound.
+ * Explicit tracing handle for execution contexts that supply `ctx.tracing`.
  *
- * The global is only active inside "handler" invocations (fetch, scheduled,
- * queue). An RPC method on a `WorkerEntrypoint` (e.g. the `VITE_HOST.build`
- * call the preview Durable Object makes into the `vite-host` worker) is not a
- * handler invocation, so `tracing` is `undefined` there and every `withSpan`
- * would silently drop to a no-op — the whole ~30s build became an untraced
- * black box. An RPC entrypoint calls {@link runWithTracing} with its
- * `ctx.tracing` handle so nested `withSpan` calls deep in the build still
- * record spans and nest correctly under the invocation.
+ * Older runtimes leave the global unbound in WorkerEntrypoint RPC methods,
+ * including `VITE_HOST.build`. Passing `ctx.tracing` to {@link runWithTracing}
+ * lets nested build spans record under that invocation. The explicit handle
+ * also takes precedence when newer runtimes expose a global tracing handle.
  */
 const tracingContext = new AsyncLocalStorage<Tracing | undefined>();
 
@@ -44,9 +39,9 @@ export function runWithTracing<R>(handle: Tracing | undefined, function_: () => 
 	return tracingContext.run(handle, function_);
 }
 
-/** The active tracing handle: the global when bound, else the context fallback. */
+/** Prefer an explicitly supplied handle over the runtime's global handle. */
 function activeTracing(): Tracing | undefined {
-	return tracing ?? tracingContext.getStore();
+	return tracingContext.getStore() ?? tracing;
 }
 
 function applyAttributes(span: TracingSpan, attributes?: SpanAttributes): void {

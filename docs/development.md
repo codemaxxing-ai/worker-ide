@@ -38,7 +38,11 @@ Install the browser matrix with `mise exec -- bunx playwright install chromium f
 
 Integration tests target `TEST_BASE_URL`, defaulting to `https://localhost:3000`, and do not start a server. Node test clients trust the generated local certificate while remote targets keep normal TLS verification. Playwright accepts local test certificates and starts a fresh server locally unless `TEST_BASE_URL` explicitly selects an existing server. CI expects an already-running server. E2E uses one worker locally and in CI to avoid competing native Docker setup. These suites create and clean up test projects through development-only helpers; point them at a local or isolated test instance.
 
-Keep `containers_pid_namespace` enabled in `wrangler.jsonc`. Each container needs its own process namespace so destruction also terminates native preview servers and command subprocesses. This is required for CI's rootless Docker without cgroups; sharing the host namespace leaves surviving children that block container teardown. The live Computer integration suite checks that computerd runs as PID 1 and that project cleanup completes.
+Keep the Workers compatibility date at `2026-04-01` or later so containers use private PID namespaces by default. Each container needs its own process namespace so destruction also terminates native preview servers and command subprocesses. This is required for CI's rootless Docker without cgroups; sharing the host namespace leaves surviving children that block container teardown. The live Computer integration suite checks that computerd runs as PID 1 and that project cleanup completes.
+
+The `workerd` package override pins the local runtime to a release that supports the configured compatibility date. Keep that pin current when advancing the date so preview isolates and Worker tests exercise the same runtime behavior.
+
+The Bun patch for `@cloudflare/vitest-pool-workers` keeps the Vitest 3 adapter compatible with that runtime: it reserves the `connect` handler and explicitly requests ArrayBuffer frames for the test transport. Remove the patch when upgrading to a test adapter that includes these fixes.
 
 E2E builds the editor and serves its frontend files through a [browser fixture](../test/e2e/built-editor.ts) that preserves the live Worker's response policy. APIs, authentication, and hosted project runtimes remain live. This tests the production frontend without replacing the backend or security headers.
 

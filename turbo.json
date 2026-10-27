@@ -52,5 +52,13 @@
 			"cache": false
 		}
 	},
-	"globalDependencies": ["mise.toml", ".nvmrc", "raw-minified.d.ts", "tsconfig*.json", "wrangler.jsonc", "auxiliary/*/wrangler.jsonc"]
+	"globalDependencies": [
+		"mise.toml",
+		".nvmrc",
+		"raw-minified.d.ts",
+		"tsconfig*.json",
+		"wrangler.jsonc",
+		"auxiliary/*/wrangler.jsonc",
+		"patches/**"
+	]
 }

@@ -8,6 +8,8 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
+import { WORKERS_COMPATIBILITY_DATE } from '@shared/constants';
+
 import { routeAppRequest } from './app-runtime';
 import { getServerEntrypoint, serverModulesFromOutput } from './loader-runner';
 import { buildVinext } from '../runtimes/vinext-build';
@@ -30,8 +32,8 @@ describe('vinext App Router render', () => {
 			loader: env.LOADER,
 			cacheKey: `vinext-render:${Date.now()}`,
 			moduleSet: {
-				compatibilityDate: '2025-06-01',
-				compatibilityFlags: ['nodejs_compat', 'enable_nodejs_fs_module'],
+				compatibilityDate: WORKERS_COMPATIBILITY_DATE,
+				compatibilityFlags: ['nodejs_compat'],
 				mainModule: build.mainModule,
 				modules: serverModulesFromOutput(build.serverModules),
 			},

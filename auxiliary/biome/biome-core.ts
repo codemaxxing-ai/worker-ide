@@ -90,7 +90,6 @@ async function ensureBiome(): Promise<boolean> {
 async function initBiome(): Promise<void> {
 	// In the Cloudflare Workers runtime, `.wasm` imports are pre-compiled at
 	// deploy time and resolve to a WebAssembly.Module.
-	// @ts-expect-error -- WASM module import resolved to WebAssembly.Module by Cloudflare at deploy time
 	const { default: biomeWasm } = await import('../../vendor/biome_wasm_bg.wasm');
 	const wasmModule = await import('@biomejs/wasm-web');
 	await wasmModule.default({ module_or_path: biomeWasm });

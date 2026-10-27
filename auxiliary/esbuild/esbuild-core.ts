@@ -4,7 +4,6 @@ import { BundleDependencyError } from '@shared/bundler-types';
 import { toAbsolutePreviewPath } from '@shared/preview-path';
 import { WorkerBuildBudget, readWorkerModule } from '@shared/worker-resource-budget';
 
-// @ts-expect-error -- WASM module import resolved to WebAssembly.Module by Cloudflare at deploy time
 import esbuildWasm from '../../vendor/esbuild.wasm';
 
 import type { BundleResult, BundleWithCdnOptions, TransformOptions, TransformResult } from '@shared/bundler-types';
