@@ -1,0 +1,19 @@
+worker/services/agent/tools/preview-fetch.test.ts
+  s_efbbdbf748f430::t_38f88662504197 13-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f6e73ce4ca0314bd2984a913e579727c4ebe76f4",
+  "prompts": {},
+  "sessions": {
+    "s_efbbdbf748f430": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17f86-491c-73e1-810d-375896240c9c",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
