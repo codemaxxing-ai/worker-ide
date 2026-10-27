@@ -1,0 +1,67 @@
+README.md
+  s_68483996b45c03::t_2ff58420889d93 119-120,123-127
+shared/constants/agent.ts
+  s_68483996b45c03::t_99e144acab03c9 53-54,106-108,124,128-131,137
+shared/managed-typecheck.test.ts
+  s_68483996b45c03::t_6de4dbf764a810 1-35
+shared/validation/tools.ts
+  s_68483996b45c03::t_a3cf98391acace 162
+worker/durable/session-turn-agent.ts
+  s_4c584bcb1b44c9::t_5425e47d7e27f3 184-191
+worker/fixtures/minimal/package.json
+  s_68483996b45c03::t_75f7c409cb457c 7
+worker/fixtures/request-inspector/package.json
+  s_68483996b45c03::t_8f383cbb0694c4 7
+worker/lib/protected-files.test.ts
+  s_68483996b45c03::t_ccb88fbf6b63f2 266-285,405-414
+worker/lib/protected-files.ts
+  s_68483996b45c03::t_e4c9682a400c3c 255-260,273,285,491-502
+worker/services/agent/completion-review.test.ts
+  s_68483996b45c03::t_c4be01322eb21e 1-170
+worker/services/agent/completion-review.ts
+  s_68483996b45c03::t_e97ba055a17fad 1-222
+worker/services/agent/tool-executor.ts
+  s_68483996b45c03::t_a621135a6e5c27 1-2,34,38,48-49
+worker/services/agent/tools/completion-review.ts
+  s_68483996b45c03::t_dbea350aa39b9d 1-101
+worker/services/agent/tools/computer-tools.ts
+  s_68483996b45c03::t_a4fb31c38b92bd 77
+worker/services/agent/tools/dependencies-update.ts
+  s_68483996b45c03::t_d7bfc0567c5e5e 13
+worker/services/agent/tools/external-tool-guards.test.ts
+  s_68483996b45c03::t_781cbb14845134 8-14,23,71,79-81,102,142-208
+worker/services/agent/tools/index.test.ts
+  s_68483996b45c03::t_745fdb664f68df 101-103
+worker/services/agent/tools/index.ts
+  s_68483996b45c03::t_01154c87e8f057 9-10,16,41,56,79,109,171-178,246-278,293,298-299,331,348-350,441,458-460,553,568,730-747
+worker/services/agent/tools/test-run.ts
+  s_68483996b45c03::t_5ad341961c4867 30
+worker/services/agent/tools/todos-update.ts
+  s_68483996b45c03::t_b55956a9838509 25
+worker/services/agent/types.ts
+  s_68483996b45c03::t_ca8eb9421e0c45 1,133-134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6d89d25afb7fbee6b5a6383364da5ee83a88d36b",
+  "prompts": {},
+  "sessions": {
+    "s_4c584bcb1b44c9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17aa4-fc86-7ed3-90c3-bb571bf703d0",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    },
+    "s_68483996b45c03": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17aa5-f83e-7d91-86b1-cded27080774",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
