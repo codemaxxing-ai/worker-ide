@@ -13,6 +13,7 @@ import {
 	shouldWaitForUser,
 	SessionTurnAgent,
 } from './session-turn-agent';
+import { AgentLogger } from '../services/agent/agent-logger';
 import { createServerTools } from '../services/agent/tools';
 import { createMockContext, createMockSendEvent } from '../services/agent/tools/test-helpers';
 
@@ -29,6 +30,49 @@ function submission(status: ThinkSubmissionInspection['status'], error?: string)
 }
 
 describe('session turn lifecycle', () => {
+	it.each(['completed', 'error', 'aborted'])('captures a debug-log snapshot for a %s submission', async (status) => {
+		const logger = new AgentLogger('session', 'project', DEFAULT_AI_MODEL, 'code');
+		const host = {
+			state: { activeSubmissionId: 'submission-1' },
+			eventBatcher: { flush: async () => {} },
+			getMessages: async () => [],
+			getDebugLogger: () => logger,
+			setState: vi.fn(),
+			completePendingTurn: vi.fn(async () => {}),
+		};
+		await Reflect.apply(SessionTurnAgent.prototype.onSubmissionStatus, host, [
+			{ ...submission('completed'), status, error: status === 'completed' ? undefined : 'Stopped' },
+		]);
+		expect(host.setState).toHaveBeenCalledWith(
+			expect.objectContaining({
+				pendingCompletion: expect.objectContaining({
+					debugLog: expect.objectContaining({ id: logger.id, summary: expect.objectContaining({ aborted: status === 'aborted' }) }),
+				}),
+			}),
+		);
+		expect(host.completePendingTurn).toHaveBeenCalledOnce();
+	});
+
+	it('queues the completed log after publishing terminal state without awaiting workspace writes', async () => {
+		const logger = new AgentLogger('session', 'project', DEFAULT_AI_MODEL, 'code');
+		const log = logger.toJSON();
+		const completeThinkTurn = vi.fn(async () => {});
+		const host = {
+			state: {
+				activeTurn: { submissionId: 'submission-1' },
+				pendingCompletion: { submissionId: 'submission-1', history: [], status: 'completed', debugLog: log },
+			},
+			getSnapshotContext: () => {},
+			listSubmissions: async () => [],
+			requireConfiguration: () => ({ sessionId: 'session' }),
+			getParentStub: async () => ({ completeThinkTurn }),
+			queue: vi.fn(async () => 'queued-log'),
+			setState: vi.fn(),
+		};
+		await Reflect.apply(Reflect.get(SessionTurnAgent.prototype, 'completePendingTurnInner'), host, []);
+		expect(host.queue).toHaveBeenCalledWith('persistDebugLog', log);
+		expect(completeThinkTurn.mock.invocationCallOrder[0]).toBeLessThan(host.queue.mock.invocationCallOrder[0]);
+	});
 	it.each([false, true])('forwards complete SDK tool input (incremental input: %s)', async (incremental) => {
 		const events: StreamEvent[] = [];
 		const host = {

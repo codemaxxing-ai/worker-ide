@@ -56,6 +56,7 @@ import * as authSchema from '../db/auth-schema';
 import { trackWebSocketEvent } from '../lib/analytics';
 import { filesystemNamespace } from '../lib/durable-object-namespaces';
 import { toDurableObjectId } from '../lib/project-id';
+import { findLatestDebugLogId } from '../services/agent/agent-logger';
 import { chatMessagesToModelMessages, estimateMessagesTokens, estimateSessionTokens } from '../services/agent/context-pruner';
 import { registerConfiguredMcpServers } from '../services/agent/mcp';
 import { ARTIFACTS_CONTEXT_LABEL, HISTORY_CONTEXT_LABEL, ROOT_MEMORY_CONTEXT_LABEL } from '../services/agent/memory/artifacts';
@@ -787,7 +788,13 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 		const pendingChangesMap = this.loadPendingChangesFromDatabase();
 		const isRunning = this.state.currentSession?.sessionId === sessionId && this.state.currentSession.status === 'running';
 		const sessionParticipants = await this.resolveSessionParticipants(session.history);
+		const restoredDebugLogId =
+			this.agentSessionStore.getMetadata(sessionId).debugLogId ??
+			(await this.withProjectMount(() => findLatestDebugLogId(PROJECT_ROOT, sessionId)).catch((): undefined => {}));
 		if (sequence !== this.sessionSelectionSequence) return session;
+		if (this.state.currentSession?.sessionId === sessionId && this.state.currentSession.status === 'running') return session;
+		const debugLogId = this.agentSessionStore.getMetadata(sessionId).debugLogId ?? restoredDebugLogId;
+		if (debugLogId) this.agentSessionStore.writeMetadata(sessionId, { debugLogId });
 
 		this.setState({
 			...this.state,
@@ -804,7 +811,7 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 				pendingChanges: pendingChangesMap,
 				toolMetadata: session.toolMetadata ?? {},
 				toolErrors: session.toolErrors ?? {},
-				debugLogId: undefined,
+				debugLogId,
 				stopRequested: session.stopRequested ?? false,
 				pendingQuestion: getPendingUserQuestion(session.history),
 				needsContinuation: false,
@@ -1115,6 +1122,14 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 		await this.turnCoordinator.completeThinkTurn(sessionId, submissionId, history, status, error, activeSubmissions);
 	}
 
+	setSessionDebugLogId(sessionId: string, debugLogId: string): void {
+		if (!this.sessionManager.get(sessionId)) return;
+		const previousId = this.agentSessionStore.getMetadata(sessionId).debugLogId;
+		if (previousId && Number(previousId.split('-').at(-1)) > Number(debugLogId.split('-').at(-1))) return;
+		this.agentSessionStore.writeMetadata(sessionId, { debugLogId });
+		if (this.state.currentSession?.sessionId === sessionId) this.updateSessionState(sessionId, { debugLogId });
+	}
+
 	// =========================================================================
 	// Title Generation
 	// =========================================================================
@@ -1223,7 +1238,7 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 				pendingChanges: this.loadPendingChangesFromDatabase(),
 				toolMetadata: metadata.toolMetadata ?? {},
 				toolErrors: metadata.toolErrors ?? {},
-				debugLogId: undefined,
+				debugLogId: metadata.debugLogId,
 				stopRequested: metadata.stopRequested ?? false,
 				pendingQuestion: undefined,
 				needsContinuation: false,
@@ -1294,6 +1309,11 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 				PRIMARY KEY(session_id, message_id)
 			)
 		`);
+		try {
+			this.ctx.storage.sql.exec('ALTER TABLE session_metadata ADD COLUMN debug_log_id TEXT');
+		} catch {
+			// Column already exists.
+		}
 		this.ctx.storage.sql.exec(`
 			CREATE TABLE IF NOT EXISTS think_turn_completions (
 				session_id TEXT NOT NULL,

@@ -19,6 +19,7 @@ interface SessionMetadataState {
 	contextTokensUsed?: number;
 	toolMetadata?: Record<string, ToolMetadataInfo>;
 	toolErrors?: Record<string, ToolErrorInfo>;
+	debugLogId?: string;
 	status?: AgentSessionStatus;
 	errorMessage?: string;
 	stopRequested?: boolean;
@@ -41,6 +42,7 @@ function parseSessionMetadata(row: SessionMetadataRow | undefined): SessionMetad
 		contextTokensUsed: row.contextTokensUsed ?? undefined,
 		toolMetadata: row.toolMetadata ? JSON.parse(row.toolMetadata) : undefined,
 		toolErrors: row.toolErrors ? JSON.parse(row.toolErrors) : undefined,
+		debugLogId: row.debugLogId ?? undefined,
 		status: isAgentSessionStatus(row.status) ? row.status : undefined,
 		errorMessage: row.errorMessage ?? undefined,
 		stopRequested: row.stopRequested === 1,
@@ -138,6 +140,7 @@ export class AgentSessionStore {
 			contextTokensUsed: patch.contextTokensUsed ?? existing.contextTokensUsed,
 			toolMetadata: toolMetadata ? JSON.stringify(toolMetadata) : undefined,
 			toolErrors: toolErrors ? JSON.stringify(toolErrors) : undefined,
+			debugLogId: patch.debugLogId ?? existing.debugLogId,
 			status: patch.status ?? existing.status,
 			errorMessage: Object.hasOwn(patch, 'errorMessage') ? patch.errorMessage : existing.errorMessage,
 			stopRequested: (patch.stopRequested ?? existing.stopRequested) ? 1 : 0,

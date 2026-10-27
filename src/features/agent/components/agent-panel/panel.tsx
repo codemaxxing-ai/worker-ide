@@ -1032,7 +1032,7 @@ export function AgentPanel({ projectId, className }: { projectId: string; classN
 								</div>
 							) : undefined}
 
-							{!isProcessing && committedMessages.length > 0 && committedMessages.at(-1)?.role === 'assistant' && (
+							{!isProcessing && committedMessages.length > 0 && (
 								<div className="flex animate-chat-item items-center justify-end gap-2 px-2">
 									{debugLogId && (
 										<Tooltip content="Download debug log" side="bottom">

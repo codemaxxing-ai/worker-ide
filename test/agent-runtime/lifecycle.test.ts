@@ -116,6 +116,26 @@ async function waitForToolInput(projectId: string) {
 }
 
 describe('production agent lifecycle in the current Workers runtime', () => {
+	it.each(['hello', 'fail'])('saves a downloadable debug log and restores its ID after reopening (%s)', async (prompt) => {
+		const projectId = await createProject();
+		await request('/submit', projectId, { messageId: 'message', prompt });
+		await waitForStatus(projectId, prompt === 'fail' ? 'error' : 'completed');
+		const debugLogId = await vi.waitFor(
+			async () => {
+				return z.object({ debugLogId: z.string().min(1) }).parse(await request('/state', projectId)).debugLogId;
+			},
+			{ timeout: 4000 },
+		);
+		expect(await request('/debug-log', projectId)).toMatchObject({
+			id: debugLogId,
+			sessionId: 'session',
+			projectId,
+			mode: 'code',
+			entries: expect.arrayContaining([expect.objectContaining({ category: 'agent_loop', event: 'finished' })]),
+		});
+		expect(await request('/reload-session', projectId)).toMatchObject({ debugLogId });
+	});
+
 	it('reconciles a completed child from a fresh invocation when its completion RPC failed', async () => {
 		const projectId = await createProject();
 		await request('/block-completion', projectId);

@@ -107,10 +107,23 @@ export class AgentLogger {
 		private readonly projectId: string,
 		private readonly model: string,
 		private readonly mode: string,
+		persistedLog?: AgentDebugLog,
 	) {
-		this.startTime = Date.now();
+		this.startTime = persistedLog ? Date.parse(persistedLog.startedAt) : Date.now();
 		const idPrefix = sessionId ?? crypto.randomUUID().slice(0, 8);
-		this.id = `${idPrefix}-${this.startTime}`;
+		this.id = persistedLog?.id ?? `${idPrefix}-${this.startTime}`;
+		if (!persistedLog) return;
+		this.entries.push(...persistedLog.entries);
+		this.currentIteration = persistedLog.summary.totalIterations;
+		this.toolCallCount = persistedLog.summary.totalToolCalls;
+		for (const [name, count] of Object.entries(persistedLog.summary.toolCallsByName)) this.toolCallCounts.set(name, count);
+		this.errorCount = persistedLog.summary.totalErrors;
+		this.warningCount = persistedLog.summary.totalWarnings;
+		this.totalInputTokens = persistedLog.summary.totalInputTokens;
+		this.totalOutputTokens = persistedLog.summary.totalOutputTokens;
+		this.doomLoopDetected = persistedLog.summary.doomLoopDetected;
+		this.hitIterationLimit = persistedLog.summary.hitIterationLimit;
+		this.aborted = persistedLog.summary.aborted;
 	}
 
 	// =========================================================================
@@ -262,7 +275,7 @@ export class AgentLogger {
 	 * when error handling paths overlap (e.g., catch block flushes and then the
 	 * finally block tries again).
 	 */
-	async flush(projectRoot: string): Promise<void> {
+	async flush(projectRoot: string, logData = this.toJSON()): Promise<void> {
 		if (this.flushed) return;
 		this.flushed = true;
 
@@ -273,7 +286,6 @@ export class AgentLogger {
 		try {
 			await fs.mkdir(logsDirectory, { recursive: true });
 
-			const logData = this.toJSON();
 			await fs.writeFile(`${logsDirectory}/${this.id}.json`, JSON.stringify(logData, undefined, 2));
 
 			this.entriesAtFlush = this.entries.length;
@@ -312,5 +324,20 @@ export class AgentLogger {
 		} catch {
 			// Non-fatal
 		}
+	}
+}
+
+export async function findLatestDebugLogId(projectRoot: string, sessionId: string): Promise<string | undefined> {
+	try {
+		const entries = await fs.readdir(`${projectRoot}/.agent/sessions/${sessionId}/debug-logs`);
+		return entries
+			.filter(
+				(entry) => entry.startsWith(`${sessionId}-`) && entry.endsWith('.json') && /^\d+$/.test(entry.slice(sessionId.length + 1, -5)),
+			)
+			.toSorted((left, right) => Number(left.slice(sessionId.length + 1, -5)) - Number(right.slice(sessionId.length + 1, -5)))
+			.at(-1)
+			?.slice(0, -5);
+	} catch {
+		return undefined;
 	}
 }

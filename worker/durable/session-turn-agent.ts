@@ -11,6 +11,7 @@ import { clearSnapshotFromMessages } from './session-history';
 import { filesystemNamespace } from '../lib/durable-object-namespaces';
 import { runWithProjectStub } from '../lib/project-fs';
 import { toDurableObjectId } from '../lib/project-id';
+import { AgentLogger } from '../services/agent/agent-logger';
 import { createSendEventFunction, drainEventQueue, toolErrorEvents } from '../services/agent/event-helpers';
 import { registerConfiguredMcpServers } from '../services/agent/mcp';
 import { isRequestOriginContext, type RequestOriginContext } from '../services/agent/request-origin-context';
@@ -20,6 +21,7 @@ import { chatMessageToUiMessage, uiMessagesToChatMessages, userMessageToUiMessag
 import { createServerTools } from '../services/agent/tools';
 import { createAdapter as createWorkersAiAdapter } from '../services/agent/workers-ai';
 
+import type { AgentDebugLog } from '../services/agent/agent-logger';
 import type { SnapshotContext } from '../services/agent/snapshot-manager';
 import type { FileChange } from '../services/agent/types';
 import type { ChatResponseResult, ChunkContext, ThinkSubmissionInspection, StepContext, TurnConfig, TurnContext } from '@cloudflare/think';
@@ -51,6 +53,7 @@ interface SessionTurnState {
 	historyInitialized?: boolean;
 	activeSubmissionId?: string;
 	activeTurn?: ActiveTurnConfiguration;
+	activeDebugLog?: AgentDebugLog;
 	activeSnapshot?: {
 		id: string;
 		directory: string;
@@ -61,6 +64,7 @@ interface SessionTurnState {
 		history: ChatMessage[];
 		status: 'completed' | 'error' | 'aborted';
 		error?: string;
+		debugLog?: AgentDebugLog;
 	};
 }
 
@@ -79,6 +83,7 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 	private completionPromise?: Promise<void>;
 	private parentStub?: Promise<DurableObjectStub<AgentRunner>>;
 	private eventBatcher = this.createEventBatcher();
+	private debugLogger?: AgentLogger;
 
 	override broadcast(_message: string | ArrayBuffer | ArrayBufferView, _without?: string[]): void {
 		// This internal facet has no UI clients. Think persists its transcript
@@ -132,6 +137,9 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		this.eventBatcher = this.createEventBatcher();
 		const configuration = this.requireConfiguration();
 		const turnConfiguration = this.requireActiveTurn();
+		const logger = this.getDebugLogger();
+		logger?.info('agent_loop', context.continuation ? 'resumed' : 'started', { submissionId: turnConfiguration.submissionId });
+		if (logger) this.setState({ ...this.state, activeDebugLog: logger.toJSON() });
 		if (!context.continuation) {
 			const parent = await this.getParentStub();
 			await parent.beginThinkTurn(configuration.sessionId, turnConfiguration.submissionId);
@@ -146,6 +154,7 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		);
 		const agentsContext = await runWithProjectStub(filesystemStub, () => readAgentsContext('/project'));
 		const instructions = await buildSessionTurnInstructions(turnConfiguration.mode, agentsContext);
+		logger?.debug('llm', 'request', { instructions, messages: context.messages });
 
 		this.eventQueue = [];
 		this.queryChanges = [];
@@ -187,6 +196,7 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 			},
 			this.queryChanges,
 			turnConfiguration.mode,
+			logger,
 		);
 
 		return {
@@ -252,6 +262,22 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 	}
 
 	override async onStepEnd(context: StepContext): Promise<void> {
+		const logger = this.debugLogger;
+		if (logger) {
+			logger.setIteration(context.stepNumber + 1);
+			logger.recordTokenUsage(context.usage.inputTokens ?? 0, context.usage.outputTokens ?? 0);
+			logger.info('llm', 'response', {
+				text: context.text,
+				reasoning: context.reasoning,
+				finishReason: context.finishReason,
+				usage: context.usage,
+			});
+			for (const result of context.toolCalls) logger.recordToolCall(result.toolName);
+			for (const event of toolErrorEvents(context.content)) {
+				if (event.type === 'tool-error') logger.error('tool_call', 'error', { ...event });
+			}
+			this.setState({ ...this.state, activeDebugLog: logger.toJSON() });
+		}
 		const events = [...drainEventQueue(this.eventQueue), ...toolErrorEvents(context.content)];
 		await this.saveSnapshotChanges(events);
 		await this.eventBatcher.enqueue(events);
@@ -273,7 +299,16 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 	override async onSubmissionStatus(submission: ThinkSubmissionInspection): Promise<void> {
 		if (submission.status === 'running') {
 			const activeTurn = parseActiveTurnConfiguration(submission.metadata, submission.submissionId);
-			this.setState({ ...this.state, activeSubmissionId: submission.submissionId, activeTurn });
+			const isNewTurn = this.state.activeSubmissionId !== submission.submissionId;
+			if (isNewTurn) this.debugLogger = undefined;
+			this.setState({
+				...this.state,
+				activeSubmissionId: submission.submissionId,
+				activeTurn,
+				activeDebugLog: isNewTurn ? undefined : this.state.activeDebugLog,
+			});
+			const logger = this.getDebugLogger();
+			if (logger) this.setState({ ...this.state, activeDebugLog: logger.toJSON() });
 			return;
 		}
 
@@ -285,6 +320,11 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		});
 		const terminal = getTerminalSubmissionResult(submission);
 		const history = uiMessagesToChatMessages(await this.getMessages());
+		const logger = this.getDebugLogger();
+		if (terminal.status === 'aborted') logger?.markAborted();
+		if (terminal.error) logger?.error('agent_loop', terminal.status, { message: terminal.error });
+		logger?.info('agent_loop', 'finished', { status: terminal.status });
+		logger?.debug('message', 'history', { messages: history });
 		this.setState({
 			...this.state,
 			pendingCompletion: {
@@ -292,6 +332,7 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 				history,
 				status: terminal.status,
 				error: terminal.error,
+				debugLog: logger?.toJSON(),
 			},
 		});
 		await this.completePendingTurn();
@@ -359,6 +400,27 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 			return;
 		}
 		await this.reconcileActiveSubmission();
+	}
+
+	async persistDebugLog(log: AgentDebugLog): Promise<void> {
+		const configuration = this.requireConfiguration();
+		if (log.projectId !== configuration.projectId || log.sessionId !== configuration.sessionId)
+			throw new Error('Invalid debug log session.');
+		const logger = new AgentLogger(log.sessionId, log.projectId, log.model, log.mode, log);
+		const filesystemId = toDurableObjectId(filesystemNamespace, configuration.projectId);
+		await runWithProjectStub(filesystemNamespace.get(filesystemId), () => logger.flush('/project', log));
+		if (!logger.isFlushed) throw new Error('Failed to persist agent debug log.');
+		const parent = await this.getParentStub();
+		await parent.setSessionDebugLogId(configuration.sessionId, log.id);
+	}
+
+	private getDebugLogger(): AgentLogger | undefined {
+		if (this.debugLogger) return this.debugLogger;
+		const configuration = this.state.configuration;
+		const turn = this.state.activeTurn;
+		if (!configuration || !turn) return undefined;
+		this.debugLogger = new AgentLogger(configuration.sessionId, configuration.projectId, turn.model, turn.mode, this.state.activeDebugLog);
+		return this.debugLogger;
 	}
 
 	private createEventBatcher(): SessionEventBatcher {
@@ -472,13 +534,17 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 			completion.error,
 			activeSubmissions,
 		);
+		if (completion.debugLog) await this.queue('persistDebugLog', completion.debugLog);
+		const completingActiveTurn = this.state.activeTurn?.submissionId === completion.submissionId;
 		this.setState({
 			...this.state,
 			activeSubmissionId: this.state.activeSubmissionId === completion.submissionId ? undefined : this.state.activeSubmissionId,
 			activeTurn: this.state.activeTurn?.submissionId === completion.submissionId ? undefined : this.state.activeTurn,
 			activeSnapshot: undefined,
 			pendingCompletion: undefined,
+			activeDebugLog: completingActiveTurn ? undefined : this.state.activeDebugLog,
 		});
+		if (completingActiveTurn) this.debugLogger = undefined;
 		if (emptySnapshot) {
 			// An execution can retain the mutation queue while it synchronizes. Cleanup
 			// must not keep the session running behind that queue.

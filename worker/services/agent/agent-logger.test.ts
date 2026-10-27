@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_AI_MODEL } from '@shared/constants';
+import { fs } from '@worker/lib/project-fs';
 
-import { AgentLogger, sanitizeToolInput, summarizeToolResult } from './agent-logger';
+import { AgentLogger, findLatestDebugLogId, sanitizeToolInput, summarizeToolResult } from './agent-logger';
 
 import type { AgentDebugLog } from './agent-logger';
 
@@ -34,6 +35,37 @@ describe('AgentLogger', () => {
 	// =========================================================================
 
 	describe('constructor', () => {
+		it('restores the same ID, entries, and summary across a resumed turn', () => {
+			logger.setIteration(2);
+			logger.recordToolCall('read_file');
+			logger.recordTokenUsage(10, 20);
+			logger.warn('tool_call', 'warning');
+			const persisted = logger.toJSON();
+			const restored = new AgentLogger('test-session', 'test-project', DEFAULT_AI_MODEL, 'code', persisted);
+			restored.recordToolCall('read_file');
+			restored.recordTokenUsage(30, 40);
+
+			expect(restored.toJSON()).toMatchObject({
+				id: persisted.id,
+				startedAt: persisted.startedAt,
+				entries: persisted.entries,
+				summary: {
+					totalIterations: 2,
+					totalToolCalls: 2,
+					toolCallsByName: { read_file: 2 },
+					totalInputTokens: 40,
+					totalOutputTokens: 60,
+					totalWarnings: 1,
+				},
+			});
+		});
+
+		it('persists the completed snapshot without changing its completion time during a queued write', async () => {
+			const persisted = { ...logger.toJSON(), completedAt: '2026-01-01T00:00:00.000Z', totalDurationMs: 123 };
+			const restored = new AgentLogger('test-session', 'test-project', DEFAULT_AI_MODEL, 'code', persisted);
+			await restored.flush('/project', persisted);
+			expect(fs.writeFile).toHaveBeenCalledWith(expect.stringContaining(persisted.id), JSON.stringify(persisted, undefined, 2));
+		});
 		it('generates an ID from sessionId and timestamp', () => {
 			expect(logger.id).toMatch(/^test-session-\d+$/);
 		});
@@ -302,6 +334,25 @@ describe('AgentLogger', () => {
 				expect(timestamp).toBeLessThan(1005);
 			}
 		});
+	});
+});
+
+describe('findLatestDebugLogId', () => {
+	it('finds the latest main-agent log while ignoring unrelated files and sub-agent logs', async () => {
+		vi.mocked(fs.readdir).mockResolvedValueOnce([
+			'session-9.json',
+			'session-100.json',
+			'other-200.json',
+			'session-child-300.json',
+			'session-bad.json',
+			'session-400.txt',
+		]);
+		expect(await findLatestDebugLogId('/project', 'session')).toBe('session-100');
+	});
+
+	it('returns no ID when a session has no saved logs', async () => {
+		vi.mocked(fs.readdir).mockRejectedValueOnce(new Error('Missing directory'));
+		expect(await findLatestDebugLogId('/project', 'session')).toBeUndefined();
 	});
 });
 

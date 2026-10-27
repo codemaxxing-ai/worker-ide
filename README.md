@@ -122,6 +122,8 @@ Project DOM tests run with Vitest in the container. Register `jsdom` or `happy-d
 
 Successful `user_question` calls pause the agent turn until the user replies. Unanswered questions return when a session is reopened. Tool metadata and errors are persisted per session, including background sessions, so todo lists and other tool results remain available after completion and reload.
 
+Agent turns save JSON debug logs under `.agent/sessions/<sessionId>/debug-logs/`. The **Agent Log** download beneath the latest response appears after the log is saved and is restored when the session is reopened.
+
 Tool calls can be expanded while their arguments are streaming, including dynamically registered tools. Directory listing accepts both `ls` and `list`. Agent model requests and streams fail after two minutes without a response or provider activity; tool execution keeps its separate runtime deadline.
 
 Stopping aborts inference and cancels queued turns without waiting for workspace execution cancellation or empty-snapshot cleanup. Workspace mutations retain FIFO ownership through synchronization. Complete tool inputs update the displayed arguments even when a provider omits incremental argument events.

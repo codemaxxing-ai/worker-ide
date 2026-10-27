@@ -246,6 +246,19 @@ export default {
 			return new Response('evicted');
 		}
 		if (url.pathname === '/state') return Response.json(await parent.readTestState());
+		if (url.pathname === '/reload-session') {
+			await parent.clearCurrentSession();
+			await parent.loadSession(sessionId);
+			return Response.json(await parent.readTestState());
+		}
+		if (url.pathname === '/debug-log') {
+			const state = z.object({ debugLogId: z.string() }).safeParse(await parent.readTestState());
+			if (!state.success) return new Response('No debug log', { status: 404 });
+			const filesystem = environment.DurableObjectFilesystem.get(environment.DurableObjectFilesystem.idFromString(toHex(projectId)));
+			return new Response(await filesystem.wsReadFile(`/.agent/sessions/${sessionId}/debug-logs/${state.data.debugLogId}.json`), {
+				headers: { 'Content-Type': 'application/json' },
+			});
+		}
 		if (url.pathname === '/traffic') return Response.json(await parent.readTestTraffic());
 		if (url.pathname === '/block-completion') {
 			await parent.blockCompletionForTest();

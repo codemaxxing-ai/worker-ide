@@ -27,6 +27,7 @@ export function upsertSessionMetadata(database: AgentDatabase, data: SessionMeta
 				contextTokensUsed: toSqlNullable(data.contextTokensUsed),
 				toolMetadata: toSqlNullable(data.toolMetadata),
 				toolErrors: toSqlNullable(data.toolErrors),
+				debugLogId: toSqlNullable(data.debugLogId),
 				status: toSqlNullable(data.status),
 				errorMessage: toSqlNullable(data.errorMessage),
 				stopRequested: data.stopRequested,

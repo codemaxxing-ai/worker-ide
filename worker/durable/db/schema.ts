@@ -5,6 +5,7 @@ export const sessionMetadata = sqliteTable('session_metadata', {
 	contextTokensUsed: integer('context_tokens_used'),
 	toolMetadata: text('tool_metadata'),
 	toolErrors: text('tool_errors'),
+	debugLogId: text('debug_log_id'),
 	status: text('status'),
 	errorMessage: text('error_message'),
 	stopRequested: integer('stop_requested').notNull().default(0),

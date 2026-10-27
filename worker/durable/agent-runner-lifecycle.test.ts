@@ -29,6 +29,30 @@ async function createTestAgent(name: string, sessionId: string): Promise<Durable
 }
 
 describe('agent runner turn completion', () => {
+	it('restores a saved debug-log ID after reopening and ignores late writes from older runs', async () => {
+		const sessionId = 'debug-log-session';
+		const stub = await createTestAgent('agent:debug-log-persistence', sessionId);
+		await stub.loadSession(sessionId);
+		await stub.setSessionDebugLogId(sessionId, `${sessionId}-200`);
+		await stub.setSessionDebugLogId(sessionId, `${sessionId}-100`);
+		await stub.clearCurrentSession();
+		await stub.loadSession(sessionId);
+		await runInDurableObject(stub, (instance) => {
+			expect(instance.state.currentSession?.debugLogId).toBe(`${sessionId}-200`);
+		});
+	});
+
+	it('persists a background session log without changing the selected chat', async () => {
+		const stub = await createTestAgent('agent:background-debug-log', 'background');
+		await stub.setSessionDebugLogId('background', 'background-200');
+		await runInDurableObject(stub, (instance) => {
+			expect(instance.state.currentSession).toBeUndefined();
+		});
+		await stub.loadSession('background');
+		await runInDurableObject(stub, (instance) => {
+			expect(instance.state.currentSession?.debugLogId).toBe('background-200');
+		});
+	});
 	it('flushes pending text before completion instead of appending it again afterward', async () => {
 		const stub = await createTestAgent('agent:buffered-completion-test', 'buffered-session');
 		await stub.loadSession('buffered-session');
