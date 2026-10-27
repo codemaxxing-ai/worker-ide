@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import { HIDDEN_ENTRIES } from '@shared/constants';
 import { todoItemSchema } from '@shared/validation';
 import { fs } from '@worker/lib/project-fs';
@@ -29,10 +31,11 @@ function getTodoFilePath(projectRoot: string, sessionId: string = 'default'): st
 	return `${projectRoot}/.agent/todo/${sessionId}.json`;
 }
 
-export async function readTodos(projectRoot: string, sessionId?: string): Promise<TodoItem[]> {
+export async function readTodos(projectRoot: string, sessionId?: string, strict = false): Promise<TodoItem[]> {
 	try {
 		const content = await fs.readFile(getTodoFilePath(projectRoot, sessionId), 'utf8');
 		const parsed: unknown = JSON.parse(content);
+		if (strict) return z.array(todoItemSchema).parse(parsed);
 		if (!Array.isArray(parsed)) return [];
 		const validated: TodoItem[] = [];
 		for (const item of parsed) {
@@ -42,7 +45,8 @@ export async function readTodos(projectRoot: string, sessionId?: string): Promis
 			}
 		}
 		return validated;
-	} catch {
+	} catch (error) {
+		if (strict && !(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
 		return [];
 	}
 }

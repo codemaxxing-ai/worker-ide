@@ -5,6 +5,13 @@ import { createMockContext, createMockSendEvent } from './test-helpers';
 import type { BrowserBinding } from '../types';
 import type { Agent } from 'agents';
 
+const mockReviewRun = vi.fn(async (_model: string, _input: unknown, _options: unknown) => ({
+	answers: {
+		complete: { type: 'noul', noul: 0.99 },
+		needs_user: { type: 'noul', noul: 0.01 },
+		unsupported_claims: { type: 'noul', noul: 0.01 },
+	},
+}));
 const mockCreateExecuteRuntime = vi.fn();
 const mockBrowserExecute = vi.fn(async ({ code }: { code: string }) => code);
 const mockBrowserMarkdown = vi.fn(async (_input: { url?: string; html?: string }) => 'markdown');
@@ -13,6 +20,7 @@ vi.mock('cloudflare:workers', () => ({
 	tracing: undefined,
 	env: {
 		PREVIEW_SECRET: 'test-preview-secret',
+		AI: { run: (...arguments_: unknown[]) => Reflect.apply(mockReviewRun, undefined, arguments_) },
 	},
 }));
 
@@ -60,7 +68,7 @@ function lastCodeModeTools(): Record<string, { execute?: unknown }> {
 }
 
 function contextOverrides(overrides?: Parameters<typeof createMockContext>[0]) {
-	return createMockContext({
+	const context = createMockContext({
 		projectId: 'project123',
 		ctx: createMockDurableObjectState(),
 		loader: createLoader(),
@@ -68,6 +76,9 @@ function contextOverrides(overrides?: Parameters<typeof createMockContext>[0]) {
 		requestOriginContext: { appOrigin: 'https://example.com', contentOrigin: 'https://content.example.net' },
 		...overrides,
 	});
+	Reflect.set(context.fsStub, 'drainWorkspaceChanges', async () => Object.assign([], { [Symbol.dispose]: () => {} }));
+	Reflect.set(context.fsStub, 'wsReadFile', async () => '[]');
+	return context;
 }
 
 function createAgentWithMcpConnection(): { agent: Agent<Env, unknown>; waitForConnections: ReturnType<typeof vi.fn> } {
@@ -88,6 +99,7 @@ function createAgentWithMcpConnection(): { agent: Agent<Env, unknown>; waitForCo
 describe('createServerTools external guards', () => {
 	beforeEach(() => {
 		mockCreateExecuteRuntime.mockReset();
+		mockReviewRun.mockClear();
 		mockBrowserExecute.mockClear();
 		mockBrowserMarkdown.mockClear();
 	});
@@ -125,6 +137,73 @@ describe('createServerTools external guards', () => {
 			expect(tools[name]?.execute).toBeTypeOf('function');
 			expect(lastCodeModeTools()[name]?.execute).toBeTypeOf('function');
 		}
+	});
+
+	it('reviews observed nested Code Mode results instead of trusting the draft summary', async () => {
+		const testContext = contextOverrides({
+			readCompletionReviewContext: async () => ({
+				messages: [{ id: 'request', role: 'user', parts: [{ type: 'text', content: 'Add a cube' }] }],
+				changedPaths: ['/src/app.tsx'],
+				observations: [],
+				todos: [],
+				revision: 0,
+				incomplete: false,
+			}),
+		});
+		Reflect.set(testContext.fsStub, 'computerExec', async () => ({
+			backend: 'container',
+			exitCode: 1,
+			stdout: 'window is not defined',
+			stderr: '',
+			[Symbol.dispose]: () => {},
+		}));
+		const tools = await createServerTools(createMockSendEvent(), testContext, [], 'code');
+		const nested = lastCodeModeTools();
+		expect(tools.completion_review?.execute).toBeTypeOf('function');
+		expect(nested.completion_review?.execute).toBeTypeOf('function');
+		const list = nested.dependencies_list?.execute;
+		if (typeof list !== 'function') throw new Error('Missing nested dependencies tool');
+		await list({}, { toolCallId: 'nested-list', messages: [] });
+		const execute = nested.exec?.execute;
+		if (typeof execute !== 'function') throw new Error('Missing nested exec tool');
+		await execute({ command: 'bun run test', backend: 'container' }, { toolCallId: 'nested-test', messages: [] });
+		const review = tools.completion_review;
+		if (!review?.execute) throw new Error('Missing completion review');
+		const nestedReview = nested.completion_review?.execute;
+		if (typeof nestedReview !== 'function') throw new Error('Missing nested completion review');
+		const result = await nestedReview({ draft_summary: 'Done' }, { toolCallId: 'review', messages: [] });
+		expect(JSON.parse(result).recommendation).toBe('continue');
+		expect(mockReviewRun).toHaveBeenCalledWith(
+			'@cf/cloudflare/clef-flash',
+			expect.objectContaining({ state: expect.stringContaining('dependencies_list') }),
+			expect.objectContaining({
+				signal: expect.any(AbortSignal),
+				extraHeaders: { 'cf-aig-collect-log-payload': 'false' },
+				gateway: expect.objectContaining({
+					id: 'default',
+					retries: { maxAttempts: 1 },
+					metadata: expect.objectContaining({ type: 'completion_review' }),
+				}),
+			}),
+		);
+		expect(mockReviewRun.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ state: expect.stringContaining('window is not defined') }));
+		Reflect.set(testContext.fsStub, 'wsReadFile', async () => 'malformed TODO data');
+		const unavailable = await review.execute({ draft_summary: 'Done' }, { toolCallId: 'missing-evidence', messages: [] });
+		expect(unavailable).toContain('"recommendation":"unknown"');
+		expect(unavailable).toContain('tool:2');
+		expect(mockReviewRun).toHaveBeenCalledOnce();
+	});
+
+	it.each(['plan', 'ask'])('does not expose completion review in %s mode', async (mode) => {
+		const tools = await createServerTools(createMockSendEvent(), contextOverrides(), [], mode === 'plan' ? 'plan' : 'ask');
+		expect(tools).not.toHaveProperty('completion_review');
+		expect(lastCodeModeTools()).not.toHaveProperty('completion_review');
+	});
+
+	it('does not expose primary completion review in sub-agents', async () => {
+		const tools = await createServerTools(createMockSendEvent(), contextOverrides({ isSubAgent: true }), [], 'code');
+		expect(tools).not.toHaveProperty('completion_review');
+		expect(lastCodeModeTools()).not.toHaveProperty('completion_review');
 	});
 
 	it('keeps sub-agent calls direct so retained runs receive their parent tool call ID', async () => {

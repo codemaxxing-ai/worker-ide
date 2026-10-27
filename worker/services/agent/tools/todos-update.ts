@@ -22,6 +22,7 @@ Task management:
 - Provide the complete list of TODO items (not just changes).
 - Only have ONE task as in_progress at a time. Complete existing tasks before starting new ones.
 - Mark tasks as completed IMMEDIATELY after finishing — do not batch completions.
+- A verification task is completed only when its stated checks pass; running a failing check is not successful verification. Keep unresolved verification pending and report its blocker.
 - Use high priority for blocking tasks, medium for normal, low for nice-to-have.`;
 
 export const definition: ToolDefinition = {

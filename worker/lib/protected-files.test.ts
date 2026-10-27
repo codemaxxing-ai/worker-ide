@@ -263,6 +263,26 @@ describe('regenerateProtectedFiles', () => {
 		expect(packageJson.scripts).toHaveProperty('test', 'vitest run');
 	});
 
+	it.each(['tsx', 'mts', 'cts'])('retains typechecking for referenced .%s projects after dependency updates', async (extension) => {
+		files.set(`${ROOT}/package.json`, JSON.stringify({ name: 'test', dependencies: { react: '^19.0.0' } }));
+		files.set(`${ROOT}/src/app.${extension}`, 'export const value = 1;');
+		files.set(`${ROOT}/tsconfig.json`, JSON.stringify({ files: [], references: [{ path: './tsconfig.app.json' }] }));
+		files.set(`${ROOT}/tsconfig.app.json`, JSON.stringify({ compilerOptions: { noEmit: true }, include: ['src'] }));
+		await regenerateProtectedFiles(ROOT);
+		expect(JSON.parse(files.get(`${ROOT}/package.json`)!)).toHaveProperty('scripts.typecheck', 'tsc -b');
+		expect(JSON.parse(files.get(`${ROOT}/package.json`)!)).toHaveProperty('devDependencies.typescript');
+		await writeDependencies(ROOT, { react: '^19.0.0', three: '^0.174.0' });
+		await regenerateProtectedFiles(ROOT);
+		expect(JSON.parse(files.get(`${ROOT}/package.json`)!)).toHaveProperty('scripts.typecheck', 'tsc -b');
+	});
+
+	it('does not advertise typechecking without a root TypeScript configuration', async () => {
+		files.set(`${ROOT}/package.json`, JSON.stringify({ name: 'test', dependencies: {} }));
+		files.set(`${ROOT}/src/app.ts`, 'export const value = 1;');
+		await regenerateProtectedFiles(ROOT);
+		expect(JSON.parse(files.get(`${ROOT}/package.json`)!)).not.toHaveProperty('scripts.typecheck');
+	});
+
 	it('preserves existing dependencies through regeneration', async () => {
 		files.set(`${ROOT}/package.json`, JSON.stringify({ name: 'test', dependencies: { hono: '^4.0.0', react: '^19.0.0' } }));
 		files.set(`${ROOT}/src/app.tsx`, '');
@@ -380,6 +400,16 @@ describe('vinext projects', () => {
 		expect(packageJson.devDependencies).toEqual({ vinext: '^0.1.8', vite: '^6.0.0' });
 		expect(packageJson.type).toBe('module');
 		expect(packageJson.name).toBe('my-vinext-app');
+	});
+
+	it('preserves a framework-managed typecheck script when a root configuration exists', async () => {
+		seedVinextProject();
+		const manifest = JSON.parse(files.get(`${ROOT}/package.json`)!);
+		manifest.scripts.typecheck = 'tsc --noEmit';
+		files.set(`${ROOT}/package.json`, JSON.stringify(manifest));
+		files.set(`${ROOT}/tsconfig.json`, '{}');
+		await regenerateProtectedFiles(ROOT);
+		expect(JSON.parse(files.get(`${ROOT}/package.json`)!)).toHaveProperty('scripts.typecheck', 'tsc --noEmit');
 	});
 
 	it('regenerateProtectedFiles writes a vinext-shaped wrangler.jsonc', async () => {

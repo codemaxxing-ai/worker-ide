@@ -1,3 +1,4 @@
+import type { CompletionReviewContext } from './completion-review';
 import type { RequestOriginContext } from './request-origin-context';
 import type { ProjectFilesystem } from '../../durable/project-filesystem';
 import type { ExtensionManager } from '@cloudflare/think/extensions';
@@ -129,6 +130,8 @@ export interface ToolExecutorContext {
 	fsStub: DurableObjectStub<ProjectFilesystem>;
 	model: AIModelId;
 	requestOriginContext?: RequestOriginContext;
+	readCompletionReviewContext?: () => Promise<CompletionReviewContext>;
+	recordReviewObservation?: (toolName: string, input: unknown, output: unknown, failed?: boolean) => void;
 	indexArtifact?: (entry: { key: string; content: string }) => Promise<void>;
 }
 

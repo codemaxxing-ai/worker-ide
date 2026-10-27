@@ -159,6 +159,7 @@ export const toolInputSchemas = {
 		env: z.record(z.string(), z.string()).optional(),
 		input: z.json().optional(),
 	}),
+	completion_review: z.object({ draft_summary: z.string().min(1).max(8000) }),
 	user_question: questionInputSchema,
 	web_fetch: webfetchInputSchema,
 	docs_search: searchCloudflareDocumentationInputSchema,

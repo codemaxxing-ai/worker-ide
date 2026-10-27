@@ -252,7 +252,12 @@ async function generateVinextPackageJson(projectRoot: string, projectName: strin
 	existing.dependencies = dependencies;
 	return JSON.stringify(existing, undefined, 2);
 }
-function generatePackageJson(projectName: string, filePaths: string[], dependencies: Record<string, string>): string {
+function generatePackageJson(
+	projectName: string,
+	filePaths: string[],
+	dependencies: Record<string, string>,
+	hasRootTypeScriptConfiguration: boolean,
+): string {
 	const { hasReact, hasTypeScript, hasTests } = detectProjectFlags(dependencies, filePaths);
 
 	const devDependencies: Record<string, string> = {
@@ -265,7 +270,7 @@ function generatePackageJson(projectName: string, filePaths: string[], dependenc
 		devDependencies['@types/react-dom'] = '^19.0.0';
 		devDependencies['@vitejs/plugin-react'] = '^4.0.0';
 	}
-	if (hasTypeScript) {
+	if (hasTypeScript || hasRootTypeScriptConfiguration) {
 		devDependencies.typescript = '^5.0.0';
 	}
 	if (hasTests) {
@@ -277,6 +282,7 @@ function generatePackageJson(projectName: string, filePaths: string[], dependenc
 		build: 'vite build',
 		deploy: 'vite build && wrangler deploy',
 	};
+	if (hasRootTypeScriptConfiguration) scripts.typecheck = 'tsc -b';
 	if (hasTests) {
 		scripts.test = 'vitest run';
 	}
@@ -482,7 +488,18 @@ async function doRegenerate(projectRoot: string): Promise<void> {
 		return;
 	}
 
-	await fs.writeFile(`${projectRoot}/package.json`, generatePackageJson(projectName, filePaths, dependencies));
+	await fs.writeFile(
+		`${projectRoot}/package.json`,
+		generatePackageJson(
+			projectName,
+			filePaths,
+			dependencies,
+			await fs.access(`${projectRoot}/tsconfig.json`).then(
+				() => true,
+				() => false,
+			),
+		),
+	);
 	await fs.writeFile(`${projectRoot}/wrangler.jsonc`, generateWranglerJsonc(projectName, assetSettings, bindingsConfig));
 	await fs.writeFile(`${projectRoot}/vite.config.ts`, generateViteConfig(dependencies));
 	await fs.writeFile(`${projectRoot}/vitest.config.ts`, generateVitestConfig());

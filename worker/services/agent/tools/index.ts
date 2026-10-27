@@ -6,11 +6,14 @@ import { ToolExecutionError } from '@shared/tool-errors';
 import { runWithProjectStub } from '@worker/lib/project-fs';
 import { PROJECT_ROOT, WorkspaceClient } from '@worker/lib/workspace-client';
 
+import { CompletionReviewRecorder } from '../completion-review';
+import { readTodos } from '../tool-executor';
 import * as assetSettingsGetTool from './asset-settings-get';
 import * as assetSettingsUpdateTool from './asset-settings-update';
 import * as bashTool from './bash';
 import * as bindingsGetTool from './bindings-get';
 import * as bindingsUpdateTool from './bindings-update';
+import * as completionReviewTool from './completion-review';
 import { createComputerTools } from './computer-tools';
 import * as dependenciesListTool from './dependencies-list';
 import * as dependenciesUpdateTool from './dependencies-update';
@@ -35,6 +38,7 @@ import { sanitizeToolInput, summarizeToolResult } from '../agent-logger';
 import { createConfiguredMcpConnectors } from '../mcp';
 
 import type { AgentLogger } from '../agent-logger';
+import type { CompletionReviewContext } from '../completion-review';
 import type {
 	FileChange,
 	PendingToolCallIds,
@@ -49,6 +53,7 @@ import type { StateBackend } from '@cloudflare/shell';
 import type { ToolSet } from 'ai';
 
 export const TOOL_EXECUTORS: ReadonlyMap<string, ToolExecuteFunction> = new Map([
+	['completion_review', completionReviewTool.execute],
 	['user_question', userQuestionTool.execute],
 	['web_fetch', webFetchTool.execute],
 	['docs_search', documentationSearchTool.execute],
@@ -71,6 +76,7 @@ export const TOOL_EXECUTORS: ReadonlyMap<string, ToolExecuteFunction> = new Map(
 ]);
 
 export const AGENT_TOOLS: readonly ToolDefinition[] = [
+	completionReviewTool.definition,
 	userQuestionTool.definition,
 	webFetchTool.definition,
 	documentationSearchTool.definition,
@@ -100,7 +106,7 @@ const DEFINITIONS_BY_NAME: ReadonlyMap<string, ToolDefinition> = new Map(AGENT_T
  */
 const DIRECT_TOOL_NAMES = new Set(['user_question', 'plan_update', 'todos_get', 'todos_update', 'sub_agent']);
 
-const DIRECT_DEPENDENCY_TOOL_NAMES = new Set(['dependencies_list', 'dependencies_update']);
+const DIRECT_COMPANION_TOOL_NAMES = new Set(['dependencies_list', 'dependencies_update', 'completion_review']);
 
 const PLAN_MODE_TOOL_NAMES = new Set([
 	'user_question',
@@ -162,7 +168,14 @@ export const READ_ONLY_TOOL_NAMES = new Set([
  * - plan/todos tools: sub-agents are ephemeral and should report back to the
  *   root agent instead of creating durable task state of their own
  */
-export const SUB_AGENT_EXCLUDED_TOOLS = new Set(['sub_agent', 'user_question', 'plan_update', 'todos_get', 'todos_update']);
+export const SUB_AGENT_EXCLUDED_TOOLS = new Set([
+	'sub_agent',
+	'user_question',
+	'plan_update',
+	'todos_get',
+	'todos_update',
+	'completion_review',
+]);
 
 /**
  * Mutation tool names — tools that modify files or project state.
@@ -230,7 +243,39 @@ export async function createServerTools(
 	_pendingToolCallIds?: PendingToolCallIds,
 	excludedToolNames?: ReadonlySet<string>,
 ): Promise<ToolSet> {
-	context = { ...context, sessionId: context.sessionId ?? `agent:${context.projectId}` };
+	const recorder = new CompletionReviewRecorder();
+	const readCompletionReviewContext = context.readCompletionReviewContext;
+	context = {
+		...context,
+		recordReviewObservation: (name, input, output, failed) => recorder.record(name, input, output, failed),
+		readCompletionReviewContext: readCompletionReviewContext
+			? async () => {
+					let evidence: CompletionReviewContext;
+					try {
+						await drainWorkspaceChanges(context, trackedSendEvent, queryChanges);
+						evidence = {
+							...(await readCompletionReviewContext()),
+							todos: await runWithProjectStub(
+								context.fsStub,
+								() => readTodos(context.projectRoot, context.sessionId, true),
+								context.projectRoot,
+								context.sessionId,
+							),
+						};
+					} catch {
+						evidence = { messages: [], changedPaths: [], todos: [], observations: [], revision: 0, incomplete: true };
+					}
+					return {
+						...evidence,
+						observations: [...recorder.observations],
+						revision: recorder.revision,
+						incomplete: evidence.incomplete || recorder.incomplete,
+						changedPaths: [...new Set([...evidence.changedPaths, ...queryChanges.map((change) => change.path)])],
+					};
+				}
+			: undefined,
+		sessionId: context.sessionId ?? `agent:${context.projectId}`,
+	};
 	await context.fsStub.registerComputerSession(context.sessionId ?? `agent:${context.projectId}`, mode, context.requestOriginContext);
 	// Suppress identical notifications, while preserving every later revision.
 	const emittedChanges = new Map<string, Record<string, unknown>>();
@@ -245,11 +290,13 @@ export async function createServerTools(
 			)
 				return;
 			emittedChanges.set(data.path, data);
+			recorder.revision++;
 		}
 		sendEvent(type, data);
 	};
 
-	const isExcluded = (name: string): boolean => Boolean(excludedToolNames?.has(name));
+	const isExcluded = (name: string): boolean =>
+		Boolean(excludedToolNames?.has(name)) || (name === 'completion_review' && Boolean(context.isSubAgent));
 	const wrapDeps = (events: SendEventFunction): WrapDeps => ({ sendEvent: events, context, queryChanges, mode, logger, toolFailures });
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool generic variance; streamText/createExecuteRuntime accept ToolSet (Record<string, Tool<any, any>>)
@@ -281,7 +328,7 @@ export async function createServerTools(
 		if (definition && executor) {
 			const wrapped = wrapTool(definition, executor, wrapDeps(trackedSendEvent));
 			codeModeTools[name] = wrapped;
-			if (DIRECT_DEPENDENCY_TOOL_NAMES.has(name)) {
+			if (DIRECT_COMPANION_TOOL_NAMES.has(name)) {
 				llmTools[name] = wrapDirectTool(wrapped, context, trackedSendEvent, queryChanges);
 			}
 		}
@@ -298,6 +345,9 @@ export async function createServerTools(
 	}
 
 	await addBrowserTools(codeModeTools, context, mode);
+	for (const [name, definition] of Object.entries(codeModeTools)) {
+		if (name.startsWith('browser_')) codeModeTools[name] = wrapObservedTool(definition, name, context);
+	}
 
 	// 3. Assemble the single Code Mode tool — or fall back to direct exposure.
 	if (context.ctx && context.loader) {
@@ -388,6 +438,7 @@ function wrapCodemodeTool(
 		execute: async (input: unknown, options: unknown) => {
 			try {
 				const output: unknown = await Reflect.apply(originalExecute, tool, [input, options]);
+				if (computerToolName) context.recordReviewObservation?.(computerToolName, input, output);
 				if (computerToolName) {
 					const record = output && typeof output === 'object' ? output : {};
 					const argumentsValue = input && typeof input === 'object' ? input : {};
@@ -404,6 +455,9 @@ function wrapCodemodeTool(
 					});
 				}
 				return output;
+			} catch (error) {
+				if (computerToolName) context.recordReviewObservation?.(computerToolName, input, String(error), true);
+				throw error;
 			} finally {
 				await drainWorkspaceChanges(context, sendEvent, queryChanges);
 			}
@@ -496,6 +550,7 @@ function wrapTool(definition: ToolDefinition, executor: ToolExecuteFunction, dep
 						),
 					{ 'tool.name': toolName, 'agent.mode': mode },
 				);
+				context.recordReviewObservation?.(toolName, input, result);
 				logger?.info(
 					'tool_call',
 					'completed',
@@ -510,6 +565,7 @@ function wrapTool(definition: ToolDefinition, executor: ToolExecuteFunction, dep
 				});
 				return result.output;
 			} catch (error) {
+				context.recordReviewObservation?.(toolName, input, String(error), true);
 				const isToolError = error instanceof ToolExecutionError;
 				logger?.[isToolError ? 'warn' : 'error'](
 					'tool_call',
@@ -670,4 +726,22 @@ function wrapBrowserExecuteCode(code: string, primaryPreviewOrigin: string, allo
   }
   return await __userFunction();
 }`;
+}
+
+function wrapObservedTool(definition: AnyTool, name: string, context: ToolExecutorContext): AnyTool {
+	const execute = definition.execute;
+	if (typeof execute !== 'function') return definition;
+	return {
+		...definition,
+		execute: async (input: unknown, options: unknown) => {
+			try {
+				const output: unknown = await Reflect.apply(execute, definition, [input, options]);
+				context.recordReviewObservation?.(name, input, output);
+				return output;
+			} catch (error) {
+				context.recordReviewObservation?.(name, input, String(error), true);
+				throw error;
+			}
+		},
+	};
 }

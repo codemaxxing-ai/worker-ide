@@ -74,7 +74,7 @@ export function createComputerTools(context: ToolExecutorContext, mode: 'code' |
 				},
 				container: {
 					description:
-						'Linux with Node 24, Bun, Git, Python and native build tools. Use when native commands or full test runners are needed. Manage project dependencies with dependencies_update; the IDE handles installation for previews and builds. Public HTTP(S) through the controlled gateway. Foreground commands only; deadline five minutes.',
+						'Linux with Node 24, Bun, Git, Python and native build tools. Use when native commands or full test runners are needed. List dependencies before registering packages with dependencies_update. Worker previews and builds resolve packages without installation; install registered packages only when a required container command needs missing packages. Public HTTP(S) through the controlled gateway. Foreground commands only; deadline five minutes.',
 				},
 			},
 		},

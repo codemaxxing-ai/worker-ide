@@ -98,7 +98,9 @@ describe('MUTATION_TOOL_NAMES', () => {
 
 describe('SUB_AGENT_EXCLUDED_TOOLS', () => {
 	it('prevents recursive delegation and durable parent-session interactions', () => {
-		expect(SUB_AGENT_EXCLUDED_TOOLS).toEqual(new Set(['sub_agent', 'user_question', 'plan_update', 'todos_get', 'todos_update']));
+		expect(SUB_AGENT_EXCLUDED_TOOLS).toEqual(
+			new Set(['sub_agent', 'user_question', 'plan_update', 'todos_get', 'todos_update', 'completion_review']),
+		);
 	});
 });
 

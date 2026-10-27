@@ -4,6 +4,7 @@
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
+		"typecheck": "tsc -b",
 		"deploy": "vite build && wrangler deploy",
 		"test": "vitest run"
 	},
