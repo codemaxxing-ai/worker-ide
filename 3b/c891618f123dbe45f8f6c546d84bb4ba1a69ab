@@ -1,0 +1,43 @@
+README.md
+  s_4c584bcb1b44c9::t_9ba1f2534ed4b3 123-124
+src/features/agent/components/agent-panel/panel.tsx
+  s_4c584bcb1b44c9::t_4db1359a893685 1035
+test/agent-runtime/fixture.ts
+  s_4c584bcb1b44c9::t_3ab32def3f423c 249-261
+test/agent-runtime/lifecycle.test.ts
+  s_4c584bcb1b44c9::t_32bed1eb854c15 119-138
+worker/durable/agent-runner-lifecycle.test.ts
+  s_4c584bcb1b44c9::t_780345f45300c7 32-55
+worker/durable/agent-runner.ts
+  s_4c584bcb1b44c9::t_24c5b8057289cd 59,791-793,795-797,814,1125-1132,1241,1312-1316
+worker/durable/db/dal.ts
+  s_4c584bcb1b44c9::t_02e5ab04bcbe9a 30
+worker/durable/db/schema.ts
+  s_4c584bcb1b44c9::t_7ed07b2be9fc4e 8
+worker/durable/session-store.ts
+  s_4c584bcb1b44c9::t_fec2ec6f2a726c 22,45,143
+worker/durable/session-turn-agent.test.ts
+  s_4c584bcb1b44c9::t_67d2d95942af12 16,33-75
+worker/durable/session-turn-agent.ts
+  s_4c584bcb1b44c9::t_dc0f1c17fe64da 14,24,56,67,86,140-142,157,199,265-280,302-311,323-327,335,405-425,537-538,545,547
+worker/services/agent/agent-logger.test.ts
+  s_4c584bcb1b44c9::t_d0c4f89b21d22b 4,6,38-68,340-358
+worker/services/agent/agent-logger.ts
+  s_4c584bcb1b44c9::t_1152e71e5ebe85 110,112,114-126,278,329-343
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3bc891618f123dbe45f8f6c546d84bb4ba1a69ab",
+  "prompts": {},
+  "sessions": {
+    "s_4c584bcb1b44c9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17aa4-fc86-7ed3-90c3-bb571bf703d0",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
