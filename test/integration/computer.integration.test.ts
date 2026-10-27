@@ -57,6 +57,18 @@ describe('Computer live runtime', () => {
 		expect(data.result.stdout).toContain('computer.txt');
 	});
 
+	it('isolates native execution in a private container process namespace', async () => {
+		const runtime = hc<DevelopmentTestRoutes>(`${BASE_URL}/p/${projectId}/api`, { headers: { Cookie: cookie } });
+		const response = await runtime.__test['computer-exec'].$post({
+			json: { backend: 'container', command: 'cat /proc/1/comm' },
+		});
+		if (!response.ok) await throwApiError(response, 'Cannot inspect the container process namespace');
+		const data = await response.json();
+		expect(data.result.exitCode, data.result.stderr).toBe(0);
+		expect(data.result.backend).toBe('container');
+		expect(data.result.stdout.trim()).toBe('computerd');
+	});
+
 	it('installs packages, runs native tools and synchronizes bytes and symlinks in both directions', async () => {
 		const api = hc<ApiRoutes>(`${BASE_URL}/p/${projectId}/api`, { headers: { Cookie: cookie } });
 		const runtime = hc<DevelopmentTestRoutes>(`${BASE_URL}/p/${projectId}/api`, { headers: { Cookie: cookie } });

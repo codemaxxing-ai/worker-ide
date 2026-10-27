@@ -8,7 +8,8 @@
 	"name": "worker-ide",
 	"main": "worker/index.ts",
 	"compatibility_date": "2026-03-24",
-	"compatibility_flags": ["nodejs_compat"],
+	// Private PID namespaces let container teardown terminate every child process.
+	"compatibility_flags": ["nodejs_compat", "containers_pid_namespace"],
 	"limits": {
 		// Allow headroom for agent turns that make many tool and streaming RPCs.
 		"subrequests": 100000,

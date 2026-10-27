@@ -17,7 +17,6 @@ import { WorkerBuildBudget, isWorkerResourceLimit } from '@shared/worker-resourc
 import { GitService } from './git-service';
 import { selectComputerBackend } from '../lib/computer-backend';
 import { ComputerChanges } from '../lib/computer-changes';
-import { destroyComputerContainer } from '../lib/computer-container-lifecycle';
 import { drainComputerOutput } from '../lib/computer-execution';
 import { ComputerMutationQueue, ComputerSynchronizationPending } from '../lib/computer-mutation-queue';
 import { ComputerOutputPublisher } from '../lib/computer-output-observer';
@@ -1078,7 +1077,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 
 	async destroyStorage(): Promise<void> {
 		await this.queue.run('destroyStorage', [], async () => {
-			await destroyComputerContainer(this.ctx.container, this.computerInstance);
+			if (this.ctx.container?.running) await this.ctx.container.destroy();
 			const tables = this.ctx.storage.sql
 				.exec<{ name: string }>(
 					"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('computer_mutation_queue', 'computer_mutation_payload')",

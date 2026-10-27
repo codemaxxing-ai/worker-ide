@@ -429,7 +429,7 @@ jobs:
         run: |
           head -n 100 "$RUNNER_TEMP/worker-ide-dev.log" || true
           tail -n 100 "$RUNNER_TEMP/worker-ide-dev.log" || true
-          sudo ps -e -o pid,ppid,stat,wchan:32,args | rg 'computerd|native-runtime|fusermount|containerd-shim|runc' || true
+          sudo ps -e -o pid,ppid,stat,wchan:32,args | grep -E 'computerd|native-runtime|fusermount|containerd-shim|runc' || true
           for process_id in $(pgrep -f 'computerd|native-runtime|fusermount|containerd-shim|runc'); do
             echo "Process $process_id"
             sudo cat "/proc/$process_id/stack" || true
