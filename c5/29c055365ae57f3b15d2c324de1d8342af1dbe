@@ -1,0 +1,21 @@
+docs/development.md
+  s_efbbdbf748f430::t_19294beecf0085 47,93
+package.json
+  s_efbbdbf748f430::t_4c75704d1be083 152
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c529c055365ae57f3b15d2c324de1d8342af1dbe",
+  "prompts": {},
+  "sessions": {
+    "s_efbbdbf748f430": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17f86-491c-73e1-810d-375896240c9c",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
