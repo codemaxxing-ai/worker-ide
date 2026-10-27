@@ -1,0 +1,93 @@
+.github/workflows/ci.yml
+  s_18a151f9050ebf::t_d5d89f1fbdda12 8,33
+auxiliary/biome/worker-configuration.d.ts
+  s_18a151f9050ebf::t_bd9004e416a590 2,12-35
+auxiliary/biome/wrangler.jsonc
+  s_18a151f9050ebf::t_aa084849e2de9b 5
+auxiliary/email/wrangler.jsonc
+  s_18a151f9050ebf::t_9487afdc2a6a2b 6
+auxiliary/esbuild/worker-configuration.d.ts
+  s_18a151f9050ebf::t_7bc337ed029208 2,12-35
+auxiliary/esbuild/wrangler.jsonc
+  s_18a151f9050ebf::t_b4f52fd1d4fe66 5
+auxiliary/push/worker-configuration.d.ts
+  s_18a151f9050ebf::t_940c966a83694b 2,24-47
+auxiliary/push/wrangler.jsonc
+  s_18a151f9050ebf::t_ef510148729c12 5
+auxiliary/vite-host/worker-configuration.d.ts
+  s_18a151f9050ebf::t_f6661585985f90 2,12-35
+auxiliary/vite-host/wrangler.jsonc
+  s_18a151f9050ebf::t_b73ef0d732c2b7 5
+bun.lock
+  s_18a151f9050ebf::t_e6dbcf4e427805 98,123,129-131,141,403,405,407,409,411,557,559,561,563,565,567,569,571,573,575,577,579,581,583,585,587,589,591,593,595,597,601,603,605,607,2123,2439,2801,2805,2929-2932,2953,2957,3105-3106,3205,3349-3354,3791,3793,3795,3797,3799,3801,3803,3805,3807,3809,3811,3813,3815,3817,3819,3821,3823,3825,3827,3829,3831,3833,3835,3837,3839,3841,3869-3972,4055-4058,4064-4067
+docs/development.md
+  s_18a151f9050ebf::t_6fbecf70d59602 41-45
+landing/bun.lock
+  s_18a151f9050ebf::t_bd61d94d54b9d6 41,120,122,124,126,128,1436
+landing/package.json
+  s_18a151f9050ebf::t_497402c65b961f 48
+landing/wrangler.jsonc
+  s_18a151f9050ebf::t_3ba5acf1f1b465 3
+package.json
+  s_a5204b3760efc8::t_50990bf4c3b912 96,121,126,172-174
+patches/vitest-pool-workers-compatibility.patch
+  s_a5204b3760efc8::t_3d64e6bf782d99 1-24
+shared/constants/project.ts
+  s_18a151f9050ebf::t_f62d1e7616aade 21
+turbo.json
+  s_18a151f9050ebf::t_fc0e8628b61c8d 55-63
+worker-configuration.d.ts
+  s_18a151f9050ebf::t_75acef573037de 2-3,57-80,507,515,564,1273-1274,1321,1501,3366,3494,3527,3596,3692,3711-3712,3715-3724,5237-5241,5243,5264,9280-9304,9308-9332,10301-10310,10318-10333,10336-10376,10378,10381-10397,10400-10427,10429-10438,10442-10457,10594-10609,10613-10628,10632-10666,10670-10685,10778-10779,10786,10850-10861,10865,11120-11167,11169,11171-11173,11175,11192-11254,11276,11316,11603,11609,11612,11642,11678,11713,11727,11738-11739,13275-13301,13442-13445,13454,13482,13485-13498,14299,14317,14326,14426,15446,15457,15476-15481,15493-15503,15557,15592,16004,16006-16013,16025-16049
+worker/fixtures/minimal/wrangler.jsonc
+  s_18a151f9050ebf::t_40a8bec1a0e45b 5
+worker/fixtures/request-inspector/wrangler.jsonc
+  s_18a151f9050ebf::t_638a4f87ffeb8b 5
+worker/fixtures/vinext/wrangler.jsonc
+  s_18a151f9050ebf::t_fb01353f4ee041 4
+worker/lib/tracing.ts
+  s_18a151f9050ebf::t_d28749ebb0fcd5 20,22-25,42,44
+worker/services/artifacts-repo.test.ts
+  s_18a151f9050ebf::t_0f82838871126a 1-85
+worker/services/artifacts-repo.ts
+  s_18a151f9050ebf::t_3d0bc6e31f916c 32-35,38-40,49-51,64,69
+worker/services/git-proxy.ts
+  s_18a151f9050ebf::t_41600e5360019a 72-74
+worker/services/vite-host/runtime/deploy-build.integration.test.ts
+  s_18a151f9050ebf::t_35a003474f4df2 11-12,55
+worker/services/vite-host/runtime/loader-runner.test.ts
+  s_18a151f9050ebf::t_9b7cf16240fc60 4-5,14
+worker/services/vite-host/runtime/vinext-development-render.integration.test.ts
+  s_18a151f9050ebf::t_b0dc4396f9ebe4 13-14,33-34
+worker/services/vite-host/runtime/vinext-render.integration.test.ts
+  s_18a151f9050ebf::t_67d3669e395895 11-12,35-36
+worker/services/vite-host/runtime/vinext-server-error.integration.test.ts
+  s_18a151f9050ebf::t_4f1be42c9a190e 12-13,31-32
+worker/services/vite-host/runtime/vinext-template.integration.test.ts
+  s_18a151f9050ebf::t_b5c20086b7ff93 10-11,35-36
+wrangler.jsonc
+  s_18a151f9050ebf::t_8db057ad20579b 10-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "68432dc450d11a8d8cd0528bdad9ed9d952a0de1",
+  "prompts": {},
+  "sessions": {
+    "s_18a151f9050ebf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17f3d-7448-7701-b7e7-f274314cafb7",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    },
+    "s_a5204b3760efc8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17f4e-2d61-78b0-bfa4-ddca9610ffd2",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
