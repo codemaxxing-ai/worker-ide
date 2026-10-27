@@ -1,0 +1,63 @@
+.storybook/vitest.config.ts
+  s_f288f691ef0d3f::t_fcc6eedb2655f7 6,40
+AGENTS.md
+  s_f288f691ef0d3f::t_b0b5dea2438c4a 172-173
+README.md
+  s_18a151f9050ebf::t_313589f1f67060 89
+auxiliary/biome/wrangler.jsonc
+  s_18a151f9050ebf::t_4d623167bc4ca2 5
+auxiliary/email/wrangler.jsonc
+  s_18a151f9050ebf::t_1bb391d1f55160 6
+auxiliary/esbuild/wrangler.jsonc
+  s_18a151f9050ebf::t_475f0f1066bf89 5
+auxiliary/push/wrangler.jsonc
+  s_18a151f9050ebf::t_ff08853187638a 5
+auxiliary/vite-host/wrangler.jsonc
+  s_18a151f9050ebf::t_ab60fc6349629d 5
+bun.lock
+  s_18a151f9050ebf::t_4358f5827ff0be 18-19,59,121,375-376,395,397,399,401,403,405,407,595,1141-1142,1145,1147,1151,1155,2255-2256,2489,2577,2721,2795,2805,2923,2925,2927,2929,2947,3019-3024,3027-3028,3031-3033,3035,3091-3092,3109-3110,3185,3187,3189,3351-3355,3357,3361-3365,3367,3369,3371,3373,3375-3413,3485-3488,3493-3494,3835-3836,3921,3923,3925,3927,3929,3931,3933,3935,3937,3939,3941,3943,3945,3947,3949,3951,3953,3955,3957,3959,3961,3963,3965,3967,3969,3971,3973,3975,3977,3979,3981,3983,3985,3987,3989,3991
+landing/bun.lock
+  s_18a151f9050ebf::t_46cab955a0d1ba 35,40,117,119,121,123,125,127,233,273,1075,1341,1435,1437,1441,1481,1483,1489,1491,1575-1577,1595,1605-1609,1611,1613-1615,1637,1639,1641,1643,1645,1647,1649,1651,1653,1655,1657,1659,1661,1663,1665,1667,1669,1671,1673,1675,1677,1679,1681,1699,1701,1703,1705,1707,1709,1711,1713,1715,1717,1719,1721,1723,1725,1727,1729,1731,1733,1735,1737,1739,1741,1743,1745,1747,1749,1753,1755,1757,1759,1761,1763,1765,1767,1769,1771,1773,1775,1777,1779,1781,1783,1785,1787,1789,1791,1793,1795,1797,1801-1821,1823,1825,1827,1829,1831,1833,1835,1837,1839,1841,1843,1845,1847,1849,1851,1853,1855,1857,1859,1861,1863,1865,1867,1869,1871
+landing/package.json
+  s_18a151f9050ebf::t_0eb88c8deca0b7 45,48
+landing/wrangler.jsonc
+  s_18a151f9050ebf::t_76a0d8004a9f9f 3
+package.json
+  s_18a151f9050ebf::t_5f9164dbd65631 16-17,57,119
+shared/constants/project.ts
+  s_18a151f9050ebf::t_47a6064522def2 21
+turbo.json
+  s_f288f691ef0d3f::t_56424f95231c38 55
+worker/fixtures/minimal/wrangler.jsonc
+  s_18a151f9050ebf::t_59b78e436708cd 5
+worker/fixtures/request-inspector/wrangler.jsonc
+  s_18a151f9050ebf::t_4e758e7a23420d 5
+worker/fixtures/vinext/wrangler.jsonc
+  s_18a151f9050ebf::t_614f235974e13a 4
+wrangler.jsonc
+  s_18a151f9050ebf::t_bcfd2afaa60670 10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "135bdc84ea1573276c20770cc82d486ddc8f5ea4",
+  "prompts": {},
+  "sessions": {
+    "s_18a151f9050ebf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17f3d-7448-7701-b7e7-f274314cafb7",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    },
+    "s_f288f691ef0d3f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17f66-865f-78a3-a505-f20b0581ed2f",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
