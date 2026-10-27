@@ -1,0 +1,23 @@
+README.md
+  s_58fb14d4dd96ba::t_3406e51d957036 7-8
+shared/constants/ai-models.ts
+  s_58fb14d4dd96ba::t_2c180fe32e8939 13-15,17,21-23,25,29-31,33,46-47
+worker/durable/session-history.test.ts
+  s_58fb14d4dd96ba::t_e98879e49558e3 104,202,208
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dda2b044149c2f2201fdf6aed8b4cb32954ccf0e",
+  "prompts": {},
+  "sessions": {
+    "s_58fb14d4dd96ba": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17a94-1275-7782-867c-45be020de0b3",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
