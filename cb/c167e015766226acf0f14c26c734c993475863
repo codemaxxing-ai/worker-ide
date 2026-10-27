@@ -1,0 +1,25 @@
+docs/development.md
+  s_5416f6d2eeb14f::t_4babf49b740537 41-42
+worker/durable/project-filesystem.ts
+  s_5416f6d2eeb14f::t_af08dc485eac6e 20,1081
+worker/lib/computer-container-lifecycle.test.ts
+  s_5416f6d2eeb14f::t_e06ee7c8d4da02 1-75
+worker/lib/computer-container-lifecycle.ts
+  s_5416f6d2eeb14f::t_361b0600290866 1-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cbc167e015766226acf0f14c26c734c993475863",
+  "prompts": {},
+  "sessions": {
+    "s_5416f6d2eeb14f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17f08-9a40-73f3-a8df-3f20d128daa7",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
