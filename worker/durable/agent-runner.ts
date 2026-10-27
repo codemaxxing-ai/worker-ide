@@ -1,21 +1,12 @@
 import { ExtensionManager } from '@cloudflare/think/extensions';
 import { Agent, callable, getCurrentAgent } from 'agents';
 import { AgentSearchProvider, SessionManager } from 'agents/experimental/memory/session';
-import { createCompactFunction } from 'agents/experimental/memory/utils';
-import { generateText } from 'ai';
 import { env } from 'cloudflare:workers';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import { messagePartsHaveUserContent, messagePartsToPromptText } from '@shared/chat-message-parts';
-import {
-	AGENT_SYSTEM_PROMPT,
-	DEFAULT_AI_MODEL,
-	MAX_AI_SESSIONS_PER_PROJECT,
-	MCP_SERVERS,
-	SUMMARIZATION_AI_MODEL,
-	getModelConfig,
-} from '@shared/constants';
+import { AGENT_SYSTEM_PROMPT, DEFAULT_AI_MODEL, MAX_AI_SESSIONS_PER_PROJECT, MCP_SERVERS, getModelConfig } from '@shared/constants';
 import { buildProjectDeepLinkPath } from '@shared/project-deep-link';
 import {
 	pendingChangesFileSchema,
@@ -57,7 +48,8 @@ import { trackWebSocketEvent } from '../lib/analytics';
 import { filesystemNamespace } from '../lib/durable-object-namespaces';
 import { toDurableObjectId } from '../lib/project-id';
 import { findLatestDebugLogId } from '../services/agent/agent-logger';
-import { chatMessagesToModelMessages, estimateMessagesTokens, estimateSessionTokens } from '../services/agent/context-pruner';
+import { chatMessagesToModelMessages, estimateMessagesTokens } from '../services/agent/context-pruner';
+import { readSessionTranscript } from '../services/agent/harness-session';
 import { registerConfiguredMcpServers } from '../services/agent/mcp';
 import { ARTIFACTS_CONTEXT_LABEL, HISTORY_CONTEXT_LABEL, ROOT_MEMORY_CONTEXT_LABEL } from '../services/agent/memory/artifacts';
 import { SharedContextProvider } from '../services/agent/memory/shared-context-provider';
@@ -67,7 +59,6 @@ import { cleanupSessionArtifacts } from '../services/agent/session-cleanup';
 import { sessionMessagesToChatMessages } from '../services/agent/session-messages';
 import { readAgentsContext } from '../services/agent/system-prompt-builder';
 import { deriveFallbackTitle, generateSessionTitle } from '../services/agent/title-generator';
-import { createAdapter as createWorkersAiAdapter } from '../services/agent/workers-ai';
 
 import type { AgentDatabase } from './db';
 import type { RequestOriginContext } from '../services/agent/request-origin-context';
@@ -78,10 +69,6 @@ import type { PushNotification } from '@shared/notification-types';
 import type { AgentMode, AiSession, ChatMessage, PendingFileChange, ReviewEntry, UserMessagePart } from '@shared/types';
 
 const REQUEST_ORIGIN_CONTEXT_STORAGE_KEY = 'request-origin-context';
-const SESSION_COMPACTION_THRESHOLD = 100_000;
-const SESSION_COMPACTION_PROTECT_HEAD = 3;
-const SESSION_COMPACTION_TAIL_TOKEN_BUDGET = 32_000;
-const SESSION_COMPACTION_MIN_TAIL_MESSAGES = 4;
 
 const ROOT_MEMORY_MAX_TOKENS = 2000;
 const PROJECT_ROOT = '/project';
@@ -135,32 +122,6 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 		.withContext(ARTIFACTS_CONTEXT_LABEL, {
 			description: 'Searchable project artifacts such as plans, todos, diagnostics, and sub-agent reports.',
 			provider: this.artifactsContextProvider,
-		})
-		.onCompaction(
-			createCompactFunction({
-				summarize: async (prompt) => {
-					const { text } = await generateText({
-						model: createWorkersAiAdapter(SUMMARIZATION_AI_MODEL, {
-							generationType: 'compaction',
-							projectId: this.getProjectId(),
-							organizationId: this.projectOrganizationId,
-							repeatedContextKey: prompt,
-						}),
-						prompt,
-						maxOutputTokens: 4096,
-					});
-					return text;
-				},
-				protectHead: SESSION_COMPACTION_PROTECT_HEAD,
-				tailTokenBudget: SESSION_COMPACTION_TAIL_TOKEN_BUDGET,
-				minTailMessages: SESSION_COMPACTION_MIN_TAIL_MESSAGES,
-			}),
-		)
-		.compactAfter(SESSION_COMPACTION_THRESHOLD, {
-			// Drive BOTH the compaction trigger and the boundary ("what to
-			// compress") decision off the same accurate char-heuristic estimate
-			// the rest of the agent uses, instead of the SDK's default estimate.
-			tokenCounter: ({ messages, systemPrompt }) => estimateSessionTokens(messages, systemPrompt),
 		})
 		.withCachedPrompt()
 		.withSearchableHistory(HISTORY_CONTEXT_LABEL);
@@ -873,13 +834,17 @@ export class AgentRunner extends Agent<Env, AgentState> implements AgentRunnerCl
 
 		const sourceSession = this.sessionManager.get(sessionId);
 		if (!sourceSession) return { contextTokensUsed: 0 };
-		const sourceHistory = await this.sessionManager.getHistory(sessionId);
+		const sourceHistory = await readSessionTranscript(this.sessionManager.getSession(sessionId));
 		const targetMessage = sourceHistory[messageIndex];
 		if (!targetMessage) return { contextTokensUsed: 0 };
 
-		const forkedSession = await this.sessionManager.fork(sessionId, targetMessage.id, `${sourceSession.name} (fork)`);
+		const forkedSession = await this.sessionManager.create(`${sourceSession.name} (fork)`, { parentSessionId: sessionId });
+		await this.sessionManager.appendAll(
+			forkedSession.id,
+			sourceHistory.slice(0, messageIndex + 1).map((message) => ({ ...message, id: crypto.randomUUID() })),
+		);
 		const sourceAiSession = await this.agentSessionStore.read(sessionId);
-		const forkedHistory = sessionMessagesToChatMessages(await this.sessionManager.getHistory(forkedSession.id));
+		const forkedHistory = sessionMessagesToChatMessages(await readSessionTranscript(this.sessionManager.getSession(forkedSession.id)));
 		const truncatedHistory = reattachForkedMessageState(forkedHistory, sourceAiSession?.history ?? []);
 		const sourceMetadata = this.agentSessionStore.getMetadata(sessionId);
 		const modelMessages = chatMessagesToModelMessages(truncatedHistory);

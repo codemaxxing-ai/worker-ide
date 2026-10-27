@@ -56,6 +56,47 @@ function createSessionStore(initialHistory: SessionMessage[]) {
 }
 
 describe('AgentSessionStore.syncHistory', () => {
+	it('persists complete text and tool pairs while retaining attachment and review metadata', async () => {
+		const content = 'complete history '.repeat(2000);
+		const messages: ChatMessage[] = [
+			{
+				id: 'original-user',
+				role: 'user',
+				authorUserId: 'author',
+				createdAt: 123_000,
+				metadata: { snapshotId: 'review' },
+				parts: [
+					{ type: 'text', content },
+					{ type: 'image', url: 'data:image/png;base64,aGVsbG8=', mediaType: 'image/png' },
+				],
+			},
+			{
+				id: 'original-assistant',
+				role: 'assistant',
+				parts: [
+					{ type: 'reasoning', content },
+					{ type: 'tool-call', toolCallId: 'execution', toolName: 'exec', arguments: { command: content } },
+					{ type: 'tool-result', toolCallId: 'execution', toolName: 'exec', result: content },
+				],
+			},
+		];
+		const { store, appendAll } = createSessionStore([]);
+		await store.syncHistory('session', messages);
+		expect(appendAll).toHaveBeenCalledWith(
+			'session',
+			messages.map((message) => chatMessageToSessionMessage(message)),
+			undefined,
+		);
+		expect(databaseMocks.replaceSessionMessageMetadata).toHaveBeenLastCalledWith({}, 'session', [
+			expect.objectContaining({
+				messageId: 'original-user',
+				authorUserId: 'author',
+				snapshotId: 'review',
+				partsJson: JSON.stringify(messages[0].parts),
+			}),
+		]);
+	});
+
 	it('appends only the new suffix when history shares the existing prefix', async () => {
 		const initial = [chatMessageToSessionMessage(createMessage('m1', 'one'))];
 		const { store, appendAll, clearMessages } = createSessionStore(initial);

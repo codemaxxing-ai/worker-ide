@@ -33,6 +33,7 @@ export interface AgentState {
  * directly — no bi-directional sync or skip-flags needed.
  */
 export interface AgentSessionState {
+	activeSubmissionId?: string;
 	sessionId: string;
 	title: string;
 	status: AgentSessionStatus | 'idle';
@@ -78,6 +79,7 @@ export interface SessionSummary {
  * build the in-progress assistant message for display.
  */
 export type StreamEvent =
+	| ToolOutputEvent
 	| TextDeltaEvent
 	| ReasoningDeltaEvent
 	| ToolCallStartEvent
@@ -103,6 +105,13 @@ export type StreamEvent =
 export interface TextDeltaEvent {
 	type: 'text-delta';
 	delta: string;
+}
+export interface ToolOutputEvent {
+	type: 'tool-output';
+	submissionId: string;
+	toolCallId: string;
+	toolName: string;
+	output: import('./command-output').CommandOutput;
 }
 export interface ReasoningDeltaEvent {
 	type: 'reasoning-delta';
@@ -214,18 +223,23 @@ export interface SubAgentActivityEvent {
 	activity: SubAgentActivity;
 }
 export type SubAgentActivity =
+	| { kind: 'tool-output'; event: ToolOutputEvent }
 	| { kind: 'tool-start'; toolName: string }
-	| { kind: 'tool-end'; toolName: string; isError?: boolean }
-	| { kind: 'tool-metadata'; toolName: string; title: string; metadata: Record<string, unknown> }
+	| { kind: 'tool-end'; toolName: string; toolCallId?: string; result?: string; isError?: boolean }
+	| { kind: 'tool-metadata'; toolName: string; toolCallId?: string; title: string; metadata: Record<string, unknown> }
 	| { kind: 'text-delta'; delta: string }
 	| { kind: 'reasoning-delta'; delta: string }
 	| { kind: 'debug-log'; debugLogId: string };
 export interface SubAgentActivityRecord {
+	outputTruncated?: boolean;
 	tools: SubAgentToolEntry[];
 	debugLogId: string | undefined;
 	streamingText: string | undefined;
 }
 export interface SubAgentToolEntry {
+	result?: string;
+	toolCallId?: string;
+	commandOutput?: import('./command-output').ToolCommandOutput;
 	toolName: string;
 	title: string;
 	metadata: Record<string, unknown>;

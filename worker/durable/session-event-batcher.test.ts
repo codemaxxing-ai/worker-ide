@@ -71,3 +71,49 @@ describe('session event batching', () => {
 		await expect(batcher.flush()).rejects.toThrow('RPC budget exhausted');
 	});
 });
+
+it('caps output retained per outer call, batches snapshots, and ignores updates after completion', async () => {
+	vi.useFakeTimers();
+	try {
+		const sent: StreamEvent[][] = [];
+		const batcher = new SessionEventBatcher(
+			async (events) => {
+				sent.push(events);
+			},
+			() => {},
+		);
+		for (let index = 0; index < 100; index++) {
+			await batcher.enqueue([
+				{
+					type: 'tool-output',
+					submissionId: 'turn',
+					toolCallId: 'outer',
+					toolName: 'codemode',
+					output: {
+						executionId: String(index),
+						stdout: '😀'.repeat(20_000),
+						stderr: '',
+						stdoutBytes: 80_000,
+						stderrBytes: 0,
+						truncated: false,
+					},
+				},
+			]);
+		}
+		expect(sent).toHaveLength(0);
+		await vi.advanceTimersByTimeAsync(100);
+		await batcher.flush();
+		const events = sent.flat().filter((event) => event.type === 'tool-output');
+		expect(events).toHaveLength(33);
+		expect(events.reduce((total, event) => total + new TextEncoder().encode(event.output.stdout + event.output.stderr).length, 0)).toBe(
+			120_000,
+		);
+		expect(events.at(-1)?.output.truncated).toBe(true);
+		await batcher.enqueue([{ type: 'tool-call-end', toolCallId: 'outer', toolName: 'codemode', result: 'done' }]);
+		await batcher.enqueue([events[0]!]);
+		await batcher.flush();
+		expect(sent.flat().filter((event) => event.type === 'tool-output')).toHaveLength(33);
+	} finally {
+		vi.useRealTimers();
+	}
+});

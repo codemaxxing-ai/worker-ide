@@ -1,4 +1,7 @@
+import { mergeCommandOutput } from '@shared/command-output';
+
 import type { StreamEvent } from '@shared/agent-state';
+import type { ToolCommandOutput } from '@shared/command-output';
 
 const FLUSH_INTERVAL_MS = 100;
 const MAX_PENDING_CHARACTERS = 8192;
@@ -10,6 +13,14 @@ export class SessionEventBatcher {
 	private timer?: ReturnType<typeof setTimeout>;
 	private tail = Promise.resolve();
 	private failure?: Error;
+	private outputs = new Map<string, ToolCommandOutput>();
+	private completed = new Set<string>();
+
+	completeTool(toolCallId: string): void {
+		this.outputs.delete(toolCallId);
+		this.completed.add(toolCallId);
+		if (this.completed.size > 256) this.completed.delete(this.completed.values().next().value ?? '');
+	}
 
 	constructor(
 		private readonly send: (events: StreamEvent[]) => Promise<void>,
@@ -19,8 +30,32 @@ export class SessionEventBatcher {
 	enqueue(events: StreamEvent[]): Promise<void> {
 		if (this.failure) return Promise.reject(this.failure);
 		let boundary = false;
-		for (const event of events) {
+		for (let event of events) {
 			const last = this.pending.at(-1);
+			if (event.type === 'tool-output') {
+				if (this.completed.has(event.toolCallId)) continue;
+				const retained = mergeCommandOutput(this.outputs.get(event.toolCallId), event.output);
+				this.outputs.set(event.toolCallId, retained);
+				const executionId = event.output.executionId;
+				const output = retained.executions.find((entry) => entry.executionId === executionId);
+				event = {
+					...event,
+					output: output ?? { ...event.output, executionId: 'output-record-limit', stdout: '', stderr: '', truncated: true },
+				};
+				const outputEvent = event;
+				const index = this.pending.findIndex(
+					(pending) =>
+						pending.type === 'tool-output' &&
+						pending.toolCallId === outputEvent.toolCallId &&
+						pending.output.executionId === outputEvent.output.executionId,
+				);
+				if (index === -1) {
+					this.pending.push(event);
+				} else {
+					this.pending[index] = event;
+				}
+				continue;
+			}
 			if (event.type === 'text-delta' || event.type === 'reasoning-delta') {
 				this.pendingCharacters += event.delta.length;
 				if (last?.type === event.type) {
@@ -34,6 +69,7 @@ export class SessionEventBatcher {
 					continue;
 				}
 			} else {
+				if (event.type === 'tool-call-end') this.completeTool(event.toolCallId);
 				boundary = true;
 			}
 			this.pending.push({ ...event });

@@ -9,7 +9,8 @@ export default defineConfig({
 	fullyParallel: true,
 	forbidOnly: !!process.env.CI,
 	retries: process.env.CI ? 2 : 1,
-	workers: process.env.CI ? 1 : 4,
+	// Native Docker setup shares the local runtime; match CI's execution budget.
+	workers: 1,
 	reporter: [['html', { open: 'never' }]],
 	use: {
 		launchOptions: { timeout: 15_000 },

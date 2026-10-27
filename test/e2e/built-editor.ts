@@ -22,7 +22,8 @@ export async function serveBuiltEditor(context: BrowserContext, browserName: str
 			request.resourceType() === 'document' && url.pathname.startsWith('/p/') && isValidProjectId(url.pathname.slice(3));
 		const isAsset = url.pathname.startsWith('/assets/');
 		if (!isProjectDocument && !isAsset) return route.continue();
-		const response = await route.fetch();
+		// Retry transient connection resets while reading the live response policy.
+		const response = await route.fetch({ maxRetries: request.method() === 'GET' ? 2 : 0 });
 		if (!response.ok() && !(isAsset && response.status() === 404)) return route.fulfill({ response });
 		const headers = response.headers();
 		delete headers['content-length'];

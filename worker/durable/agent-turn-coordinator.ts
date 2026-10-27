@@ -169,6 +169,8 @@ export class AgentTurnCoordinator {
 		const current = this.dependencies.getCurrentSession();
 		if (current?.sessionId !== sessionId) return;
 		this.dependencies.updateSessionState(sessionId, {
+			activeSubmissionId: submissionId,
+			doomLoopMessage: undefined,
 			status: 'running',
 			statusText: 'Thinking...',
 			pendingQuestion: undefined,
@@ -212,6 +214,7 @@ export class AgentTurnCoordinator {
 			this.dependencies.refreshReviewState();
 			this.dependencies.updateSessionState(sessionId, {
 				status: hasActiveSubmission ? 'running' : status === 'completed' ? 'completed' : status,
+				activeSubmissionId: hasActiveSubmission ? latest.activeSubmissionId : undefined,
 				statusText: hasActiveSubmission ? 'Thinking...' : undefined,
 				error: hasActiveSubmission ? undefined : error ? { message: error } : undefined,
 				messages: activeMessages,

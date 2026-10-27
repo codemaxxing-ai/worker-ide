@@ -111,3 +111,93 @@ describe('streamed tool arguments', () => {
 		]);
 	});
 });
+
+describe('live command events', () => {
+	it('updates output without ending the tool and rejects stale submission events', async () => {
+		const { stream, getCurrent } = createHarness();
+		getCurrent().activeSubmissionId = 'turn';
+		await stream.handleEvent('session', { type: 'tool-call-start', toolCallId: 'exec', toolName: 'exec' });
+		const event = {
+			type: 'tool-output',
+			submissionId: 'turn',
+			toolCallId: 'exec',
+			toolName: 'exec',
+			output: { executionId: 'one', stdout: 'first', stderr: '', stdoutBytes: 5, stderrBytes: 0, truncated: false },
+		} satisfies import('@shared/agent-state').ToolOutputEvent;
+		await stream.handleEvent('session', event);
+		expect(getCurrent().toolMetadata.exec.commandOutput?.executions[0].stdout).toBe('first');
+		expect(getCurrent().messages[0].parts.some((part) => part.type === 'tool-result')).toBe(false);
+		await stream.handleEvent('session', { ...event, submissionId: 'old', output: { ...event.output, stdout: 'stale', stdoutBytes: 6 } });
+		expect(getCurrent().toolMetadata.exec.commandOutput?.executions[0].stdout).toBe('first');
+		await stream.handleEvent('session', { type: 'tool-call-end', toolCallId: 'exec', toolName: 'exec', result: 'done' });
+		await stream.handleEvent('session', { ...event, output: { ...event.output, stdout: 'late', stdoutBytes: 9 } });
+		expect(getCurrent().toolMetadata.exec.commandOutput?.executions[0].stdout).toBe('first');
+	});
+});
+
+it('accepts current subagent output and ignores a previous submission or completed parent', async () => {
+	const { stream, getCurrent } = createHarness();
+	getCurrent().activeSubmissionId = 'turn';
+	await stream.handleEvent('session', {
+		type: 'tool-call-start',
+		toolCallId: 'parent',
+		toolName: 'sub_agent',
+		arguments: { prompt: 'work' },
+	});
+	const event = {
+		type: 'tool-output',
+		submissionId: 'turn',
+		toolCallId: 'child',
+		toolName: 'exec',
+		output: { executionId: 'execution', stdout: 'child output', stderr: '', stdoutBytes: 12, stderrBytes: 0, truncated: false },
+	} satisfies import('@shared/agent-state').ToolOutputEvent;
+	await stream.handleEvent('session', {
+		type: 'sub-agent-activity',
+		parentToolCallId: 'parent',
+		activity: { kind: 'tool-output', event: { ...event, submissionId: 'old' } },
+	});
+	expect(getCurrent().subAgentActivities.parent).toBeUndefined();
+	await stream.handleEvent('session', { type: 'sub-agent-activity', parentToolCallId: 'parent', activity: { kind: 'tool-output', event } });
+	expect(getCurrent().subAgentActivities.parent?.tools[0]?.commandOutput?.executions[0]?.stdout).toBe('child output');
+	await stream.handleEvent('session', { type: 'tool-call-end', toolCallId: 'parent', toolName: 'sub_agent', result: 'done' });
+	await stream.handleEvent('session', {
+		type: 'sub-agent-activity',
+		parentToolCallId: 'parent',
+		activity: { kind: 'tool-output', event: { ...event, output: { ...event.output, stdout: 'late', stdoutBytes: 20 } } },
+	});
+	expect(getCurrent().subAgentActivities.parent?.tools[0]?.commandOutput?.executions[0]?.stdout).toBe('child output');
+});
+
+it('merges child completion into its live record and rejects late child output', async () => {
+	const { stream, getCurrent } = createHarness();
+	getCurrent().activeSubmissionId = 'turn';
+	await stream.handleEvent('session', { type: 'tool-call-start', toolCallId: 'parent', toolName: 'sub_agent' });
+	const event = {
+		type: 'tool-output',
+		submissionId: 'turn',
+		toolCallId: 'child',
+		toolName: 'exec',
+		output: { executionId: 'execution', stdout: 'partial', stderr: '', stdoutBytes: 7, stderrBytes: 0, truncated: false },
+	} satisfies import('@shared/agent-state').ToolOutputEvent;
+	await stream.handleEvent('session', { type: 'sub-agent-activity', parentToolCallId: 'parent', activity: { kind: 'tool-output', event } });
+	await stream.handleEvent('session', {
+		type: 'sub-agent-activity',
+		parentToolCallId: 'parent',
+		activity: { kind: 'tool-metadata', toolCallId: 'child', toolName: 'exec', title: 'Command', metadata: {} },
+	});
+	await stream.handleEvent('session', {
+		type: 'sub-agent-activity',
+		parentToolCallId: 'parent',
+		activity: { kind: 'tool-end', toolCallId: 'child', toolName: 'exec', result: 'final result' },
+	});
+	await stream.handleEvent('session', {
+		type: 'sub-agent-activity',
+		parentToolCallId: 'parent',
+		activity: { kind: 'tool-output', event: { ...event, output: { ...event.output, stdout: 'late', stdoutBytes: 20 } } },
+	});
+	expect(getCurrent().subAgentActivities.parent?.tools).toHaveLength(1);
+	expect(getCurrent().subAgentActivities.parent?.tools[0]).toMatchObject({
+		result: 'final result',
+		commandOutput: { executions: [expect.objectContaining({ stdout: 'partial' })] },
+	});
+});

@@ -6,7 +6,9 @@ import { useStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 
 import { isToolName } from '../helpers';
+import { CommandOutput } from './command-output';
 import { ToolIcon } from './tool-icon';
+import { InlineCodeSection } from './tool-views';
 
 import type { SubAgentActivityRecord } from '@shared/agent-state';
 import type { ToolName } from '@shared/validation';
@@ -103,6 +105,16 @@ export function InlineSubAgentActivity({
 					</pre>
 				</details>
 			)}
+			{isExpanded &&
+				!rawResultContent &&
+				tools.map((entry, index) =>
+					entry.result === undefined ? (
+						<CommandOutput key={entry.toolCallId ?? index} output={entry.commandOutput} />
+					) : (
+						<InlineCodeSection key={entry.toolCallId ?? index} label="Output" content={entry.result} />
+					),
+				)}
+			{isExpanded && activityRecord?.outputTruncated && <CommandOutput output={{ executions: [], truncated: true }} />}
 			{isExpanded && subAgentDebugLogId && projectId && (
 				<button
 					onClick={handleDownloadLog}

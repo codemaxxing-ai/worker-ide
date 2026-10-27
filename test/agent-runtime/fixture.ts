@@ -2,7 +2,7 @@ import { WorkerEntrypoint, env as fixtureEnvironment } from 'cloudflare:workers'
 import { z } from 'zod';
 
 import { toHex } from '../../shared/project-id';
-import { AgentRunner as ApplicationAgentRunner, SessionTurnAgent } from '../../worker/durable';
+import { AgentRunner as ApplicationAgentRunner, SessionTurnAgent, SubAgentWorker } from '../../worker/durable';
 
 import type { AgentSessionState, StreamEvent } from '../../shared/agent-state';
 import type { ChatMessage } from '../../shared/types';
@@ -16,6 +16,7 @@ ApplicationAgentRunner.prototype.addMcpServer = async (): Promise<{ id: string; 
 	state: 'ready',
 });
 SessionTurnAgent.prototype.addMcpServer = async (): Promise<{ id: string; state: 'ready' }> => ({ id: 'fixture-docs', state: 'ready' });
+SubAgentWorker.prototype.addMcpServer = async (): Promise<{ id: string; state: 'ready' }> => ({ id: 'fixture-docs', state: 'ready' });
 const aiBinding = fixtureEnvironment.AI;
 Reflect.set(fixtureEnvironment, 'AI', {
 	run: (model: string, input: unknown) => Reflect.apply(aiBinding.run, aiBinding, [model, input]),
@@ -98,6 +99,7 @@ export class FixtureAI extends WorkerEntrypoint {
 		startedModelRequests.add(prompt);
 		if (prompt === 'stall-start') await new Promise((resolve) => setTimeout(resolve, 60_000));
 		const finishedTool = input.messages.at(-1)?.role === 'tool';
+		if (prompt === 'delegate-output' && finishedTool) await new Promise((resolve) => setTimeout(resolve, 1000));
 		let heartbeat: ReturnType<typeof setInterval> | undefined;
 		const stream = new ReadableStream<Uint8Array>({
 			start(controller) {
@@ -113,6 +115,64 @@ export class FixtureAI extends WorkerEntrypoint {
 				}
 				if (prompt === 'fail') {
 					controller.error(new Error('Simulated provider failure'));
+					return;
+				}
+				if (prompt === 'delegate-output' && !finishedTool) {
+					send({
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											id: 'delegate',
+											type: 'function',
+											function: { name: 'sub_agent', arguments: JSON.stringify({ prompt: 'codemode-output' }) },
+										},
+									],
+								},
+								finish_reason: 'tool_calls',
+							},
+						],
+					});
+					controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+					controller.close();
+					return;
+				}
+				const codeModeScenarios: Record<string, string> = {
+					'codemode-output':
+						'const first = await tools.exec({command:"printf first",backend:"shell"}); await new Promise(resolve => setTimeout(resolve, 1000)); const second = await tools.exec({command:"printf second",backend:"shell"}); await new Promise(resolve => setTimeout(resolve, 1000)); return {first, second};',
+					'codemode-failure':
+						'for (let index = 0; index < 3; index++) { await tools.exec({command:"exit 7",backend:"shell"}); } await state.writeFile({path:"/source.txt",content:"must not execute"}); return "unexpected";',
+					'codemode-progress':
+						'for (let index = 0; index < 3; index++) { await tools.exec({command:"exit 7",backend:"shell"}); await state.writeFile({path:"/source.txt",content:"progress-"+index}); } return "done";',
+					'state-failure':
+						'for (let index = 0; index < 3; index++) { try { await state.writeFile({path:"/package.json",content:"{}"}); } catch {} } await state.writeFile({path:"/source.txt",content:"must not execute"}); return "unexpected";',
+				};
+				const code = codeModeScenarios[prompt];
+				if ((code && !finishedTool) || prompt === 'repeat-failure') {
+					send({
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											id: code ? 'codemode-call' : `failure-${input.messages.length}`,
+											type: 'function',
+											function: {
+												name: code ? 'codemode' : 'exec',
+												arguments: JSON.stringify(code ? { code } : { command: 'exit 7', backend: 'shell' }),
+											},
+										},
+									],
+								},
+								finish_reason: 'tool_calls',
+							},
+						],
+					});
+					controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+					controller.close();
 					return;
 				}
 				if (prompt === 'burst-edit' && !finishedTool) {
@@ -277,8 +337,15 @@ export default {
 		}
 		if (url.pathname === '/seed-history') {
 			const history: ChatMessage[] = [
-				{ id: 'old-user', role: 'user', parts: [{ type: 'text', content: 'Previous request' }] },
-				{ id: 'old-assistant', role: 'assistant', parts: [{ type: 'text', content: 'Previous answer' }] },
+				{
+					id: 'old-user',
+					role: 'user',
+					authorUserId: 'original-author',
+					createdAt: 123_000,
+					metadata: { snapshotId: 'original-review' },
+					parts: [{ type: 'text', content: 'Previous request' }],
+				},
+				{ id: 'old-assistant', role: 'assistant', parts: [{ type: 'text', content: 'Previous answer'.repeat(1000) }] },
 			];
 			await parent.seedTestHistory(sessionId, history);
 			return Response.json({ seeded: true });

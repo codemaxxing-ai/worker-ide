@@ -36,6 +36,7 @@ describe('session turn lifecycle', () => {
 			state: { activeSubmissionId: 'submission-1' },
 			eventBatcher: { flush: async () => {} },
 			getMessages: async () => [],
+			session: { getHistoryRowStats: async () => [] },
 			getDebugLogger: () => logger,
 			setState: vi.fn(),
 			completePendingTurn: vi.fn(async () => {}),
@@ -128,6 +129,7 @@ describe('session turn lifecycle', () => {
 		const cancelSubmission = vi.fn(async () => {});
 		const cancellation = new Promise<void>(() => {});
 		const host = {
+			eventAbortController: new AbortController(),
 			listSubmissions: async () => [submission('running'), { ...submission('pending'), submissionId: 'queued' }],
 			cancelWorkspaceCommands: vi.fn(() => cancellation),
 			cancelSubmission,
@@ -143,7 +145,7 @@ describe('session turn lifecycle', () => {
 	});
 
 	it('removes one queued submission without cancelling the running workspace command', async () => {
-		const host = { cancelSubmission: vi.fn(async () => {}), cancelWorkspaceCommands: vi.fn() };
+		const host = { state: {}, cancelSubmission: vi.fn(async () => {}), cancelWorkspaceCommands: vi.fn() };
 		await Reflect.apply(SessionTurnAgent.prototype.cancelSubmissionById, host, ['queued']);
 		expect(host.cancelSubmission).toHaveBeenCalledWith('queued', 'Cancelled by user');
 		expect(host.cancelWorkspaceCommands).not.toHaveBeenCalled();

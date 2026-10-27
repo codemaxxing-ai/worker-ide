@@ -1,5 +1,7 @@
 import { parsePartialJson } from 'ai';
 
+import { mergeCommandOutput } from '@shared/command-output';
+
 import { clearSnapshotFromMessages, setSnapshotOnLastCommittedUserMessage } from './session-history';
 import { accumulatePendingChange } from '../services/agent/pending-changes';
 
@@ -34,6 +36,30 @@ export class SessionStreamState {
 		}
 
 		switch (event.type) {
+			case 'tool-output': {
+				const current = this.host.getCurrentSession();
+				if (!current || current.status !== 'running' || current.activeSubmissionId !== event.submissionId) break;
+				if (
+					current.messages.some((message) =>
+						message.parts.some((part) => part.type === 'tool-result' && part.toolCallId === event.toolCallId),
+					)
+				)
+					break;
+				const previous = current.toolMetadata[event.toolCallId];
+				this.host.updateSessionState(sessionId, {
+					toolMetadata: {
+						...current.toolMetadata,
+						[event.toolCallId]: {
+							toolCallId: event.toolCallId,
+							toolName: event.toolName,
+							title: previous?.title ?? event.toolName,
+							metadata: previous?.metadata ?? {},
+							commandOutput: mergeCommandOutput(previous?.commandOutput, event.output),
+						},
+					},
+				});
+				break;
+			}
 			case 'status': {
 				this.host.updateSessionState(sessionId, { statusText: event.message });
 				break;
@@ -95,6 +121,7 @@ export class SessionStreamState {
 					toolMetadata: {
 						...current.toolMetadata,
 						[event.toolCallId]: {
+							commandOutput: current.toolMetadata[event.toolCallId]?.commandOutput,
 							toolCallId: event.toolCallId,
 							toolName: event.toolName,
 							title: event.title,
@@ -231,6 +258,48 @@ export class SessionStreamState {
 					break;
 				}
 				const parentId = event.parentToolCallId;
+				if (event.activity.kind === 'tool-output') {
+					if (
+						current.status !== 'running' ||
+						current.activeSubmissionId !== event.activity.event.submissionId ||
+						!current.messages.some((message) => message.parts.some((part) => part.type === 'tool-call' && part.toolCallId === parentId)) ||
+						current.messages.some((message) => message.parts.some((part) => part.type === 'tool-result' && part.toolCallId === parentId))
+					)
+						break;
+					const progress = event.activity.event;
+					const record = current.subAgentActivities[parentId] ?? { tools: [], debugLogId: undefined, streamingText: undefined };
+					const index = record.tools.findIndex((tool) => tool.toolCallId === progress.toolCallId);
+					const retained = mergeCommandOutput(
+						{
+							executions: record.tools.flatMap((tool) => tool.commandOutput?.executions ?? []),
+							truncated: record.outputTruncated ?? false,
+						},
+						progress.output,
+					);
+					const output = retained.executions.find((entry) => entry.executionId === progress.output.executionId);
+					if (!output) {
+						this.host.updateSessionState(sessionId, {
+							subAgentActivities: { ...current.subAgentActivities, [parentId]: { ...record, outputTruncated: true } },
+						});
+						break;
+					}
+					const previous = record.tools[index];
+					if (previous?.result !== undefined) break;
+					const entry = {
+						toolCallId: progress.toolCallId,
+						toolName: progress.toolName,
+						title: previous?.title ?? progress.toolName,
+						metadata: previous?.metadata ?? {},
+						commandOutput: mergeCommandOutput(previous?.commandOutput, output),
+					};
+					const tools = [...record.tools];
+					if (index === -1) tools.push(entry);
+					else tools[index] = entry;
+					this.host.updateSessionState(sessionId, {
+						subAgentActivities: { ...current.subAgentActivities, [parentId]: { ...record, tools, outputTruncated: retained.truncated } },
+					});
+					break;
+				}
 				if (event.activity.kind === 'text-delta') {
 					this.accumulateSubAgentDelta(sessionId, parentId, event.activity.delta);
 					break;
@@ -240,7 +309,10 @@ export class SessionStreamState {
 					// sub-agent reasoning is not surfaced in the activity record.
 					break;
 				}
-				if (event.activity.kind === 'tool-start' || (event.activity.kind === 'tool-end' && !event.activity.isError)) {
+				if (
+					event.activity.kind === 'tool-start' ||
+					(event.activity.kind === 'tool-end' && !event.activity.toolCallId && !event.activity.isError)
+				) {
 					break;
 				}
 				this.flushSubAgentDeltas(sessionId);
@@ -256,25 +328,40 @@ export class SessionStreamState {
 						break;
 					}
 					case 'tool-metadata': {
-						activities[parentId] = {
-							...existing,
-							tools: [
-								...existing.tools,
-								{
-									toolName: event.activity.toolName,
-									title: event.activity.title,
-									metadata: event.activity.metadata,
-									isError: typeof event.activity.metadata.error === 'string' && event.activity.metadata.error.length > 0,
-								},
-							],
+						const activity = event.activity;
+						const index = activity.toolCallId ? existing.tools.findIndex((tool) => tool.toolCallId === activity.toolCallId) : -1;
+						const entry = {
+							...existing.tools[index],
+							toolCallId: activity.toolCallId,
+							toolName: activity.toolName,
+							title: activity.title,
+							metadata: activity.metadata,
+							isError: typeof activity.metadata.error === 'string' && activity.metadata.error.length > 0,
 						};
+						const tools = [...existing.tools];
+						if (index === -1) tools.push(entry);
+						else tools[index] = entry;
+						activities[parentId] = { ...existing, tools };
 						break;
 					}
 					case 'tool-end': {
-						activities[parentId] = {
-							...existing,
-							tools: [...existing.tools, { toolName: event.activity.toolName, title: 'Error', metadata: {}, isError: true }],
+						const activity = event.activity;
+						const index = activity.toolCallId ? existing.tools.findIndex((tool) => tool.toolCallId === activity.toolCallId) : -1;
+						const previous = existing.tools[index];
+						const entry = {
+							...previous,
+							toolCallId: activity.toolCallId,
+							toolName: activity.toolName,
+							title: previous?.title ?? activity.toolName,
+							metadata: previous?.metadata ?? {},
+							result: activity.result,
+							commandOutput: previous?.commandOutput,
+							isError: activity.isError,
 						};
+						const tools = [...existing.tools];
+						if (index === -1) tools.push(entry);
+						else tools[index] = entry;
+						activities[parentId] = { ...existing, tools };
 						break;
 					}
 					default: {

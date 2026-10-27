@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer';
 
 import { Think } from '@cloudflare/think';
 
-import { AGENT_SYSTEM_PROMPT, DEFAULT_AI_MODEL, MCP_SERVERS } from '@shared/constants';
+import { AGENT_SYSTEM_PROMPT, DEFAULT_AI_MODEL, MCP_SERVERS, getModelLimits } from '@shared/constants';
 import { aiModelSchema } from '@shared/validation';
 
 import { AgentRunner } from './agent-runner';
@@ -12,22 +12,41 @@ import { filesystemNamespace } from '../lib/durable-object-namespaces';
 import { runWithProjectStub } from '../lib/project-fs';
 import { toDurableObjectId } from '../lib/project-id';
 import { AgentLogger } from '../services/agent/agent-logger';
+import { estimateMessagesTokens } from '../services/agent/context-pruner';
 import { createSendEventFunction, drainEventQueue, toolErrorEvents } from '../services/agent/event-helpers';
+import {
+	configureHarnessSession,
+	HARNESS_MAX_RETRIES,
+	harnessContextGuard,
+	withHarnessContextBudget,
+	readHarnessTranscript,
+} from '../services/agent/harness-session';
 import { registerConfiguredMcpServers } from '../services/agent/mcp';
 import { isRequestOriginContext, type RequestOriginContext } from '../services/agent/request-origin-context';
 import { addFileToSnapshot, deleteDirectoryRecursive, initSnapshot } from '../services/agent/snapshot-manager';
 import { buildRuntimePromptAdditions, readAgentsContext } from '../services/agent/system-prompt-builder';
 import { chatMessageToUiMessage, uiMessagesToChatMessages, userMessageToUiMessage } from '../services/agent/think-messages';
+import { ToolFailureGuard, toolOutputError } from '../services/agent/tool-failure-guard';
 import { createServerTools } from '../services/agent/tools';
 import { createAdapter as createWorkersAiAdapter } from '../services/agent/workers-ai';
 
 import type { AgentDebugLog } from '../services/agent/agent-logger';
 import type { SnapshotContext } from '../services/agent/snapshot-manager';
+import type { ToolFailureState } from '../services/agent/tool-failure-guard';
 import type { FileChange } from '../services/agent/types';
-import type { ChatResponseResult, ChunkContext, ThinkSubmissionInspection, StepContext, TurnConfig, TurnContext } from '@cloudflare/think';
+import type {
+	ChatResponseResult,
+	ChunkContext,
+	ThinkSubmissionInspection,
+	StepContext,
+	TurnConfig,
+	TurnContext,
+	PrepareStepContext,
+} from '@cloudflare/think';
 import type { StreamEvent } from '@shared/agent-state';
 import type { AIModelId } from '@shared/constants';
 import type { AgentMode, ChatMessage } from '@shared/types';
+import type { Session } from 'agents/experimental/memory/session';
 import type { StopCondition, ToolSet } from 'ai';
 
 interface SessionTurnConfiguration {
@@ -49,6 +68,7 @@ interface ActiveTurnConfiguration extends TurnExecutionConfiguration {
 }
 
 interface SessionTurnState {
+	failureState?: ToolFailureState;
 	configuration?: SessionTurnConfiguration;
 	historyInitialized?: boolean;
 	activeSubmissionId?: string;
@@ -84,6 +104,35 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 	private parentStub?: Promise<DurableObjectStub<AgentRunner>>;
 	private eventBatcher = this.createEventBatcher();
 	private debugLogger?: AgentLogger;
+	private inputOverhead = 0;
+	private failureGuard?: ToolFailureGuard;
+
+	// Keep transcript rows intact; compaction only changes the inference overlay.
+	override mediaEviction = false;
+
+	// Retain interruption reconciliation, but never replay a turn or its tools.
+	override async onChatRecovery() {
+		return { continue: false };
+	}
+
+	override configureSession(session: Session): Session {
+		return configureHarnessSession(session, () => ({ ...this.state.configuration, abortSignal: this.eventAbortController.signal }));
+	}
+
+	override contextOverflow = harnessContextGuard(DEFAULT_AI_MODEL);
+
+	override async beforeStep(context: PrepareStepContext): Promise<void> {
+		this.failureGuard?.assertHealthy();
+		const estimatedTokens = estimateMessagesTokens(context.messages) + this.inputOverhead;
+		await this.eventBatcher.enqueue([
+			{
+				type: 'context-utilization',
+				estimatedTokens,
+				contextWindow: getModelLimits(this.getModel()).contextWindow,
+				utilization: estimatedTokens / getModelLimits(this.getModel()).contextWindow,
+			},
+		]);
+	}
 
 	override broadcast(_message: string | ArrayBuffer | ArrayBufferView, _without?: string[]): void {
 		// This internal facet has no UI clients. Think persists its transcript
@@ -153,6 +202,7 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 			turnConfiguration.requestOriginContext ?? configuration.requestOriginContext,
 		);
 		const agentsContext = await runWithProjectStub(filesystemStub, () => readAgentsContext('/project'));
+		this.contextOverflow = harnessContextGuard(this.getModel());
 		const instructions = await buildSessionTurnInstructions(turnConfiguration.mode, agentsContext);
 		logger?.debug('llm', 'request', { instructions, messages: context.messages });
 
@@ -160,7 +210,28 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		this.queryChanges = [];
 		this.eventAbortController.abort();
 		this.eventAbortController = new AbortController();
-		const sendEvent = createSendEventFunction(this.eventQueue, { current: undefined }, this.eventAbortController.signal);
+		if (this.state.failureState?.submissionId !== turnConfiguration.submissionId)
+			this.setState({ ...this.state, failureState: { submissionId: turnConfiguration.submissionId, count: 0, seen: [] } });
+		this.failureGuard = new ToolFailureGuard(
+			() => this.state.failureState ?? { submissionId: turnConfiguration.submissionId, count: 0, seen: [] },
+			(failureState) => {
+				this.setState({ ...this.state, failureState });
+				if (failureState.message) {
+					this.eventQueue.push({
+						type: 'doom-loop-detected',
+						reason: 'repeated_error_pattern',
+						toolName: undefined,
+						message: failureState.message,
+					});
+					this.ctx.waitUntil(this.cancelWorkspaceCommands(turnConfiguration.submissionId).catch(() => {}));
+				}
+			},
+		);
+		const queuedSendEvent = createSendEventFunction(this.eventQueue, { current: undefined }, this.eventAbortController.signal);
+		const sendEvent: typeof queuedSendEvent = (type, data) => {
+			if (type === 'file_changed') this.failureGuard?.progress();
+			queuedSendEvent(type, data);
+		};
 		if (turnConfiguration.mode === 'code' && !context.continuation) {
 			const snapshot = await runWithProjectStub(
 				filesystemStub,
@@ -200,6 +271,12 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 				}),
 				fsStub: filesystemStub,
 				model: turnConfiguration.model,
+				submissionId: turnConfiguration.submissionId,
+				failureGuard: this.failureGuard,
+				onToolOutput: async (event) => {
+					if (this.state.activeSubmissionId === event.submissionId && !this.eventAbortController.signal.aborted)
+						await this.eventBatcher.enqueue([event]);
+				},
 				requestOriginContext: turnConfiguration.requestOriginContext ?? configuration.requestOriginContext,
 			},
 			this.queryChanges,
@@ -207,18 +284,29 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 			logger,
 		);
 
+		this.inputOverhead = Math.ceil(
+			(instructions.length +
+				JSON.stringify(
+					Object.entries(tools).map(([name, tool]) => ({ name, description: tool.description, inputSchema: tool.inputSchema })),
+				).length) /
+				4,
+		);
 		return {
-			model: createWorkersAiAdapter(turnConfiguration.model, {
-				generationType: 'agent',
-				projectId: configuration.projectId,
-				organizationId: configuration.organizationId,
-			}),
+			model: withHarnessContextBudget(
+				createWorkersAiAdapter(turnConfiguration.model, {
+					generationType: 'agent',
+					projectId: configuration.projectId,
+					organizationId: configuration.organizationId,
+				}),
+				turnConfiguration.model,
+			),
 			instructions,
 			tools,
 			maxSteps: this.maxSteps,
 			stopWhen: shouldWaitForUser,
 			chatStreamStallTimeoutMs: this.chatStreamStallTimeoutMs,
-			maxRetries: 0,
+			maxRetries: HARNESS_MAX_RETRIES,
+			maxOutputTokens: getModelLimits(turnConfiguration.model).maxOutput,
 		};
 	}
 
@@ -270,6 +358,13 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 	}
 
 	override async onStepEnd(context: StepContext): Promise<void> {
+		for (const part of context.content) {
+			if (part.type === 'tool-error')
+				this.failureGuard?.record({ id: part.toolCallId, toolName: part.toolName, input: part.input, error: String(part.error) });
+			if (part.type === 'tool-result' && part.toolName !== 'codemode')
+				this.failureGuard?.record({ id: part.toolCallId, toolName: part.toolName, input: part.input, error: toolOutputError(part.output) });
+		}
+
 		const logger = this.debugLogger;
 		if (logger) {
 			logger.setIteration(context.stepNumber + 1);
@@ -290,6 +385,7 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		await this.saveSnapshotChanges(events);
 		await this.eventBatcher.enqueue(events);
 		await this.eventBatcher.flush();
+		this.failureGuard?.assertHealthy();
 	}
 
 	override async onChatResponse(result: ChatResponseResult): Promise<void> {
@@ -308,12 +404,17 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		if (submission.status === 'running') {
 			const activeTurn = parseActiveTurnConfiguration(submission.metadata, submission.submissionId);
 			const isNewTurn = this.state.activeSubmissionId !== submission.submissionId;
-			if (isNewTurn) this.debugLogger = undefined;
+			if (isNewTurn) {
+				this.debugLogger = undefined;
+				this.eventAbortController.abort();
+				this.eventAbortController = new AbortController();
+			}
 			this.setState({
 				...this.state,
 				activeSubmissionId: submission.submissionId,
 				activeTurn,
 				activeDebugLog: isNewTurn ? undefined : this.state.activeDebugLog,
+				failureState: isNewTurn ? { submissionId: submission.submissionId, count: 0, seen: [] } : this.state.failureState,
 			});
 			const logger = this.getDebugLogger();
 			if (logger) this.setState({ ...this.state, activeDebugLog: logger.toJSON() });
@@ -326,8 +427,11 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 			// scheduled reconciliation can deliver it from a fresh invocation.
 			console.error('[SessionTurnAgent] Streaming events failed before completion:', error);
 		});
-		const terminal = getTerminalSubmissionResult(submission);
-		const history = uiMessagesToChatMessages(await this.getMessages());
+		const terminal =
+			this.state.failureState?.message && submission.status !== 'aborted'
+				? ({ status: 'error', error: this.state.failureState.message } satisfies { status: 'error'; error: string })
+				: getTerminalSubmissionResult(submission);
+		const history = uiMessagesToChatMessages(await readHarnessTranscript(this.session));
 		const logger = this.getDebugLogger();
 		if (terminal.status === 'aborted') logger?.markAborted();
 		if (terminal.error) logger?.error('agent_loop', terminal.status, { message: terminal.error });
@@ -369,6 +473,7 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 	}
 
 	async cancelSubmissionById(submissionId: string): Promise<void> {
+		if (this.state.activeSubmissionId === submissionId) this.eventAbortController.abort();
 		await this.cancelSubmission(submissionId, 'Cancelled by user');
 	}
 
@@ -387,7 +492,10 @@ export class SessionTurnAgent extends Think<Env, SessionTurnState> {
 		for (const submission of submissions.filter((submission) => submission.status === 'pending')) {
 			await this.cancelSubmission(submission.submissionId, 'Cancelled by user');
 		}
-		if (runningSubmission) await this.cancelSubmission(runningSubmission.submissionId, 'Cancelled by user');
+		if (runningSubmission) {
+			this.eventAbortController.abort();
+			await this.cancelSubmission(runningSubmission.submissionId, 'Cancelled by user');
+		}
 	}
 
 	private async cancelWorkspaceCommands(submissionId: string): Promise<void> {

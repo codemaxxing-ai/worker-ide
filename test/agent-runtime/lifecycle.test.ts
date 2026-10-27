@@ -60,6 +60,10 @@ beforeAll(async () => {
 		}),
 	);
 	await runtime.ready;
+	const database = await runtime.getD1Database('DB');
+	await database.exec(
+		`CREATE TABLE "user" (id TEXT PRIMARY KEY, name TEXT NOT NULL, image TEXT); INSERT INTO "user" VALUES ('original-author', 'Original author', NULL)`,
+	);
 });
 
 afterAll(async () => {
@@ -116,6 +120,96 @@ async function waitForToolInput(projectId: string) {
 }
 
 describe('production agent lifecycle in the current Workers runtime', () => {
+	it('forwards subagent command output during execution and replaces it with the child result', async () => {
+		const projectId = await createProject();
+		await request('/submit', projectId, { messageId: 'message', prompt: 'delegate-output' });
+		await vi.waitFor(
+			async () => {
+				expect(await request('/state', projectId)).toMatchObject({
+					status: 'running',
+					subAgentActivities: {
+						delegate: {
+							tools: expect.arrayContaining([
+								expect.objectContaining({
+									toolCallId: 'codemode-call',
+									commandOutput: expect.objectContaining({
+										executions: expect.arrayContaining([expect.objectContaining({ stdout: 'first' })]),
+									}),
+								}),
+							]),
+						},
+					},
+				});
+			},
+			{ timeout: 4000, interval: 25 },
+		);
+		await vi.waitFor(
+			async () => {
+				expect(await request('/state', projectId)).toMatchObject({
+					status: 'running',
+					subAgentActivities: {
+						delegate: {
+							tools: expect.arrayContaining([
+								expect.objectContaining({ toolCallId: 'codemode-call', result: expect.stringContaining('second') }),
+							]),
+						},
+					},
+				});
+			},
+			{ timeout: 4000, interval: 25 },
+		);
+		await waitForStatus(projectId, 'completed');
+	});
+	it('streams multiple CodeMode command records before the outer tool completes', async () => {
+		const projectId = await createProject();
+		await request('/submit', projectId, { messageId: 'message', prompt: 'codemode-output' });
+		await vi.waitFor(
+			async () => {
+				expect(await request('/state', projectId)).toMatchObject({
+					status: 'running',
+					toolMetadata: { 'codemode-call': { commandOutput: { executions: [expect.objectContaining({ stdout: 'first' })] } } },
+				});
+			},
+			{ timeout: 4000, interval: 25 },
+		);
+		await vi.waitFor(
+			async () => {
+				expect(await request('/state', projectId)).toMatchObject({
+					status: 'running',
+					toolMetadata: {
+						'codemode-call': {
+							commandOutput: { executions: [expect.objectContaining({ stdout: 'first' }), expect.objectContaining({ stdout: 'second' })] },
+						},
+					},
+				});
+			},
+			{ timeout: 4000, interval: 25 },
+		);
+		await waitForStatus(projectId, 'completed');
+		expect(JSON.stringify(await request('/session', projectId))).toContain('second');
+	});
+	it.each(['repeat-failure', 'codemode-failure', 'state-failure'])(
+		'stops equivalent structured failures and permits a new submission (%s)',
+		async (prompt) => {
+			const projectId = await createProject();
+			await request('/submit', projectId, { messageId: 'message', prompt });
+			await waitForStatus(projectId, 'error');
+			expect(await request('/state', projectId)).toMatchObject({
+				error: { message: expect.stringContaining('three repeated failures') },
+				doomLoopMessage: expect.stringContaining('three repeated failures'),
+			});
+			expect(await request('/file', projectId)).toEqual({ content: 'baseline' });
+			await request('/submit', projectId, { messageId: 'recovered', prompt: 'hello' });
+			await waitForStatus(projectId, 'completed');
+		},
+	);
+	it('resets repeated CodeMode failures after successful state operations', async () => {
+		const projectId = await createProject();
+		await request('/submit', projectId, { messageId: 'message', prompt: 'codemode-progress' });
+		await waitForStatus(projectId, 'completed');
+		expect(await request('/file', projectId)).toEqual({ content: 'progress-2' });
+		expect(await request('/state', projectId)).not.toHaveProperty('doomLoopMessage', expect.any(String));
+	});
 	it.each(['hello', 'fail'])('saves a downloadable debug log and restores its ID after reopening (%s)', async (prompt) => {
 		const projectId = await createProject();
 		await request('/submit', projectId, { messageId: 'message', prompt });
@@ -238,8 +332,13 @@ describe('production agent lifecycle in the current Workers runtime', () => {
 		await waitForStatus(projectId, 'completed');
 		expect(await request('/session', projectId)).toMatchObject({
 			history: expect.arrayContaining([
-				expect.objectContaining({ id: 'old-user' }),
-				expect.objectContaining({ id: 'old-assistant' }),
+				expect.objectContaining({
+					id: 'old-user',
+					authorUserId: 'original-author',
+					createdAt: 123_000,
+					metadata: expect.objectContaining({ snapshotId: 'original-review' }),
+				}),
+				expect.objectContaining({ id: 'old-assistant', parts: [{ type: 'text', content: 'Previous answer'.repeat(1000) }] }),
 				expect.objectContaining({ id: 'next' }),
 				expect.objectContaining({ role: 'assistant', parts: [{ type: 'text', content: 'Earlier request retained' }] }),
 			]),

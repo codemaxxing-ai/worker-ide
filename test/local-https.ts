@@ -3,7 +3,11 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { getCACertificates, setDefaultCACertificates } from 'node:tls';
 
-import { Agent } from 'undici';
+import { Agent, install } from 'undici';
+
+// Keep fetch and its Web API constructors together across isolated Vitest files.
+// Node's lazily cached fetch can retain a previous file's AbortSignal constructor.
+install();
 
 let dispatcher: Agent | undefined;
 

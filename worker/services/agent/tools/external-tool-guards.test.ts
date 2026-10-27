@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
+import { ToolFailureGuard } from '../tool-failure-guard';
 import { createMockContext, createMockSendEvent } from './test-helpers';
 
+import type { ToolFailureState } from '../tool-failure-guard';
 import type { BrowserBinding } from '../types';
+import type { StateBackend } from '@cloudflare/shell';
 import type { Agent } from 'agents';
 
 const mockReviewRun = vi.fn(async (_model: string, _input: unknown, _options: unknown) => ({
@@ -16,7 +20,8 @@ const mockCreateExecuteRuntime = vi.fn();
 const mockBrowserExecute = vi.fn(async ({ code }: { code: string }) => code);
 const mockBrowserMarkdown = vi.fn(async (_input: { url?: string; html?: string }) => 'markdown');
 
-vi.mock('cloudflare:workers', () => ({
+vi.mock('cloudflare:workers', async (importOriginal) => ({
+	...(await importOriginal<typeof import('cloudflare:workers')>()),
 	tracing: undefined,
 	env: {
 		PREVIEW_SECRET: 'test-preview-secret',
@@ -27,17 +32,17 @@ vi.mock('cloudflare:workers', () => ({
 vi.mock('@cloudflare/think/tools/execute', () => ({
 	createExecuteRuntime: (...arguments_: Parameters<typeof mockCreateExecuteRuntime>) => {
 		mockCreateExecuteRuntime(...arguments_);
-		return { runtime: {}, connectors: [], tool: { description: 'codemode', inputSchema: {}, execute: vi.fn() } };
+		return { runtime: {}, connectors: [], tool: { description: 'codemode', inputSchema: z.object({}).loose(), execute: vi.fn() } };
 	},
 }));
 
 vi.mock('@cloudflare/think/tools/browser', () => ({
 	createBrowserTools: () => ({
-		browser_markdown: { description: 'markdown', inputSchema: {}, execute: mockBrowserMarkdown },
-		browser_extract: { description: 'extract', inputSchema: {}, execute: vi.fn(async () => 'extract') },
-		browser_links: { description: 'links', inputSchema: {}, execute: vi.fn(async () => 'links') },
-		browser_scrape: { description: 'scrape', inputSchema: {}, execute: vi.fn(async () => 'scrape') },
-		browser_execute: { description: 'execute', inputSchema: {}, execute: mockBrowserExecute },
+		browser_markdown: { description: 'markdown', inputSchema: z.object({}).loose(), execute: mockBrowserMarkdown },
+		browser_extract: { description: 'extract', inputSchema: z.object({}).loose(), execute: vi.fn(async () => 'extract') },
+		browser_links: { description: 'links', inputSchema: z.object({}).loose(), execute: vi.fn(async () => 'links') },
+		browser_scrape: { description: 'scrape', inputSchema: z.object({}).loose(), execute: vi.fn(async () => 'scrape') },
+		browser_execute: { description: 'execute', inputSchema: z.object({}).loose(), execute: mockBrowserExecute },
 	}),
 }));
 
@@ -198,6 +203,27 @@ describe('createServerTools external guards', () => {
 		const tools = await createServerTools(createMockSendEvent(), contextOverrides(), [], mode === 'plan' ? 'plan' : 'ask');
 		expect(tools).not.toHaveProperty('completion_review');
 		expect(lastCodeModeTools()).not.toHaveProperty('completion_review');
+	});
+
+	it.each(['plan', 'ask'])('stops repeated forbidden state writes in %s mode before executing a mutation', async (mode) => {
+		let failureState: ToolFailureState = { submissionId: 'submission', count: 0, seen: [] };
+		const failureGuard = new ToolFailureGuard(
+			() => failureState,
+			(state) => {
+				failureState = state;
+			},
+		);
+		const context = contextOverrides({ failureGuard });
+		const write = vi.fn(async () => {});
+		Reflect.set(context.fsStub, 'wsWriteFile', write);
+		await createServerTools(createMockSendEvent(), context, [], mode === 'plan' ? 'plan' : 'ask');
+		const call = mockCreateExecuteRuntime.mock.calls.at(-1);
+		if (!call) throw new Error('Missing CodeMode runtime');
+		const backend: StateBackend = call[0].state;
+		for (let index = 0; index < 3; index++) await expect(backend.writeFile('/source.txt', 'blocked')).rejects.toThrow('read-only');
+		expect(failureState.count).toBe(3);
+		expect(failureGuard.controller.signal.aborted).toBe(true);
+		expect(write).not.toHaveBeenCalled();
 	});
 
 	it('does not expose primary completion review in sub-agents', async () => {

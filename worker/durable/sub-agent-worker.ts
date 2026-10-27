@@ -1,22 +1,32 @@
 import { Think } from '@cloudflare/think';
 
-import { DEFAULT_AI_MODEL, MCP_SERVERS } from '@shared/constants';
+import { DEFAULT_AI_MODEL, MCP_SERVERS, getModelLimits } from '@shared/constants';
 import { aiModelSchema } from '@shared/validation';
 
+import { SessionEventBatcher } from './session-event-batcher';
 import { filesystemNamespace } from '../lib/durable-object-namespaces';
 import { runWithProjectStub } from '../lib/project-fs';
 import { toDurableObjectId } from '../lib/project-id';
 import { createSendEventFunction, drainEventQueue, toolErrorEvents } from '../services/agent/event-helpers';
+import {
+	configureHarnessSession,
+	HARNESS_MAX_RETRIES,
+	harnessContextGuard,
+	withHarnessContextBudget,
+} from '../services/agent/harness-session';
 import { callConfiguredMcpTool, registerConfiguredMcpServers } from '../services/agent/mcp';
 import { isRequestOriginContext } from '../services/agent/request-origin-context';
 import { readAgentsContext } from '../services/agent/system-prompt-builder';
+import { ToolFailureGuard, toolOutputError } from '../services/agent/tool-failure-guard';
 import { createServerTools, SUB_AGENT_EXCLUDED_TOOLS } from '../services/agent/tools';
 import { createAdapter as createWorkersAiAdapter } from '../services/agent/workers-ai';
 
 import type { RequestOriginContext } from '../services/agent/request-origin-context';
-import type { ChatResponseResult, ChunkContext, StepContext, TurnConfig, TurnContext } from '@cloudflare/think';
+import type { ToolFailureState } from '../services/agent/tool-failure-guard';
+import type { ChatResponseResult, ChunkContext, StepContext, TurnConfig, TurnContext, ThinkSubmissionInspection } from '@cloudflare/think';
 import type { StreamEvent } from '@shared/agent-state';
 import type { AIModelId } from '@shared/constants';
+import type { Session } from 'agents/experimental/memory/session';
 import type { UIMessage } from 'ai';
 
 const SUB_AGENT_SYSTEM_PROMPT =
@@ -31,9 +41,11 @@ interface SubAgentInput {
 	userId?: string;
 	requestOriginContext?: RequestOriginContext;
 	parentToolCallId?: string;
+	parentSubmissionId?: string;
 }
 
 interface SubAgentState {
+	failureState?: ToolFailureState;
 	input?: SubAgentInput;
 }
 
@@ -43,6 +55,34 @@ export class SubAgentWorker extends Think<Env, SubAgentState> {
 	maxSteps = 100;
 	exposeMcpTools = false;
 	private eventQueue: StreamEvent[] = [];
+	private failureGuard?: ToolFailureGuard;
+	private outputBatcher = this.createOutputBatcher();
+	private createOutputBatcher(parentToolCallId?: string): SessionEventBatcher {
+		return new SessionEventBatcher(
+			async (events) => {
+				const { SessionTurnAgent } = await import('./session-turn-agent');
+				const parent = await this.parentAgent(SessionTurnAgent);
+				await parent.receiveSubAgentEvents(buildSubAgentParentEvents(events, parentToolCallId));
+			},
+			(promise) => this.ctx.waitUntil(promise),
+		);
+	}
+	// Keep transcript rows intact; compaction only changes the inference overlay.
+	override mediaEviction = false;
+
+	// Retain interruption reconciliation, but never replay a turn or its tools.
+	override async onChatRecovery() {
+		return { continue: false };
+	}
+
+	override configureSession(session: Session): Session {
+		return configureHarnessSession(session, () => ({ ...this.state.input, abortSignal: this.eventAbortController.signal }));
+	}
+	override contextOverflow = harnessContextGuard(DEFAULT_AI_MODEL);
+	override beforeStep(): void {
+		this.failureGuard?.assertHealthy();
+	}
+
 	private eventAbortController = new AbortController();
 
 	override async onStart(): Promise<void> {
@@ -57,12 +97,18 @@ export class SubAgentWorker extends Think<Env, SubAgentState> {
 
 	override formatAgentToolInput(value: unknown): UIMessage {
 		const input = parseSubAgentInput(value);
+		this.eventAbortController.abort();
+		this.eventAbortController = new AbortController();
 		this.setState({ input });
 		return {
 			id: crypto.randomUUID(),
 			role: 'user',
 			parts: [{ type: 'text', text: input.prompt }],
 		};
+	}
+
+	override async onSubmissionStatus(submission: ThinkSubmissionInspection): Promise<void> {
+		if (submission.status === 'aborted') this.eventAbortController.abort();
 	}
 
 	override getModel(): AIModelId {
@@ -80,13 +126,34 @@ export class SubAgentWorker extends Think<Env, SubAgentState> {
 		const filesystemId = toDurableObjectId(filesystemNamespace, input.projectId);
 		const filesystemStub = filesystemNamespace.get(filesystemId);
 		const agentsContext = await runWithProjectStub(filesystemStub, () => readAgentsContext('/project'));
+		this.contextOverflow = harnessContextGuard(this.getModel());
 		const instructions = agentsContext
 			? `${SUB_AGENT_SYSTEM_PROMPT}\n\n## Project Guidelines (from AGENTS.md)\n${agentsContext}`
 			: SUB_AGENT_SYSTEM_PROMPT;
 		this.eventQueue = [];
+		this.outputBatcher = this.createOutputBatcher(input.parentToolCallId);
 		this.eventAbortController.abort();
 		this.eventAbortController = new AbortController();
-		const sendEvent = createSendEventFunction(this.eventQueue, { current: undefined }, this.eventAbortController.signal);
+		const submissionId = this.state.failureState?.submissionId ?? crypto.randomUUID();
+		this.setState({ ...this.state, failureState: this.state.failureState ?? { submissionId, count: 0, seen: [] } });
+		this.failureGuard = new ToolFailureGuard(
+			() => this.state.failureState ?? { submissionId, count: 0, seen: [] },
+			(failureState) => {
+				this.setState({ ...this.state, failureState });
+				if (failureState.message)
+					this.eventQueue.push({
+						type: 'doom-loop-detected',
+						reason: 'repeated_error_pattern',
+						toolName: undefined,
+						message: failureState.message,
+					});
+			},
+		);
+		const queuedSendEvent = createSendEventFunction(this.eventQueue, { current: undefined }, this.eventAbortController.signal);
+		const sendEvent: typeof queuedSendEvent = (type, data) => {
+			if (type === 'file_changed') this.failureGuard?.progress();
+			queuedSendEvent(type, data);
+		};
 		const tools = await createServerTools(
 			sendEvent,
 			{
@@ -103,6 +170,9 @@ export class SubAgentWorker extends Think<Env, SubAgentState> {
 				agentReference: this,
 				fsStub: filesystemStub,
 				model: input.model,
+				submissionId,
+				failureGuard: this.failureGuard,
+				onToolOutput: (event) => this.outputBatcher.enqueue([{ ...event, submissionId: input.parentSubmissionId ?? event.submissionId }]),
 				requestOriginContext: input.requestOriginContext,
 			},
 			[],
@@ -115,30 +185,67 @@ export class SubAgentWorker extends Think<Env, SubAgentState> {
 		);
 
 		return {
-			model: createWorkersAiAdapter(input.model, {
-				generationType: 'agent',
-				projectId: input.projectId,
-				organizationId: input.organizationId,
-			}),
+			model: withHarnessContextBudget(
+				createWorkersAiAdapter(input.model, {
+					generationType: 'agent',
+					projectId: input.projectId,
+					organizationId: input.organizationId,
+				}),
+				input.model,
+			),
 			instructions,
 			tools,
 			maxSteps: this.maxSteps,
 			chatStreamStallTimeoutMs: this.chatStreamStallTimeoutMs,
-			maxRetries: 0,
+			maxRetries: HARNESS_MAX_RETRIES,
+			maxOutputTokens: getModelLimits(input.model).maxOutput,
 		};
 	}
 
-	override async onChunk(_context: ChunkContext): Promise<void> {
+	override async onChunk(context: ChunkContext): Promise<void> {
+		if (context.chunk.type === 'tool-result' || context.chunk.type === 'tool-error') {
+			await this.outputBatcher.flush();
+			this.outputBatcher.completeTool(context.chunk.toolCallId);
+			const parentToolCallId = this.state.input?.parentToolCallId;
+			if (parentToolCallId) {
+				const chunk = context.chunk;
+				this.eventQueue.push({
+					type: 'sub-agent-activity',
+					parentToolCallId,
+					activity: {
+						kind: 'tool-end',
+						toolCallId: chunk.toolCallId,
+						toolName: chunk.toolName,
+						result:
+							chunk.type === 'tool-result'
+								? typeof chunk.output === 'string'
+									? chunk.output
+									: JSON.stringify(chunk.output)
+								: String(chunk.error),
+						isError: chunk.type === 'tool-error',
+					},
+				});
+			}
+		}
 		await this.forwardParentEvents();
 	}
 
 	override async onChatResponse(_result: ChatResponseResult): Promise<void> {
 		await this.forwardParentEvents();
+		await this.outputBatcher.flush();
+		this.failureGuard?.assertHealthy();
 	}
 
 	override async onStepEnd(context: StepContext): Promise<void> {
+		for (const part of context.content) {
+			if (part.type === 'tool-error')
+				this.failureGuard?.record({ id: part.toolCallId, toolName: part.toolName, input: part.input, error: String(part.error) });
+			if (part.type === 'tool-result' && part.toolName !== 'codemode')
+				this.failureGuard?.record({ id: part.toolCallId, toolName: part.toolName, input: part.input, error: toolOutputError(part.output) });
+		}
 		this.eventQueue.push(...toolErrorEvents(context.content));
 		await this.forwardParentEvents();
+		this.failureGuard?.assertHealthy();
 	}
 
 	private async forwardParentEvents(): Promise<void> {
@@ -153,8 +260,9 @@ export class SubAgentWorker extends Think<Env, SubAgentState> {
 
 export function buildSubAgentParentEvents(events: StreamEvent[], parentToolCallId?: string): StreamEvent[] {
 	return events.flatMap<StreamEvent>((event) => {
-		if (event.type === 'file-changed') return [event];
+		if (event.type === 'file-changed' || event.type === 'sub-agent-activity' || event.type === 'doom-loop-detected') return [event];
 		if (!parentToolCallId) return [];
+		if (event.type === 'tool-output') return [{ type: 'sub-agent-activity', parentToolCallId, activity: { kind: 'tool-output', event } }];
 		if (event.type === 'tool-error')
 			return [
 				{
@@ -162,6 +270,7 @@ export function buildSubAgentParentEvents(events: StreamEvent[], parentToolCallI
 					parentToolCallId,
 					activity: {
 						kind: 'tool-metadata',
+						...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
 						toolName: event.toolName,
 						title: 'Error',
 						metadata: { error: event.errorMessage, errorCode: event.errorCode },
@@ -173,7 +282,13 @@ export function buildSubAgentParentEvents(events: StreamEvent[], parentToolCallI
 			{
 				type: 'sub-agent-activity',
 				parentToolCallId,
-				activity: { kind: 'tool-metadata', toolName: event.toolName, title: event.title, metadata: event.metadata },
+				activity: {
+					kind: 'tool-metadata',
+					...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
+					toolName: event.toolName,
+					title: event.title,
+					metadata: event.metadata,
+				},
 			},
 		];
 	});
@@ -195,6 +310,8 @@ function parseSubAgentInput(value: unknown): SubAgentInput {
 		userId: 'userId' in value && typeof value.userId === 'string' ? value.userId : undefined,
 		requestOriginContext:
 			'requestOriginContext' in value && isRequestOriginContext(value.requestOriginContext) ? value.requestOriginContext : undefined,
+		parentSubmissionId:
+			'parentSubmissionId' in value && typeof value.parentSubmissionId === 'string' ? value.parentSubmissionId : undefined,
 		parentToolCallId: 'parentToolCallId' in value && typeof value.parentToolCallId === 'string' ? value.parentToolCallId : undefined,
 	};
 }

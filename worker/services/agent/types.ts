@@ -1,6 +1,8 @@
 import type { CompletionReviewContext } from './completion-review';
 import type { RequestOriginContext } from './request-origin-context';
+import type { ToolFailureGuard } from './tool-failure-guard';
 import type { ProjectFilesystem } from '../../durable/project-filesystem';
+import type { LanguageModelV4FunctionTool } from '@ai-sdk/provider';
 import type { ExtensionManager } from '@cloudflare/think/extensions';
 import type { StreamEvent } from '@shared/agent-state';
 import type { AIModelId } from '@shared/constants';
@@ -113,6 +115,11 @@ export interface ToolExecutorContext {
 	 * re-attached rather than re-run after a Durable Object restart.
 	 */
 	toolCallId?: string;
+	toolName?: string;
+	submissionId?: string;
+	activeCodeMode?: { toolCallId: string; abortSignal?: AbortSignal };
+	failureGuard?: ToolFailureGuard;
+	onToolOutput?: (event: import('@shared/agent-state').ToolOutputEvent) => Promise<void>;
 	session?: Session;
 	abortSignal?: AbortSignal;
 	callMcpTool: (serverId: string, toolName: string, arguments_: Record<string, unknown>) => Promise<string>;
@@ -176,14 +183,27 @@ export type ToolExecuteFunction = (
  * Tool definition shape used by individual tool modules.
  * The tools/index.ts barrel wraps these into Vercel AI SDK tool() format.
  */
+export interface ToolJsonSchema {
+	type?: LanguageModelV4FunctionTool['inputSchema']['type'];
+	description?: string;
+	properties?: Record<string, ToolJsonSchema | boolean>;
+	items?: ToolJsonSchema | boolean;
+	required?: string[];
+	additionalProperties?: ToolJsonSchema | boolean;
+	enum?: NonNullable<LanguageModelV4FunctionTool['inputSchema']['enum']>;
+	minimum?: number;
+	maximum?: number;
+	minLength?: number;
+	maxLength?: number;
+	minItems?: number;
+	maxItems?: number;
+	pattern?: string;
+}
+
 export interface ToolDefinition {
 	name: string;
 	description: string;
-	input_schema: {
-		type: string;
-		properties: Record<string, unknown>;
-		required?: string[];
-	};
+	input_schema: ToolJsonSchema & { type: 'object'; properties: Record<string, ToolJsonSchema | boolean> };
 }
 
 export interface ToolModule {

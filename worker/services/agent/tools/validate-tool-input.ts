@@ -11,7 +11,9 @@
  * and call out the keys the model actually sent, so it can self-correct.
  */
 
-import type { ToolDefinition } from '../types';
+import { Validator } from '@cfworker/json-schema';
+
+import type { ToolJsonSchema as Schema, ToolDefinition } from '../types';
 
 type ToolInputSchema = ToolDefinition['input_schema'];
 
@@ -86,7 +88,7 @@ export function describeInputSchema(schema: ToolInputSchema): string {
  *   stringify their arguments).
  * Anything else is returned unchanged so the validator can report it.
  */
-function coerceToObject(value: unknown): unknown {
+export function coerceToObject(value: unknown): unknown {
 	if (value === undefined || value === null) {
 		return {};
 	}
@@ -114,7 +116,7 @@ function coerceToObject(value: unknown): unknown {
  * an executor that expects `Record<string, string>`). On failure the Error
  * message restates the expected shape so the model can self-correct.
  */
-export function validateAndCoerceToolInput(toolName: string, schema: ToolInputSchema, rawValue: unknown): ValidateToolInputResult {
+export function validateAndCoerceToolInput(toolName: string, schema: ToolInputSchema, rawValue?: unknown): ValidateToolInputResult {
 	const expectedShape = describeInputSchema(schema);
 	const value = coerceToObject(rawValue);
 
@@ -134,7 +136,7 @@ export function validateAndCoerceToolInput(toolName: string, schema: ToolInputSc
 	const entries = Object.entries(value);
 	const keys = entries.map(([key]) => key);
 
-	const missing = [...requiredProperties].filter((required) => !keys.includes(required));
+	const missing = [...requiredProperties].filter((required) => !(required in value) || Reflect.get(value, required) === undefined);
 	if (missing.length > 0) {
 		const unknownKeys = keys.filter((key) => !knownProperties.has(key));
 		const unknownHint =
@@ -153,13 +155,41 @@ export function validateAndCoerceToolInput(toolName: string, schema: ToolInputSc
 		};
 	}
 
-	// Strip unknown properties and string-coerce values (objects/arrays are
-	// JSON-serialized so structured data survives).
+	const validation = new Validator(closeToolInputSchema(schema), '7', false).validate(value);
+	if (!validation.valid) {
+		return {
+			success: false,
+			error: new Error(
+				`Tool "${toolName}" has invalid input: ${validation.errors.map((error) => `${error.instanceLocation}: ${error.error}`).join('; ')}. Expected shape: ${expectedShape}. Inspect the \`tools.${toolName}\` signature.`,
+			),
+		};
+	}
 	const validated: Record<string, string> = {};
 	for (const [key, entryValue] of entries) {
-		if (knownProperties.has(key)) {
-			validated[key] = typeof entryValue === 'object' && entryValue !== null ? JSON.stringify(entryValue) : String(entryValue);
-		}
+		if (entryValue === undefined) continue;
+		validated[key] = typeof entryValue === 'object' && entryValue !== null ? JSON.stringify(entryValue) : String(entryValue);
 	}
 	return { success: true, value: validated };
+}
+
+/** Close declared object shapes while leaving explicit dictionary schemas open. */
+export function closeToolInputSchema(schema: Schema): Schema {
+	return {
+		...schema,
+		...(schema.properties
+			? {
+					additionalProperties: schema.additionalProperties ?? false,
+					properties: Object.fromEntries(
+						Object.entries(schema.properties).map(([key, property]) => [
+							key,
+							typeof property === 'boolean' ? property : closeToolInputSchema(property),
+						]),
+					),
+				}
+			: {}),
+		...(schema.items && typeof schema.items !== 'boolean' ? { items: closeToolInputSchema(schema.items) } : {}),
+		...(schema.additionalProperties && typeof schema.additionalProperties !== 'boolean'
+			? { additionalProperties: closeToolInputSchema(schema.additionalProperties) }
+			: {}),
+	};
 }

@@ -57,6 +57,7 @@ export async function execute(
 			userId: context.userId,
 			requestOriginContext: context.requestOriginContext,
 			parentToolCallId: context.toolCallId,
+			parentSubmissionId: context.submissionId,
 		},
 		runId: context.toolCallId ? `agent-tool:${context.toolCallId}` : undefined,
 		parentToolCallId: context.toolCallId,

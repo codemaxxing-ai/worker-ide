@@ -1,13 +1,16 @@
+import { Validator } from '@cfworker/json-schema';
 import { createWorkspaceStateBackend } from '@cloudflare/shell';
-import { jsonSchema } from 'ai';
+import { asSchema, jsonSchema } from 'ai';
 import { env } from 'cloudflare:workers';
 
 import { ToolExecutionError } from '@shared/tool-errors';
 import { runWithProjectStub } from '@worker/lib/project-fs';
 import { PROJECT_ROOT, WorkspaceClient } from '@worker/lib/workspace-client';
 
+import { cancellableWorkerLoader } from '../cancellable-worker-loader';
 import { CompletionReviewRecorder } from '../completion-review';
 import { readTodos } from '../tool-executor';
+import { toolOutputError } from '../tool-failure-guard';
 import * as assetSettingsGetTool from './asset-settings-get';
 import * as assetSettingsUpdateTool from './asset-settings-update';
 import * as bashTool from './bash';
@@ -30,7 +33,7 @@ import * as testRunTool from './test-run';
 import * as todosGetTool from './todos-get';
 import * as todosUpdateTool from './todos-update';
 import * as userQuestionTool from './user-question';
-import { validateAndCoerceToolInput } from './validate-tool-input';
+import { closeToolInputSchema, coerceToObject, validateAndCoerceToolInput } from './validate-tool-input';
 import * as webFetchTool from './web-fetch';
 import { DEV_PREVIEW_SECRET } from '../../../lib/preview-secret';
 import { withSpan } from '../../../lib/tracing';
@@ -50,7 +53,7 @@ import type {
 	ToolFailureQueue,
 } from '../types';
 import type { StateBackend } from '@cloudflare/shell';
-import type { ToolSet } from 'ai';
+import type { ToolSet, FlexibleSchema } from 'ai';
 
 export const TOOL_EXECUTORS: ReadonlyMap<string, ToolExecuteFunction> = new Map([
 	['completion_review', completionReviewTool.execute],
@@ -222,7 +225,7 @@ const STATE_WRITE_METHODS = new Set([
 	'moveTree',
 ]);
 
-type AnyTool = Record<string, unknown>;
+type AnyTool = { inputSchema?: FlexibleSchema<unknown>; [key: string]: unknown };
 
 /**
  * Assemble the model-facing tool surface: a single `codemode` tool exposing
@@ -291,6 +294,7 @@ export async function createServerTools(
 				return;
 			emittedChanges.set(data.path, data);
 			recorder.revision++;
+			context.failureGuard?.progress();
 		}
 		sendEvent(type, data);
 	};
@@ -349,6 +353,14 @@ export async function createServerTools(
 		if (name.startsWith('browser_')) codeModeTools[name] = wrapObservedTool(definition, name, context);
 	}
 
+	// Observe leaf calls on both surfaces. CodeMode validates before invoking execute.
+	for (const [name, definition] of Object.entries(codeModeTools)) {
+		const observed = observeHarnessTool(definition, name, context);
+		codeModeTools[name] = observed;
+		if (llmTools[name] === definition) llmTools[name] = observed;
+	}
+	for (const name of directToolNames(mode)) if (llmTools[name]) llmTools[name] = observeHarnessTool(llmTools[name], name, context);
+
 	// 3. Assemble the single Code Mode tool — or fall back to direct exposure.
 	if (context.ctx && context.loader) {
 		const { createExecuteRuntime } = await import('@cloudflare/think/tools/execute');
@@ -359,12 +371,47 @@ export async function createServerTools(
 			timeout: 360_000,
 			tools: codeModeTools,
 			state: createStateBackend(context, mode),
-			loader: context.loader,
+			loader: cancellableWorkerLoader(context.loader, () => {
+				const signals = [context.activeCodeMode?.abortSignal, context.failureGuard?.controller.signal].filter(
+					(signal) => signal !== undefined,
+				);
+				return signals.length > 0 ? AbortSignal.any(signals) : undefined;
+			}),
 			connectors,
 			// eslint-disable-next-line unicorn/no-null -- codemode uses null to fully disable sandbox outbound network access
 			globalOutbound: null,
 		});
-		llmTools.codemode = wrapCodemodeTool(tool, context, trackedSendEvent, queryChanges);
+		const wrapped = wrapCodemodeTool(tool, context, trackedSendEvent, queryChanges);
+		const execute = wrapped.execute;
+		if (typeof execute !== 'function') throw new Error('CodeMode executor is unavailable');
+		let tail = Promise.resolve();
+		llmTools.codemode = {
+			...wrapped,
+			execute: async (input: unknown, options: { toolCallId?: string; abortSignal?: AbortSignal }) => {
+				const previous = tail;
+				const release = Promise.withResolvers<void>();
+				tail = release.promise;
+				await previous;
+				const toolCallId = options?.toolCallId ?? crypto.randomUUID();
+				context.activeCodeMode = { toolCallId, abortSignal: options?.abortSignal };
+				const observedBefore = context.failureGuard?.observationVersion;
+				try {
+					context.failureGuard?.assertHealthy();
+					const output: unknown = await Reflect.apply(execute, wrapped, [input, options]);
+					if (context.failureGuard?.observationVersion === observedBefore)
+						context.failureGuard?.record({ id: toolCallId, toolName: 'codemode', input, error: toolOutputError(output) });
+					return output;
+				} catch (error) {
+					if (context.failureGuard?.observationVersion === observedBefore)
+						context.failureGuard?.record({ id: toolCallId, toolName: 'codemode', input, error: String(error) });
+					throw error;
+				} finally {
+					context.failureGuard?.ignore(toolCallId);
+					context.activeCodeMode = undefined;
+					release.resolve();
+				}
+			},
+		};
 	} else {
 		// No Code Mode sandbox: expose `tools.*` directly. They run in THIS context
 		// and push their own changes into `queryChanges`, so wrap each with a drain
@@ -403,18 +450,27 @@ function codeModeToolNames(mode: 'code' | 'plan' | 'ask'): string[] {
 /** Build the `state.*` backend, read-only in plan/ask mode. */
 function createStateBackend(context: ToolExecutorContext, mode: 'code' | 'plan' | 'ask'): StateBackend {
 	const backend = createWorkspaceStateBackend(new WorkspaceClient(context.fsStub, PROJECT_ROOT, context.sessionId));
-	if (mode === 'code') return backend;
 	return new Proxy(backend, {
 		get(target, property, receiver) {
-			if (typeof property === 'string' && STATE_WRITE_METHODS.has(property)) {
-				return () => {
-					throw new ToolExecutionError(
-						'NOT_ALLOWED',
-						`state.${property} is read-only in ${mode} mode. Switch to Code mode to make changes.`,
-					);
-				};
-			}
-			return Reflect.get(target, property, receiver);
+			const value: unknown = Reflect.get(target, property, receiver);
+			if (typeof value !== 'function') return value;
+			return async (...arguments_: unknown[]) => {
+				context.failureGuard?.assertHealthy();
+				const outcome = { id: crypto.randomUUID(), toolName: `state.${String(property)}`, input: arguments_ };
+				try {
+					if (mode !== 'code' && typeof property === 'string' && STATE_WRITE_METHODS.has(property))
+						throw new ToolExecutionError(
+							'NOT_ALLOWED',
+							`state.${property} is read-only in ${mode} mode. Switch to Code mode to make changes.`,
+						);
+					const result: unknown = await Reflect.apply(value, target, arguments_);
+					context.failureGuard?.record(outcome);
+					return result;
+				} catch (error) {
+					context.failureGuard?.record({ ...outcome, error: String(error) });
+					throw error;
+				}
+			};
 		},
 	});
 }
@@ -504,20 +560,22 @@ function wrapTool(definition: ToolDefinition, executor: ToolExecuteFunction, dep
 	// In Code Mode this same `validate` runs inside the codemode sandbox for
 	// every `tools.*` call, where there is NO repair step — so it coerces loose
 	// input and reports the expected schema on failure (see validate-tool-input).
-	// eslint-disable-next-line @typescript-eslint/consistent-type-assertions, @typescript-eslint/no-explicit-any -- Bridge between our JSON Schema definitions and the AI SDK's JSONSchema7 type
-	const schema = jsonSchema<Record<string, string>>(definition.input_schema as any, {
+	const schema = jsonSchema<Record<string, string>>(closeToolInputSchema(definition.input_schema), {
 		validate: (value) => validateAndCoerceToolInput(toolName, definition.input_schema, value),
 	});
 
 	return {
 		description: definition.description,
 		inputSchema: schema,
-		execute: async (input: Record<string, string>, executeOptions?: { toolCallId?: string; abortSignal?: AbortSignal }) => {
+		execute: async (
+			input: Record<string, string>,
+			executeOptions?: { toolCallId?: string; abortSignal?: AbortSignal; harnessOutcomeId?: string },
+		) => {
 			const signals = [context.abortSignal, executeOptions?.abortSignal].filter((signal) => signal !== undefined);
 			const abortSignal = signals.length > 0 ? AbortSignal.any(signals) : undefined;
 			abortSignal?.throwIfAborted();
 
-			const callContext: ToolExecutorContext = { ...context, toolCallId: executeOptions?.toolCallId, abortSignal };
+			const callContext: ToolExecutorContext = { ...context, toolName, toolCallId: executeOptions?.toolCallId, abortSignal };
 
 			// Defense-in-depth: reject editing tools in non-code modes.
 			if (mode !== 'code' && EDITING_TOOL_NAMES.has(toolName)) {
@@ -551,6 +609,12 @@ function wrapTool(definition: ToolDefinition, executor: ToolExecuteFunction, dep
 					{ 'tool.name': toolName, 'agent.mode': mode },
 				);
 				context.recordReviewObservation?.(toolName, input, result);
+				context.failureGuard?.record({
+					id: executeOptions?.harnessOutcomeId ?? executeOptions?.toolCallId ?? crypto.randomUUID(),
+					toolName,
+					input,
+					error: toolOutputError(result),
+				});
 				logger?.info(
 					'tool_call',
 					'completed',
@@ -744,4 +808,71 @@ function wrapObservedTool(definition: AnyTool, name: string, context: ToolExecut
 			}
 		},
 	};
+}
+
+/** Keep leaf failures observable even when sandbox code catches them. */
+function observeHarnessTool(definition: AnyTool, name: string, context: ToolExecutorContext): AnyTool {
+	const execute = definition.execute;
+	if (typeof execute !== 'function') return definition;
+	const schema = definition.inputSchema ? asSchema(definition.inputSchema) : undefined;
+	return {
+		...definition,
+		...(schema
+			? {
+					inputSchema: jsonSchema(schema.jsonSchema, {
+						validate: async (input) => {
+							context.failureGuard?.assertHealthy();
+							const normalized = coerceToObject(input);
+							const declaredSchema = await schema.jsonSchema;
+							// Schemas come from SDK tool definitions; validate values before a Zod
+							// parser can strip unknown keys or a domain adapter stringifies them.
+							if (!declaredSchema || typeof declaredSchema !== 'object') throw new Error(`Missing schema for ${name}`);
+							const validation = validateDeclaredInput(declaredSchema, normalized);
+							const result =
+								validation && !validation.valid
+									? ({
+											success: false,
+											error: new Error(
+												`Invalid input for ${name}: ${validation.errors.map((error) => `${error.instanceLocation}: ${error.error}`).join('; ')}. Expected ${JSON.stringify(declaredSchema)}`,
+											),
+										} satisfies { success: false; error: Error })
+									: schema.validate
+										? await schema.validate(normalized)
+										: ({ success: true, value: normalized } satisfies { success: true; value: unknown });
+							if (!result.success && context.activeCodeMode)
+								context.failureGuard?.record({ id: crypto.randomUUID(), toolName: name, input, error: String(result.error) });
+							return result;
+						},
+					}),
+				}
+			: {}),
+		execute: async (input: unknown, options?: { toolCallId?: string; abortSignal?: AbortSignal }) => {
+			context.failureGuard?.assertHealthy();
+			const id = options?.toolCallId ?? crypto.randomUUID();
+			const signals = [options?.abortSignal, context.activeCodeMode?.abortSignal, context.failureGuard?.controller.signal].filter(
+				(signal) => signal !== undefined,
+			);
+			try {
+				const output: unknown = await Reflect.apply(execute, definition, [
+					input,
+					{
+						...options,
+						harnessOutcomeId: id,
+						toolCallId: options?.toolCallId ?? context.activeCodeMode?.toolCallId ?? id,
+						abortSignal: signals.length > 0 ? AbortSignal.any(signals) : undefined,
+					},
+				]);
+				context.failureGuard?.record({ id, toolName: name, input, error: toolOutputError(output) });
+				return output;
+			} catch (error) {
+				context.failureGuard?.record({ id, toolName: name, input, error: String(error) });
+				throw error;
+			}
+		},
+	};
+}
+
+/** The SDK and validator expose compatible JSON schemas with different keyword typings. */
+function validateDeclaredInput(schema: object, input: unknown) {
+	return new Validator(schema, '7', false).validate(input);
 }

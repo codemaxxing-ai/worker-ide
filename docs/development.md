@@ -36,7 +36,7 @@ The editor runs at `https://localhost:3000`; signed previews use `*.content.loca
 
 Install the browser matrix with `mise exec -- bunx playwright install chromium firefox webkit` if it is absent. Storybook needs only Chromium. Linux CI also installs browser system dependencies; see [ci.yml](../.github/workflows/ci.yml).
 
-Integration tests target `TEST_BASE_URL`, defaulting to `https://localhost:3000`, and do not start a server. Node test clients trust the generated local certificate while remote targets keep normal TLS verification. Playwright accepts local test certificates, reuses an existing server locally, and expects an already-running server in CI. These suites create and clean up test projects through development-only helpers; point them at a local or isolated test instance.
+Integration tests target `TEST_BASE_URL`, defaulting to `https://localhost:3000`, and do not start a server. Node test clients trust the generated local certificate while remote targets keep normal TLS verification. Playwright accepts local test certificates and starts a fresh server locally unless `TEST_BASE_URL` explicitly selects an existing server. CI expects an already-running server. E2E uses one worker locally and in CI to avoid competing native Docker setup. These suites create and clean up test projects through development-only helpers; point them at a local or isolated test instance.
 
 E2E builds the editor and serves its frontend files through a [browser fixture](../test/e2e/built-editor.ts) that preserves the live Worker's response policy. APIs, authentication, and hosted project runtimes remain live. This tests the production frontend without replacing the backend or security headers.
 

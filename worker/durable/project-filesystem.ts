@@ -19,6 +19,7 @@ import { selectComputerBackend } from '../lib/computer-backend';
 import { ComputerChanges } from '../lib/computer-changes';
 import { drainComputerOutput } from '../lib/computer-execution';
 import { ComputerMutationQueue, ComputerSynchronizationPending } from '../lib/computer-mutation-queue';
+import { ComputerOutputPublisher } from '../lib/computer-output-observer';
 import { ComputerProtectedFiles } from '../lib/computer-protected-files';
 import { resolveComputerReview } from '../lib/computer-review';
 import { ComputerShellWorkspace } from '../lib/computer-shell-workspace';
@@ -48,6 +49,7 @@ import { guardProtectedFile } from '../services/agent/protected-file-guard';
 import { readRuntimeOverride, selectBuildBackend } from '../services/vite-host/runtimes/runtime-selection';
 
 import type { GitAuthor, GitStatusResponse } from './git-service';
+import type { ComputerOutputObserver } from '../lib/computer-output-observer';
 import type { ManagedConfigurationTool } from '../lib/managed-configuration';
 import type { PreviewBootstrap, PreviewBootstrapInputs } from '../lib/preview-bootstrap';
 import type { RequestOriginContext } from '../services/agent/request-origin-context';
@@ -576,8 +578,14 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 		);
 	}
 
-	async computerExec(command: string, options: ComputerExecOptions, sessionId: string): Promise<ComputerExecResult> {
+	async computerExec(
+		command: string,
+		options: ComputerExecOptions,
+		sessionId: string,
+		observer?: ComputerOutputObserver,
+	): Promise<ComputerExecResult> {
 		this.assertWritable(sessionId);
+		const publisher = new ComputerOutputPublisher(observer, (promise) => this.ctx.waitUntil(promise));
 		const identifier = options.id ?? crypto.randomUUID();
 		const requestedBackend = options.backend;
 		if (requestedBackend !== undefined && !['auto', 'shell', 'container'].includes(requestedBackend))
@@ -638,7 +646,12 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 							});
 					if (backend === 'container') await this.getWorkspaceContainer().setInactivityTimeout(120_000);
 					this.ctx.storage.kv.put(key, { status: 'running', sessionId, backend });
-					const output = await drainComputerOutput(handle, () => this.ctx.storage.setAlarm(Date.now() + 30_000));
+					const output = await drainComputerOutput(
+						handle,
+						() => this.ctx.storage.setAlarm(Date.now() + 30_000),
+						(output) => publisher.publish({ executionId: identifier, ...output }),
+					);
+					publisher.flush();
 					const cancelled =
 						Boolean(this.ctx.storage.kv.get(`computer-cancelled:${identifier}`)) || [130, 137, 143].includes(output.exitCode);
 					response = {
@@ -671,6 +684,16 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 				response = { ...response, syncStatus: 'complete' };
 				this.ctx.storage.kv.put(key, { status: response.status, sessionId, backend, result: response });
 				protectedFiles.clear(identifier);
+				publisher.publish({
+					executionId: identifier,
+					stdout: response.stdout,
+					stderr: response.stderr,
+					stdoutBytes: new TextEncoder().encode(response.stdout).length,
+					stderrBytes: new TextEncoder().encode(response.stderr).length,
+					truncated: false,
+					final: true,
+				});
+				publisher.flush();
 				return response;
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);

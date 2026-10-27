@@ -151,3 +151,60 @@ describe('shared tool call lifecycle', () => {
 		expect(screen.getByRole('button').className).toContain('text-error');
 	});
 });
+
+describe('live command output', () => {
+	it('renders partial streams while running and replaces them with final results', () => {
+		const toolCall = {
+			type: 'tool-call',
+			toolCallId: 'live',
+			toolName: 'exec',
+			arguments: { command: 'bun test' },
+		} satisfies import('@shared/types').ToolCallPart;
+		const metadata = new Map([
+			[
+				'live',
+				{
+					toolCallId: 'live',
+					toolName: 'exec',
+					title: 'exec',
+					metadata: {},
+					commandOutput: {
+						executions: [
+							{
+								executionId: 'one',
+								stdout: 'partial progress',
+								stderr: 'partial warning',
+								stdoutBytes: 16,
+								stderrBytes: 15,
+								truncated: true,
+							},
+						],
+						truncated: true,
+					},
+				},
+			],
+		]);
+		const { rerender } = render(
+			<InlineToolCall toolCall={toolCall} toolMetadata={metadata} isStreaming isExpanded onToggleExpand={() => {}} />,
+		);
+		expect(screen.getByText('partial progress')).toBeInTheDocument();
+		expect(screen.getByText('partial warning')).toBeInTheDocument();
+		expect(screen.getByText('Output truncated')).toBeInTheDocument();
+		rerender(
+			<InlineToolCall
+				toolCall={toolCall}
+				toolMetadata={metadata}
+				toolResult={{
+					type: 'tool-result',
+					toolCallId: 'live',
+					toolName: 'exec',
+					result: JSON.stringify({ exitCode: 0, stdout: 'final output', stderr: '' }),
+				}}
+				isExpanded
+				onToggleExpand={() => {}}
+			/>,
+		);
+		expect(screen.queryByText('partial progress')).not.toBeInTheDocument();
+		expect(screen.getByText(/final output/)).toBeInTheDocument();
+	});
+});

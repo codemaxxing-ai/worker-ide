@@ -29,6 +29,7 @@ export interface ToolErrorInfo {
  * `metadata` is tool-specific — the UI inspects known fields per tool name.
  */
 export interface ToolMetadataInfo {
+	commandOutput?: import('../command-output').ToolCommandOutput;
 	toolCallId: string;
 	toolName: string;
 	title: string;

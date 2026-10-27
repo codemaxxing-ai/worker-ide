@@ -41,3 +41,32 @@ export const CancelledCommand: Story = {
 		await expect(within(canvasElement).getByText('container · Cancelled')).toBeVisible();
 	},
 };
+
+export const LiveCommandOutput: Story = {
+	args: {
+		toolCall: { type: 'tool-call', toolCallId: 'live', toolName: 'exec', arguments: { command: 'bun test' } },
+		isStreaming: true,
+		toolMetadata: new Map([
+			[
+				'live',
+				{
+					toolCallId: 'live',
+					toolName: 'exec',
+					title: 'exec',
+					metadata: {},
+					commandOutput: {
+						executions: [
+							{ executionId: 'one', stdout: 'Running tests…', stderr: 'A warning', stdoutBytes: 16, stderrBytes: 9, truncated: true },
+						],
+						truncated: true,
+					},
+				},
+			],
+		]),
+	},
+	play: async ({ canvasElement }) => {
+		await expect(within(canvasElement).getByText('Running tests…')).toBeVisible();
+		await expect(within(canvasElement).getByText('A warning')).toBeVisible();
+		await expect(within(canvasElement).getByText('Output truncated')).toBeVisible();
+	},
+};

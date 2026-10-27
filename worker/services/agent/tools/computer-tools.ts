@@ -1,5 +1,8 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 import { createAITools } from '@cloudflare/computer/tools';
 
+import { ComputerOutputObserver } from '../../../lib/computer-output-observer';
 import { computerPath, projectPath } from '../../../lib/computer-workspace';
 
 import type { ToolExecutorContext } from '../types';
@@ -8,6 +11,7 @@ import type { WorkspaceLike } from '@cloudflare/computer/tools';
 
 export function createComputerTools(context: ToolExecutorContext, mode: 'code' | 'plan' | 'ask') {
 	const client = context.fsStub;
+	const executionContext = new AsyncLocalStorage<ToolExecutorContext>();
 	const writerId = context.sessionId ?? `agent:${context.projectId}`;
 	const filesystem: WorkspaceLike['fs'] = {
 		stat: async (path) => {
@@ -52,7 +56,7 @@ export function createComputerTools(context: ToolExecutorContext, mode: 'code' |
 			runtime: {
 				exec: async (command, options) => {
 					const identifier = crypto.randomUUID();
-					const result = executeComputerCommand(context, command, { ...options, id: identifier });
+					const result = executeComputerCommand(executionContext.getStore() ?? context, command, { ...options, id: identifier });
 					return { result: () => result, kill: () => client.cancelComputerExecution(identifier, writerId) };
 				},
 			},
@@ -95,14 +99,18 @@ export function createComputerTools(context: ToolExecutorContext, mode: 'code' |
 		const execute = definition.execute;
 		if (typeof execute !== 'function') continue;
 		definition.execute = async (input, options) => {
-			const result: unknown = await execute(
-				input,
-				options ?? { toolCallId: crypto.randomUUID(), messages: [], abortSignal: context.abortSignal },
-			);
-			if (!isAsyncResult(result)) return result;
-			let final: unknown;
-			for await (const output of result) final = output;
-			return final;
+			const callOptions = options ?? {
+				toolCallId: context.activeCodeMode?.toolCallId ?? crypto.randomUUID(),
+				messages: [],
+				abortSignal: context.activeCodeMode?.abortSignal ?? context.abortSignal,
+			};
+			return executionContext.run({ ...context, toolCallId: callOptions.toolCallId, abortSignal: callOptions.abortSignal }, async () => {
+				const result: unknown = await execute(input, callOptions);
+				if (!isAsyncResult(result)) return result;
+				let final: unknown;
+				for await (const output of result) final = output;
+				return final;
+			});
 		};
 	}
 	return tools;
@@ -125,6 +133,19 @@ export async function executeComputerCommand(
 	context.abortSignal?.throwIfAborted();
 	context.abortSignal?.addEventListener('abort', cancel, { once: true });
 	try {
+		const observer =
+			context.onToolOutput && context.toolCallId && context.submissionId
+				? new ComputerOutputObserver(
+						(output) =>
+							context.onToolOutput?.({
+								type: 'tool-output',
+								submissionId: context.submissionId ?? '',
+								toolCallId: context.toolCallId ?? '',
+								toolName: context.activeCodeMode ? 'codemode' : (context.toolName ?? 'exec'),
+								output,
+							}) ?? Promise.resolve(),
+					)
+				: undefined;
 		using result = await context.fsStub.computerExec(
 			command,
 			{
@@ -135,6 +156,7 @@ export async function executeComputerCommand(
 				inputJson: options.input === undefined ? undefined : JSON.stringify(options.input),
 			},
 			writerId,
+			observer,
 		);
 		return { ...result };
 	} finally {

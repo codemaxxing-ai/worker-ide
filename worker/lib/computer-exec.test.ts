@@ -3,6 +3,7 @@ import { ShellWorker, WorkerShellBackend } from '@cloudflare/computer/backends/w
 import { createExecutionContext, env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 
+import { ComputerOutputObserver } from './computer-output-observer';
 import { computerStorage } from './computer-storage';
 
 import type { WorkspaceFilesystemStub } from '@cloudflare/computer';
@@ -14,6 +15,73 @@ class ControlledShell extends ShellWorker {
 }
 
 describe('Computer execution lifecycle without Docker', () => {
+	it.each([false, true])(
+		'publishes before exit and keeps FIFO ownership through synchronization (disconnected: %s)',
+		async (disconnected) => {
+			await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
+				const shell = new ControlledShell(createExecutionContext(), { HOST: { getWorkspace: () => project.__getWorkspaceStub() } });
+				const computer = new Computer({
+					storage: computerStorage(state.storage),
+					backends: [
+						new WorkerShellBackend({
+							id: 'container',
+							source: { type: 'external-runtime', connect: () => shell },
+							egress: { mode: 'none' },
+						}),
+					],
+				});
+				Reflect.set(project, 'computerInstance', computer);
+				Reflect.set(project, 'getWorkspaceContainer', () => ({ setInactivityTimeout: async () => {} }));
+				vi.spyOn(computer, 'push').mockImplementation(async function* () {});
+				const pulling = Promise.withResolvers<void>();
+				const synchronized = Promise.withResolvers<void>();
+				vi.spyOn(computer, 'pull').mockImplementation(async function* () {
+					pulling.resolve();
+					await synchronized.promise;
+					yield* [];
+				});
+				const id = crypto.randomUUID();
+				const stream = new TransformStream<Uint8Array, Uint8Array>();
+				const writer = stream.writable.getWriter();
+				const execute = vi.spyOn(shell, 'exec').mockImplementation(async () => ({ id, events: stream.readable }));
+				const receive = vi.fn(async () => {
+					if (disconnected) throw new Error('Observer disconnected');
+				});
+				let finished = false;
+				const execution = project
+					.computerExec('streamed command', { id, backend: 'container' }, 'session', new ComputerOutputObserver(receive))
+					.then((result) => {
+						finished = true;
+						return result;
+					});
+				const send = (event: object) => writer.write(new TextEncoder().encode(`${JSON.stringify(event)}\n`));
+				await send({ id, seq: 1, name: 'stdout', value: 'First 😀 line' });
+				await vi.waitFor(
+					() => expect(receive).toHaveBeenCalledWith(expect.objectContaining({ stdout: 'First 😀 line', stdoutBytes: 15 })),
+					{ timeout: 2000 },
+				);
+				expect(finished).toBe(false);
+				let editorFinished = false;
+				const editor = project.writeFileContent('/queued.txt', 'editor').then(() => {
+					editorFinished = true;
+				});
+				await send({ id, seq: 2, name: 'exit', value: 0 });
+				await writer.close();
+				await pulling.promise;
+				expect(editorFinished).toBe(false);
+				expect(finished).toBe(false);
+				expect(state.storage.sql.exec("SELECT arguments FROM computer_mutation_queue WHERE operation = 'computerExec'").toArray()).toEqual([
+					expect.objectContaining({ arguments: JSON.stringify(['streamed command', { id, backend: 'container' }, 'session']) }),
+				]);
+				synchronized.resolve();
+				expect(await execution).toMatchObject({ stdout: 'First 😀 line', syncStatus: 'complete' });
+				await editor;
+				expect(await project.wsReadFile('/queued.txt')).toBe('editor');
+				expect(execute).toHaveBeenCalledOnce();
+				await computer.close();
+			});
+		},
+	);
 	it('ignores delayed cancellation from an earlier turn in the same session', async () => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
 			await project.beginComputerSessionTurn('session', 'old-turn', 'code');

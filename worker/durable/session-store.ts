@@ -1,12 +1,12 @@
 import { readSessionMessageMetadata, readSessionMetadata, replaceSessionMessageMetadata, upsertSessionMetadata } from './db';
 import { applyPersistedMessageMetadata, serializePersistedMessageMetadata } from './session-history';
-import { compactHistoryForPersistence } from '../services/agent/persisted-history-compactor';
+import { readSessionTranscript } from '../services/agent/harness-session';
 import { chatMessageToSessionMessage, sessionMessagesToChatMessages } from '../services/agent/session-messages';
 
 import type { AgentDatabase, SessionMetadataRow } from './db';
 import type { StreamEvent } from '@shared/agent-state';
 import type { AgentSessionStatus, AiSession, ChatMessage, ToolErrorInfo, ToolMetadataInfo } from '@shared/types';
-import type { SessionInfo, SessionMessage } from 'agents/experimental/memory/session';
+import type { Session, SessionInfo, SessionMessage } from 'agents/experimental/memory/session';
 
 const AGENT_SESSION_STATUSES: ReadonlySet<string> = new Set(['running', 'completed', 'error', 'aborted']);
 
@@ -26,6 +26,7 @@ interface SessionMetadataState {
 }
 
 interface SessionHistoryStore {
+	getSession?(sessionId: string): Session;
 	get(sessionId: string): SessionInfo | null | undefined;
 	getHistory(sessionId: string): SessionMessage[] | Promise<SessionMessage[]>;
 	clearMessages(sessionId: string): unknown;
@@ -80,6 +81,11 @@ export class AgentSessionStore {
 		private sessionHistoryStore: SessionHistoryStore,
 	) {}
 
+	private async readOriginalHistory(sessionId: string): Promise<SessionMessage[]> {
+		if (this.sessionHistoryStore.getSession) return readSessionTranscript(this.sessionHistoryStore.getSession(sessionId));
+		return this.sessionHistoryStore.getHistory(sessionId);
+	}
+
 	getMetadata(sessionId: string): SessionMetadataState {
 		return parseSessionMetadata(readSessionMetadata(this.database, sessionId));
 	}
@@ -118,7 +124,7 @@ export class AgentSessionStore {
 		}
 
 		const metadata = this.getMetadata(sessionId);
-		const sessionHistory = sessionMessagesToChatMessages(await this.sessionHistoryStore.getHistory(sessionId));
+		const sessionHistory = sessionMessagesToChatMessages(await this.readOriginalHistory(sessionId));
 		const persistedMessageMetadata = readSessionMessageMetadata(this.database, sessionId);
 		const history = applyPersistedMessageMetadata(sessionHistory, persistedMessageMetadata);
 		return buildAiSession(sessionInfo, history, metadata);
@@ -148,28 +154,26 @@ export class AgentSessionStore {
 	}
 
 	async replaceHistory(sessionId: string, history: ChatMessage[]): Promise<void> {
-		const compactedHistory = compactHistoryForPersistence(history);
 		await this.sessionHistoryStore.clearMessages(sessionId);
 		await this.sessionHistoryStore.appendAll(
 			sessionId,
-			compactedHistory.map((message) => chatMessageToSessionMessage(message)),
+			history.map((message) => chatMessageToSessionMessage(message)),
 		);
-		replaceSessionMessageMetadata(this.database, sessionId, serializePersistedMessageMetadata(sessionId, compactedHistory));
+		replaceSessionMessageMetadata(this.database, sessionId, serializePersistedMessageMetadata(sessionId, history));
 	}
 
 	async syncHistory(sessionId: string, history: ChatMessage[]): Promise<void> {
-		const compactedHistory = compactHistoryForPersistence(history);
-		const existingHistory = sessionMessagesToChatMessages(await this.sessionHistoryStore.getHistory(sessionId));
-		const sharedPrefixLength = getSharedPrefixLength(existingHistory, compactedHistory);
+		const existingHistory = sessionMessagesToChatMessages(await this.readOriginalHistory(sessionId));
+		const sharedPrefixLength = getSharedPrefixLength(existingHistory, history);
 
 		if (sharedPrefixLength !== existingHistory.length) {
-			await this.replaceHistory(sessionId, compactedHistory);
+			await this.replaceHistory(sessionId, history);
 			return;
 		}
 
-		const suffix = compactedHistory.slice(sharedPrefixLength);
+		const suffix = history.slice(sharedPrefixLength);
 		if (suffix.length > 0) {
-			const parentId = sharedPrefixLength > 0 ? compactedHistory[sharedPrefixLength - 1]?.id : undefined;
+			const parentId = sharedPrefixLength > 0 ? history[sharedPrefixLength - 1]?.id : undefined;
 			await this.sessionHistoryStore.appendAll(
 				sessionId,
 				suffix.map((message) => chatMessageToSessionMessage(message)),
@@ -177,7 +181,7 @@ export class AgentSessionStore {
 			);
 		}
 
-		replaceSessionMessageMetadata(this.database, sessionId, serializePersistedMessageMetadata(sessionId, compactedHistory));
+		replaceSessionMessageMetadata(this.database, sessionId, serializePersistedMessageMetadata(sessionId, history));
 	}
 
 	async persistHistory(sessionId: string, history: ChatMessage[], stopRequested?: boolean): Promise<void> {

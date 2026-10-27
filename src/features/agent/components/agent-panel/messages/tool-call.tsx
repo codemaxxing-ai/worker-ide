@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 
 import { FileReference } from '../../file-reference';
 import { isRecord, isToolName } from '../helpers';
+import { CommandOutput } from './command-output';
 import { InlineSubAgentActivity } from './sub-agent-activity';
 import { ToolIcon } from './tool-icon';
 import {
@@ -320,6 +321,7 @@ export function InlineToolCall({
 					}
 				/>
 			)}
+			{isExpanded && !isCompleted && <CommandOutput output={structuredMetadata?.commandOutput} />}
 			{streamingContent && (
 				<pre
 					ref={streamingPreviewReference}
