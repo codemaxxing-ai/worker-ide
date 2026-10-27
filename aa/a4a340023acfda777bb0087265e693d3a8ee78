@@ -1,0 +1,19 @@
+worker/services/agent/agent-logger.test.ts
+  s_18a151f9050ebf::t_a31db22cc896e0 12-15,26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "aaa4a340023acfda777bb0087265e693d3a8ee78",
+  "prompts": {},
+  "sessions": {
+    "s_18a151f9050ebf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17f3d-7448-7701-b7e7-f274314cafb7",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
