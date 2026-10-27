@@ -10,17 +10,19 @@ const mockLoadAssetSettings = vi.fn();
 const mockMatchesRunWorkerFirst = vi.fn();
 
 vi.mock('../../preview-service', () => ({
-	PreviewService: vi.fn().mockImplementation(() => ({
-		serveFile: mockServeFile,
-		handlePreviewAPI: mockHandlePreviewAPI,
-		loadAssetSettings: mockLoadAssetSettings,
-		matchesRunWorkerFirst: mockMatchesRunWorkerFirst,
-		routePreviewRequest: vi.fn(async (request: Request, ideOrigin: string, assetSettings: { run_worker_first: boolean | string[] }) => {
-			return mockMatchesRunWorkerFirst(new URL(request.url).pathname, assetSettings.run_worker_first)
-				? mockHandlePreviewAPI(request, new URL(request.url).pathname)
-				: mockServeFile(request, ideOrigin, assetSettings);
-		}),
-	})),
+	PreviewService: vi.fn(function () {
+		return {
+			serveFile: mockServeFile,
+			handlePreviewAPI: mockHandlePreviewAPI,
+			loadAssetSettings: mockLoadAssetSettings,
+			matchesRunWorkerFirst: mockMatchesRunWorkerFirst,
+			routePreviewRequest: vi.fn(async (request: Request, ideOrigin: string, assetSettings: { run_worker_first: boolean | string[] }) => {
+				return mockMatchesRunWorkerFirst(new URL(request.url).pathname, assetSettings.run_worker_first)
+					? mockHandlePreviewAPI(request, new URL(request.url).pathname)
+					: mockServeFile(request, ideOrigin, assetSettings);
+			}),
+		};
+	}),
 }));
 
 // Mock cloudflare:workers env
