@@ -1,0 +1,19 @@
+worker-configuration.d.ts
+  s_5416f6d2eeb14f::t_6d62edaeeb11b8 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6e53ee3b548d09f81d907b9885d1ce3bc69ae11a",
+  "prompts": {},
+  "sessions": {
+    "s_5416f6d2eeb14f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17f08-9a40-73f3-a8df-3f20d128daa7",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
