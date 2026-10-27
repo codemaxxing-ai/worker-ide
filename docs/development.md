@@ -38,6 +38,8 @@ Install the browser matrix with `mise exec -- bunx playwright install chromium f
 
 Integration tests target `TEST_BASE_URL`, defaulting to `https://localhost:3000`, and do not start a server. Node test clients trust the generated local certificate while remote targets keep normal TLS verification. Playwright accepts local test certificates and starts a fresh server locally unless `TEST_BASE_URL` explicitly selects an existing server. CI expects an already-running server. E2E uses one worker locally and in CI to avoid competing native Docker setup. These suites create and clean up test projects through development-only helpers; point them at a local or isolated test instance.
 
+Workspace deletion closes Computer's RPC connection and sends `SIGTERM` so computerd can unmount FUSE before container destruction. Graceful shutdown has a five-second budget, followed by forced destruction; storage and project rows remain available for retry if destruction fails.
+
 E2E builds the editor and serves its frontend files through a [browser fixture](../test/e2e/built-editor.ts) that preserves the live Worker's response policy. APIs, authentication, and hosted project runtimes remain live. This tests the production frontend without replacing the backend or security headers.
 
 Full Worker runs use [test-worker.ts](../scripts/test-worker.ts) to start fresh batches below workerd's heap limit. Large preview-runtime integrations and D1 fixture suites run in separate processes. Targeted runs and watch mode use Vitest directly through the same script:
