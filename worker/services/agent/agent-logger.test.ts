@@ -9,10 +9,10 @@ import type { AgentDebugLog } from './agent-logger';
 
 vi.mock('@worker/lib/project-fs', () => ({
 	fs: {
-		mkdir: vi.fn().mockResolvedValue(true),
-		writeFile: vi.fn().mockResolvedValue(true),
-		readdir: vi.fn().mockResolvedValue([]),
-		unlink: vi.fn().mockResolvedValue(true),
+		mkdir: vi.fn(async () => {}),
+		writeFile: vi.fn(async () => {}),
+		readdir: vi.fn(async () => []),
+		unlink: vi.fn(async () => {}),
 	},
 	runWithProjectFs: <R>(_adapter: unknown, function_: () => R): R => function_(),
 	runWithProjectStub: <R>(_stub: unknown, function_: () => R): R => function_(),
@@ -23,6 +23,7 @@ describe('AgentLogger', () => {
 	let logger: AgentLogger;
 
 	beforeEach(() => {
+		vi.resetAllMocks();
 		logger = new AgentLogger('test-session', 'test-project', DEFAULT_AI_MODEL, 'code');
 	});
 
