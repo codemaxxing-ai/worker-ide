@@ -101,7 +101,7 @@ describe('session-history', () => {
 	it('promotes only the next queued message', () => {
 		const messages = [
 			createUserMessage('m1', 'first', 'committed'),
-			createUserMessage('m2', 'second', 'queued', 'plan', '@cf/google/gemma-4-26b-a4b-it'),
+			createUserMessage('m2', 'second', 'queued', 'plan', '@cf/deepseek-ai/deepseek-v4.1-flash-1017'),
 			createUserMessage('m3', 'third', 'queued', 'ask'),
 		];
 
@@ -199,13 +199,13 @@ describe('session-history', () => {
 
 	it('uses the last committed request config for the next run', () => {
 		const messages = [
-			createUserMessage('m1', 'first', 'committed', 'ask', '@cf/google/gemma-4-26b-a4b-it'),
+			createUserMessage('m1', 'first', 'committed', 'ask', '@cf/deepseek-ai/deepseek-v4.1-flash-1017'),
 			createUserMessage('m2', 'second', 'queued', 'plan'),
 		];
 
 		expect(getLastCommittedRequestConfig(messages)).toEqual({
 			mode: 'ask',
-			model: '@cf/google/gemma-4-26b-a4b-it',
+			model: '@cf/deepseek-ai/deepseek-v4.1-flash-1017',
 		});
 	});
 });

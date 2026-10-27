@@ -10,27 +10,27 @@ export interface AIModelConfig<TId extends string = string> {
 }
 export const AI_MODELS = [
 	{
-		id: '@cf/google/gemma-4-26b-a4b-it',
-		label: 'Gemma 4 26b',
-		description: 'Intelligent reasoning model from Google',
+		id: '@cf/zai-org/glm-5.3',
+		label: 'GLM 5.3',
+		description: 'Flagship coding model from Z.ai',
 		provider: 'workers-ai',
-		contextWindow: 256_000,
+		contextWindow: 1_048_576,
 		maxOutput: 16_384,
 	},
 	{
-		id: '@cf/moonshotai/kimi-k2.7-code',
-		label: 'Kimi K2.7 Code',
-		description: 'Frontier-scale model from Moonshot AI',
+		id: '@cf/deepseek-ai/deepseek-v4.1-flash-1017',
+		label: 'DeepSeek V4.1 Flash (1017)',
+		description: 'Multimodal coding and reasoning model from DeepSeek',
 		provider: 'workers-ai',
-		contextWindow: 262_144,
+		contextWindow: 1_048_576,
 		maxOutput: 16_384,
 	},
 	{
-		id: '@cf/nvidia/nemotron-3-120b-a12b',
-		label: 'Nemotron 3 Super',
-		description: 'Hybrid MoE model from NVIDIA',
+		id: '@cf/zai-org/glm-5.3-flash',
+		label: 'GLM 5.3 Flash',
+		description: 'Efficient multimodal coding model from Z.ai',
 		provider: 'workers-ai',
-		contextWindow: 256_000,
+		contextWindow: 1_048_576,
 		maxOutput: 16_384,
 	},
 ] as const satisfies readonly AIModelConfig[];
@@ -43,8 +43,8 @@ export const AI_MODEL_IDS: readonly AIModelId[] = AI_MODELS.map((model) => model
 // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Required for Zod enum tuple type
 export const AI_MODEL_IDS_TUPLE = AI_MODEL_IDS as readonly [AIModelId, ...AIModelId[]];
 
-export const DEFAULT_AI_MODEL: AIModelId = '@cf/moonshotai/kimi-k2.7-code' satisfies AIModelId;
-export const SUMMARIZATION_AI_MODEL: AIModelId = '@cf/google/gemma-4-26b-a4b-it' satisfies AIModelId;
+export const DEFAULT_AI_MODEL: AIModelId = '@cf/zai-org/glm-5.3' satisfies AIModelId;
+export const SUMMARIZATION_AI_MODEL: AIModelId = '@cf/zai-org/glm-5.3-flash' satisfies AIModelId;
 
 export function getModelLabel(modelId: string): string {
 	const model = AI_MODELS.find((m) => m.id === modelId);

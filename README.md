@@ -4,6 +4,8 @@ A browser-based full-stack development environment built on Cloudflare Workers. 
 
 Model calls use `createAI` with AI SDK 7. The `agents-models` dependency is an npm alias for the official `agents@0.30.1` package, used only for its model provider; `agents@0.20.1` remains the session runtime because later releases remove the experimental session APIs this application uses. Gateway metadata, payload logging controls, session affinity, and provider timeouts are preserved.
 
+The coding assistant offers [GLM 5.3](https://developers.cloudflare.com/workers-ai/models/glm-5.3/) (default), [DeepSeek V4.1 Flash (1017)](https://developers.cloudflare.com/workers-ai/models/deepseek-v4.1-flash-1017/), and [GLM 5.3 Flash](https://developers.cloudflare.com/workers-ai/models/glm-5.3-flash/), all hosted on Workers AI with 1,048,576-token context windows. GLM 5.3 Flash handles summarization and titles. These models require Workers Paid or prepaid AI Gateway credits. Model selection was reviewed on October 26, 2026.
+
 See the [contributor documentation](docs/index.md) for architecture, workspace patterns, development guidance, and design decisions.
 
 ## Architecture
