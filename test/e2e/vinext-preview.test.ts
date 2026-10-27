@@ -40,19 +40,22 @@ async function editProjectFile(page: Page, projectId: string, path: string, find
 }
 
 test.describe('vinext preview + HMR', () => {
+	const observedWebsocketPaths = new WeakMap<Page, string[]>();
+	test.beforeEach(({ page }) => {
+		const paths: string[] = [];
+		observedWebsocketPaths.set(page, paths);
+		page.on('websocket', (socket) => paths.push(new URL(socket.url()).pathname));
+	});
 	test.use({ nativeProjectOptions: { template: 'vinext', warmPreview: true } });
 	test('server-renders the App Router app and HMR-updates each module type with client state preserved', async ({
 		page,
 		nativeProject: projectId,
 	}) => {
 		const unexpectedReloads: string[] = [];
-		const websocketPaths: string[] = [];
-		page.on('websocket', (socket) => websocketPaths.push(new URL(socket.url()).pathname));
+		const websocketPaths = observedWebsocketPaths.get(page) ?? [];
 		page.on('console', (message) => {
 			if (message.text().includes('changed module not in running graph')) unexpectedReloads.push(message.text());
 		});
-		// Capture the new document's HMR connection after the native setup fixture.
-		await page.reload();
 		await waitForFileTree(page, 'app');
 
 		const previewIframe = page.locator('iframe[title="Project Preview"]');
