@@ -1,0 +1,125 @@
+README.md
+  s_231479206ffcf1::t_7b7e7227917358 102,153-156
+bun.lock
+  s_231479206ffcf1::t_4a633c0d1623b6 12
+docs/development.md
+  s_231479206ffcf1::t_e53b19ed44ba42 39
+package.json
+  s_231479206ffcf1::t_c2c8e312199ee3 10
+playwright.config.ts
+  s_231479206ffcf1::t_3069c61f12ca97 12-13
+shared/agent-state.ts
+  s_231479206ffcf1::t_e228afa4fb2c46 36,82,109-115,226,228-229,234,240-242
+shared/command-output.test.ts
+  s_a1822a0ba6955f::t_33327b9701580e 3,5-9,11-35,37-41
+shared/command-output.ts
+  s_231479206ffcf1::t_ee93f394d57d08 1-43
+shared/types/agent.ts
+  s_231479206ffcf1::t_619d35cb182ee0 32
+src/features/agent/components/agent-panel/messages/command-output.tsx
+  s_a1822a0ba6955f::t_88f9e4d02dbc44 1-22
+src/features/agent/components/agent-panel/messages/sub-agent-activity.test.tsx
+  s_231479206ffcf1::t_e92e87f4e03170 1-42
+src/features/agent/components/agent-panel/messages/sub-agent-activity.tsx
+  s_231479206ffcf1::t_de453f67bad5b5 9,11,108-117
+src/features/agent/components/agent-panel/messages/tool-call.stories.tsx
+  s_a1822a0ba6955f::t_c7e9017e4d055a 44-72
+src/features/agent/components/agent-panel/messages/tool-call.test.tsx
+  s_a1822a0ba6955f::t_faf4bf1cc28bde 154-210
+src/features/agent/components/agent-panel/messages/tool-call.tsx
+  s_231479206ffcf1::t_e2ac21ae9e260b 10,324
+test/local-https.test.ts
+  s_231479206ffcf1::t_aa2612d61684fe 1-51
+test/local-https.ts
+  s_231479206ffcf1::t_e9e9e02d323678 6-10
+worker/durable/agent-runner.ts
+  s_231479206ffcf1::t_8bca8d59113c38 9,51-52,837,841-845,847
+worker/durable/agent-turn-coordinator.ts
+  s_231479206ffcf1::t_652ecc63ed4cd6 172-173,217
+worker/durable/project-filesystem.ts
+  s_231479206ffcf1::t_ebd0a2d2080620 22,52,581-586,588,649-654,687-696
+worker/durable/session-event-batcher.test.ts
+  s_231479206ffcf1::t_c0dac083862d71 74-119
+worker/durable/session-event-batcher.ts
+  s_231479206ffcf1::t_0e28a824e9f3fe 1-2,4,16-23,33,35-58,72
+worker/durable/session-store.test.ts
+  s_231479206ffcf1::t_27dd9bd7322d6b 59-99
+worker/durable/session-store.ts
+  s_231479206ffcf1::t_bd18976351a9db 3,9,29,84-88,127,160,162,166-167,170,174,176,184
+worker/durable/session-stream-state.test.ts
+  s_231479206ffcf1::t_97f06093950055 114-203
+worker/durable/session-stream-state.ts
+  s_231479206ffcf1::t_cd5e3cfbc7f22f 3-4,39-62,124,261-302,312-315,331-339,341-344,348-359,361-364
+worker/durable/session-turn-agent.test.ts
+  s_231479206ffcf1::t_c8201878c46ebe 39,132,148
+worker/durable/session-turn-agent.ts
+  s_231479206ffcf1::t_4f1200b86c4b01 5,15,17-23,29,35,37-45,49,71,107-135,205,213-234,274-279,287-293,295-302,308-309,361-367,388,407-411,417,430-434,476,495-498
+worker/durable/sub-agent-worker.test.ts
+  s_231479206ffcf1::t_560cdbae849faf 8-19,40,69
+worker/durable/sub-agent-worker.ts
+  s_231479206ffcf1::t_a1a06f2abe6f87 3,6,11-16,20,25-26,29,44,48,58-85,100-101,110-113,129,134,137-156,173-175,188-195,200-201,205-229,235-236,240-245,248,263,265,273,285-291,313-314
+worker/lib/computer-exec.test.ts
+  s_231479206ffcf1::t_55e4d981f55f43 6,18-84
+worker/lib/computer-execution.ts
+  s_231479206ffcf1::t_94e1adc5f08f8c 1-2,4,7-11,28-30,33,36,39-40,47
+worker/lib/computer-output-observer.test.ts
+  s_231479206ffcf1::t_f7fb5616943c31 1-37
+worker/lib/computer-output-observer.ts
+  s_231479206ffcf1::t_5175e57d4ec23e 1-75
+worker/services/agent/cancellable-worker-loader.ts
+  s_231479206ffcf1::t_82e7336609eb98 1-47
+worker/services/agent/harness-session.test.ts
+  s_231479206ffcf1::t_f45a06cc095018 1-119
+worker/services/agent/harness-session.ts
+  s_231479206ffcf1::t_e705b60950d01a 1-95
+worker/services/agent/provider-retries.test.ts
+  s_fc9bed38a8a5dc::t_e5b108aaf90263 1-89
+worker/services/agent/tool-failure-guard.test.ts
+  s_231479206ffcf1::t_4cbf4fadb9f52c 1-55
+worker/services/agent/tool-failure-guard.ts
+  s_231479206ffcf1::t_1a360e9f9db8be 1-77
+worker/services/agent/tools/computer-tools.ts
+  s_231479206ffcf1::t_2291811482ee73 1-2,5,14,59,102-113,136-148,159
+worker/services/agent/tools/sub-agent.ts
+  s_231479206ffcf1::t_6928159a718277 60
+worker/services/agent/tools/tool-validation-parity.test.ts
+  s_231479206ffcf1::t_a3dab0e1f139ae 1-35,37-51
+worker/services/agent/tools/validate-tool-input.test.ts
+  s_231479206ffcf1::t_093a7b1d357db1 67,73,115-144
+worker/services/agent/tools/validate-tool-input.ts
+  s_231479206ffcf1::t_65ec89ee5f939c 14-16,91,119,139,158-166,169-170,174-195
+worker/services/agent/types.ts
+  s_231479206ffcf1::t_32802ad5b1160c 3,5,118-122,186-202,206
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "46fa1202dc4ab29c41fa7c33edebd22c50b05a39",
+  "prompts": {},
+  "sessions": {
+    "s_231479206ffcf1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17e56-f602-7512-b99c-b99e1628bf91",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    },
+    "s_a1822a0ba6955f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17e6a-dca7-7263-92a4-22df5accf08e",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    },
+    "s_fc9bed38a8a5dc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17e78-23b6-7f02-b0fe-824fef4a2308",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
