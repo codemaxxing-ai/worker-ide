@@ -9,11 +9,11 @@ import { fadeUpVariants, springDefault } from '@/lib/motion-config';
 import { useStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 
+import { resolveAuthorName } from './message-author';
 import { messagePartsToInputSegments } from '../../../lib/input-segments';
 import { FileReference } from '../../file-reference';
 import { PreviewElementReference } from '../../preview-element-reference';
 import { getModelLabel } from '../model-config';
-import { resolveAuthorName } from './message-author';
 
 import type { SessionParticipantProfile } from '@shared/agent-state';
 import type { AgentMode, ChatMessage } from '@shared/types';

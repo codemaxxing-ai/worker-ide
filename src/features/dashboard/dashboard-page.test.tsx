@@ -78,6 +78,7 @@ function setLocalTime(isoDateTime: string) {
 afterEach(() => {
 	vi.useRealTimers();
 	vi.restoreAllMocks();
+	vi.resetAllMocks();
 });
 
 const { createProject, cloneProject, fetchOrgProjects, fetchOrgLimits } = await import('@/lib/api-client');

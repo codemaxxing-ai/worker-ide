@@ -46,7 +46,7 @@ interface RegisterSWOptions {
 describe('usePwaUpdate', () => {
 	const originalServiceWorker = navigator.serviceWorker;
 	let controllerChangeListener: EventListener | undefined;
-	let registrationUpdateMock: ReturnType<typeof vi.fn>;
+	let registrationUpdateMock: ReturnType<typeof vi.fn<() => Promise<void>>>;
 	let fetchMock: ReturnType<typeof vi.fn>;
 
 	beforeEach(() => {

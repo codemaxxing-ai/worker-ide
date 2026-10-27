@@ -86,7 +86,7 @@ The bell also synchronizes after permission or service worker changes and prefer
 | `lint`             | Check formatting (Prettier) and lint (ESLint)                           |
 | `format`           | Auto-fix formatting and lint issues                                     |
 | `test:unit`        | Unit tests (Node env)                                                   |
-| `test:worker`      | Worker tests (workerd env via `@cloudflare/vitest-pool-workers`)        |
+| `test:worker`      | Worker tests (workerd env via `@cloudflare/vitest-plugin`)              |
 | `test:agent`       | Production-build agent lifecycle tests with the current Workers runtime |
 | `test:react`       | React component tests (jsdom env)                                       |
 | `test:e2e`         | Build editor and run Playwright tests in Chromium, Firefox and WebKit   |

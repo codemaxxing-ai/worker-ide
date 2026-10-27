@@ -7,7 +7,7 @@
 	"account_id": "d64471fef208e0cf9687449dc8a5878b",
 	"name": "worker-ide",
 	"main": "worker/index.ts",
-	"compatibility_date": "2026-10-27",
+	"compatibility_date": "2026-10-19",
 	"compatibility_flags": ["nodejs_compat"],
 	"limits": {
 		// Allow headroom for agent turns that make many tool and streaming RPCs.

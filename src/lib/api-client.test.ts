@@ -5,11 +5,12 @@ import { cloneProject, createProject, fetchTemplates } from './api-client';
 const fetchMock = vi.fn<typeof globalThis.fetch>();
 
 beforeEach(() => {
+	fetchMock.mockReset();
 	vi.stubGlobal('fetch', fetchMock);
 });
 
 afterEach(() => {
-	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
 });
 function jsonResponse(body: unknown, status = 200): Response {
 	return Response.json(body, {

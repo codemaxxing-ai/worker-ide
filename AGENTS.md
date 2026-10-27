@@ -169,8 +169,8 @@ Prefer regular Workers or Durable Objects for fast request/response operations, 
 Worker code runs in Cloudflare's workerd runtime, which requires special test configuration.
 
 - Worker tests are located in `worker/**/*.test.ts` and `shared/**/*.test.ts`.
-- Configuration uses `@cloudflare/vitest-pool-workers` — see `vitest.config.ts` for details.
-- Tests run in a simulated Workers environment with isolated storage disabled.
+- Configuration uses `@cloudflare/vitest-plugin` — see `vitest.config.ts` for details.
+- Tests run in a simulated Workers environment with storage isolated per test file.
 
 ## Accessibility Testing
 

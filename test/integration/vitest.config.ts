@@ -20,11 +20,8 @@ export default defineConfig(({ mode }) => {
 			testTimeout: 120_000,
 			hookTimeout: 120_000,
 			pool: 'threads',
-			poolOptions: {
-				threads: {
-					singleThread: true,
-				},
-			},
+			maxWorkers: 1,
+			fileParallelism: false,
 			reporters: ['default'],
 			env: {
 				TEST_BASE_URL: environment.TEST_BASE_URL || 'https://localhost:3000',

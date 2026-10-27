@@ -42,10 +42,9 @@
 		"tailwindcss": "^4.3.3",
 		"typescript": "^5.9.3",
 		"typescript-eslint": "^8.67.0",
-		"wrangler": "^4.134.0"
+		"wrangler": "4.154.0"
 	},
 	"overrides": {
-		"workerd": "1.20261027.1",
-		"@cloudflare/vite-plugin": "1.55.0"
+		"@cloudflare/vite-plugin": "1.65.0"
 	}
 }

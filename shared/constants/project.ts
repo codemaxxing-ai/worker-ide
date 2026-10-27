@@ -18,4 +18,4 @@ export const MAX_AI_SESSIONS_PER_PROJECT = 50;
  *
  * Keep in sync with the `compatibility_date` values in the wrangler.jsonc files.
  */
-export const WORKERS_COMPATIBILITY_DATE = '2026-10-27';
+export const WORKERS_COMPATIBILITY_DATE = '2026-10-19';
