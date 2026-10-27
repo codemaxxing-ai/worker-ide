@@ -44,7 +44,7 @@ Keep the compatibility date within the runtime versions supplied by the Cloudfla
 
 E2E builds the editor and serves its frontend files through a [browser fixture](../test/e2e/built-editor.ts) that preserves the live Worker's response policy. APIs, authentication, and hosted project runtimes remain live. This tests the production frontend without replacing the backend or security headers.
 
-The Cloudflare Vitest plugin starts a fresh runtime for each test file, isolating storage and module state. Worker tests use one concurrent runtime to limit memory use, while a single Vitest process reuses transformed modules across files. Targeted runs and watch mode use the same command:
+The Cloudflare Vitest plugin starts a fresh runtime for each test file, isolating storage and module state. Worker tests use at most two concurrent runtimes to bound memory use and overlap runtime startup, while a single Vitest process reuses transformed modules across files. Targeted runs and watch mode use the same command:
 
 ```bash
 mise exec -- bun run test:worker --run worker/lib/computer-exec.test.ts

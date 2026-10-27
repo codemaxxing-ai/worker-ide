@@ -184,7 +184,7 @@ jobs:
   test-worker:
     name: Worker Tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
