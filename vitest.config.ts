@@ -37,7 +37,7 @@ export default defineConfig({
 			{
 				test: {
 					name: 'unit',
-					include: ['shared/**/*.test.ts', 'src/lib/**/*.test.ts', 'auxiliary/**/*.test.ts'],
+					include: ['shared/**/*.test.ts', 'src/lib/**/*.test.ts', 'auxiliary/**/*.test.ts', 'test/*.test.ts'],
 					environment: 'node',
 				},
 				resolve: {

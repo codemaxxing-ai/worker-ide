@@ -315,6 +315,9 @@ export default defineConfig(({ command }) => ({
 		},
 	},
 	server: {
+		// Freeze the host source during E2E runs; project preview HMR uses its own runtime.
+		// eslint-disable-next-line unicorn/no-null -- Vite disables file watching with null.
+		watch: process.env.WORKER_IDE_E2E === '1' ? null : undefined,
 		cors: false,
 		port: 3000,
 		host: '0.0.0.0',

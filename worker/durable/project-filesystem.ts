@@ -1055,9 +1055,14 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 	async destroyStorage(): Promise<void> {
 		await this.queue.run('destroyStorage', [], async () => {
 			if (this.ctx.container?.running) await this.ctx.container.destroy();
-			for (const { name } of this.ctx.storage.sql.exec<{ name: string }>(
-				"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('computer_mutation_queue', 'computer_mutation_payload')",
-			)) {
+			const tables = this.ctx.storage.sql
+				.exec<{ name: string }>(
+					"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('computer_mutation_queue', 'computer_mutation_payload')",
+				)
+				.toArray();
+			for (const { name } of tables) {
+				// Runtime versions use _cf_ or __cf_ for protected tables; clear KV through its API.
+				if (name.startsWith('_cf_') || name.startsWith('__cf_')) continue;
 				this.ctx.storage.sql.exec(`DROP TABLE "${name.replaceAll('"', '""')}"`);
 			}
 			for (const [key] of this.ctx.storage.kv.list()) this.ctx.storage.kv.delete(key);

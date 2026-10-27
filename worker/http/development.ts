@@ -6,6 +6,7 @@ import { serialize } from 'hono/utils/cookie';
 
 import { ENTITLEMENT_ORG_MAX_PROJECTS, ENTITLEMENT_USER_MAX_FREE_ORGS } from '@shared/entitlements';
 
+import { developmentTestCleanupRoutes } from './development-test-cleanup';
 import * as authSchema from '../db/auth-schema';
 
 import type { AuthedEnvironment } from '../types';
@@ -199,18 +200,6 @@ export function registerDevelopmentTestRoutes(app: Hono<AuthedEnvironment>): voi
 			}
 		});
 
-		app.post('/__test/cleanup', async (c) => {
-			try {
-				const database = drizzle(c.env.DB, { schema: authSchema });
-				const organizationId = '11111111-1111-4111-8111-111111111111';
-
-				await database.delete(authSchema.project).where(eq(authSchema.project.organizationId, organizationId));
-
-				return c.json({ ok: true });
-			} catch (error) {
-				console.error('/__test/cleanup failed:', error);
-				return c.json({ error: String(error) }, 500);
-			}
-		});
+		app.route('/', developmentTestCleanupRoutes);
 	}
 }

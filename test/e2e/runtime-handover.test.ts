@@ -1,6 +1,5 @@
 import { hc } from 'hono/client';
 
-import { gotoIDE } from './helpers';
 import { expect, test } from './test-fixtures';
 import { WORKER_MODULE_BYTE_BUDGET } from '../../shared/worker-resource-budget';
 import { localFetch } from '../local-https';
@@ -14,13 +13,14 @@ declare const location: { pathname: string; search: string; hash: string };
 declare const scrollY: number;
 declare function scrollTo(x: number, y: number): void;
 
-test('promotes a project by size and preserves preview state in the same iframe', async ({ page }) => {
-	const html = `<html><head><title>Runtime handover</title></head><body style="height:2000px"><input id="draft" aria-label="Draft"><button id="increment">Increment</button><output id="counter">0</output><script>
+const html = `<html><head><title>Runtime handover</title></head><body style="height:2000px"><input id="draft" aria-label="Draft"><button id="increment">Increment</button><output id="counter">0</output><script>
 	let counter=0; const show=()=>document.getElementById('counter').textContent=String(counter);
 	document.getElementById('increment').onclick=()=>{counter++;show()};
 	window.__WORKER_IDE_PREVIEW_STATE__={capture:()=>({counter}),restore:state=>{counter=state.counter;show()}};
 	</script></body></html>`;
-	const projectId = await gotoIDE(page, { template: 'minimal', files: { '/index.html': html }, warmContainer: true });
+test.use({ nativeProjectOptions: { template: 'minimal', files: { '/index.html': html }, warmDependencies: true } });
+
+test('promotes a project by size and preserves preview state in the same iframe', async ({ page, nativeProject: projectId }) => {
 	const iframe = page.locator('iframe[title="Project Preview"]');
 	const frame = page.frameLocator('iframe[title="Project Preview"]');
 	await expect(frame.getByRole('button', { name: 'Increment' })).toBeVisible();

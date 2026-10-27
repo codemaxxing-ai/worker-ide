@@ -97,6 +97,16 @@ The bell also synchronizes after permission or service worker changes and prefer
 | `storybook`        | Storybook dev server (port 6006)                                        |
 | `cf-typegen`       | Generate worker type bindings (`worker-configuration.d.ts`)             |
 
+### Local browser tests
+
+Run `mise exec -- bunx playwright install` after changing Playwright versions, then `mise exec -- bun run test:e2e`. The default run owns a fresh server on port 3000 and checks `/api/templates` before starting. Stop a conflicting server or explicitly select an existing one with `TEST_BASE_URL=https://localhost:3000`; E2E no longer silently reuses a server from another checkout. Servers started by Playwright disable host-source watching so concurrent edits cannot reset Worker state during a test. Preview HMR remains enabled.
+
+Firefox on macOS uses a private app-data directory for each Playwright worker through `test/browser-launch.ts`. This avoids the macOS 27 protection of the real Firefox app-data directory ([upstream issue](https://github.com/microsoft/playwright/issues/42768)). The directory and its macOS-created ACLs are removed after browser shutdown. Other repositories using affected Firefox builds can reuse this helper and the `launchOptions` fixture in `test/e2e/test-fixtures.ts`.
+
+E2E and integration teardown explicitly destroy each run's test workspaces and containers before deleting their database rows. Cleanup failures fail the check and retain the project IDs for retry; cleanup never clears another run's projects. Run Docker-dependent suites without restarting or updating Docker Desktop during the run. A Docker restart invalidates active container connections and requires a fresh test server; retrying tests against that server does not repair its runtime.
+
+Native preview tests prepare cold container dependencies in a fixture with a six-minute startup budget, matching the runtime's five-minute command limit plus startup overhead. Browser and HMR assertions retain their two-minute test budget and shorter per-assertion deadlines. Teardown cancels unfinished native setup before waiting for the workspace mutation queue.
+
 ## Path Aliases
 
 | Alias       | Resolves to  |

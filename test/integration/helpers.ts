@@ -1,4 +1,8 @@
+import { hc } from 'hono/client';
+
 import { localFetch as fetch } from '../local-https';
+
+import type { DevelopmentTestCleanupRoutes } from '../../worker/http/development-test-cleanup';
 export const BASE_URL = process.env.TEST_BASE_URL || 'https://localhost:3000';
 export const TEST_ORGANIZATION_ID = '11111111-1111-4111-8111-111111111111';
 let sessionCookie: string;
@@ -75,21 +79,11 @@ export async function cleanupProjects(): Promise<void> {
 	const cookie = sessionCookie;
 	if (!cookie) return;
 
-	for (const projectId of createdProjectIds) {
-		try {
-			await fetch(`${BASE_URL}/api/org/${TEST_ORGANIZATION_ID}/project/${projectId}`, {
-				method: 'DELETE',
-				headers: { Cookie: cookie },
-			});
-		} catch {
-			// Ignore — project may already be deleted
-		}
-	}
+	const api = hc<DevelopmentTestCleanupRoutes>(BASE_URL, { fetch, headers: { Cookie: cookie } });
+	const response = await api.__test.cleanup.$post(
+		{ json: { projectIds: [...createdProjectIds] } },
+		{ init: { signal: AbortSignal.timeout(30_000) } },
+	);
+	if (!response.ok) throw new Error(`Failed to release test projects: ${response.status}`);
 	createdProjectIds.length = 0;
-
-	try {
-		await fetch(`${BASE_URL}/__test/cleanup`, { method: 'POST' });
-	} catch {
-		// Ignore — server may be down
-	}
 }

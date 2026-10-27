@@ -8,6 +8,22 @@ import { ComputerWorkspace } from '../lib/computer-workspace';
 import type { ProjectFilesystem } from './project-filesystem';
 
 describe('Canonical Computer workspaces', () => {
+	it('destroys workspace data without dropping protected storage or breaking the mutation queue', async () => {
+		const stub = env.DurableObjectFilesystem.getByName(`canonical-cleanup:${crypto.randomUUID()}`);
+		await stub.writeFileContent('/source.txt', 'disposable data');
+		await stub.registerComputerSession('test', 'code');
+		await stub.destroyStorage();
+		expect(await stub.projectExists()).toBe(false);
+		await runInDurableObject(stub, (_instance, state) => {
+			expect(state.storage.kv.get('computer-session:test')).toBeUndefined();
+			expect(state.storage.sql.exec("SELECT name FROM sqlite_master WHERE name = 'computer_mutation_queue'").toArray()).toHaveLength(1);
+		});
+		await stub.writeFileContent('/fresh.txt', 'new workspace');
+		expect(await stub.wsReadFile('/fresh.txt')).toBe('new workspace');
+		expect(await stub.wsLstat('/source.txt')).toBeFalsy();
+		await stub.destroyStorage();
+	});
+
 	it('reads an empty project and initializes new files directly without legacy storage', async () => {
 		const stub = env.DurableObjectFilesystem.getByName(`canonical-new:${crypto.randomUUID()}`);
 		expect(await stub.projectExists()).toBe(false);

@@ -1,4 +1,4 @@
-import { gotoIDE, waitForFileTree } from './helpers';
+import { waitForFileTree } from './helpers';
 import { expect, test } from './test-fixtures';
 
 import type { Page } from 'playwright/test';
@@ -40,14 +40,19 @@ async function editProjectFile(page: Page, projectId: string, path: string, find
 }
 
 test.describe('vinext preview + HMR', () => {
-	test('server-renders the App Router app and HMR-updates each module type with client state preserved', async ({ page }) => {
+	test.use({ nativeProjectOptions: { template: 'vinext', warmPreview: true } });
+	test('server-renders the App Router app and HMR-updates each module type with client state preserved', async ({
+		page,
+		nativeProject: projectId,
+	}) => {
 		const unexpectedReloads: string[] = [];
 		const websocketPaths: string[] = [];
 		page.on('websocket', (socket) => websocketPaths.push(new URL(socket.url()).pathname));
 		page.on('console', (message) => {
 			if (message.text().includes('changed module not in running graph')) unexpectedReloads.push(message.text());
 		});
-		const projectId = await gotoIDE(page, { template: 'vinext', warmPreview: true });
+		// Capture the new document's HMR connection after the native setup fixture.
+		await page.reload();
 		await waitForFileTree(page, 'app');
 
 		const previewIframe = page.locator('iframe[title="Project Preview"]');

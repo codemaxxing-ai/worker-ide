@@ -2,7 +2,8 @@ import { hc } from 'hono/client';
 
 import { localFetch as fetch } from '../local-https';
 
-import type { ApiRoutes, OrgRoutes } from '../../worker/routes';
+import type { DevelopmentTestCleanupRoutes } from '../../worker/http/development-test-cleanup';
+import type { ApiRoutes } from '../../worker/routes';
 import type { DevelopmentTestRoutes } from '../../worker/routes/development-test-routes';
 import type { BrowserContext, Page } from 'playwright/test';
 
@@ -14,11 +15,12 @@ const createdProjects = new WeakMap<BrowserContext, Set<string>>();
 export async function cleanupProjects(context: BrowserContext): Promise<void> {
 	const projectIds = createdProjects.get(context);
 	if (!projectIds || !sessionCookie || !testOrganizationId) return;
-	const api = hc<OrgRoutes>(`${BASE_URL}/api`, { fetch, headers: { Cookie: sessionCookie } });
-	for (const projectId of projectIds) {
-		const response = await api.org[':orgId'].project[':projectId'].$delete({ param: { orgId: testOrganizationId, projectId } });
-		if (!response.ok && response.status !== 404) throw new Error(`Failed to clean up test project: ${response.status}`);
-	}
+	const api = hc<DevelopmentTestCleanupRoutes>(BASE_URL, { fetch, headers: { Cookie: sessionCookie } });
+	const response = await api.__test.cleanup.$post(
+		{ json: { projectIds: [...projectIds] } },
+		{ init: { signal: AbortSignal.timeout(30_000) } },
+	);
+	if (!response.ok) throw new Error(`Failed to release test projects: ${response.status}`);
 	createdProjects.delete(context);
 }
 
@@ -86,10 +88,15 @@ async function createProject(template = 'request-inspector'): Promise<{ projectI
  * AuthGate passes, then clears localStorage to reset persisted Zustand
  * state (sidebar/terminal visibility, etc.) before the page loads.
  */
-export async function gotoIDE(
-	page: Page,
-	options: { template?: string; files?: Record<string, string>; warmPreview?: boolean; warmContainer?: boolean } = {},
-): Promise<string> {
+export interface IDEOptions {
+	template?: string;
+	files?: Record<string, string>;
+	warmPreview?: boolean;
+	warmContainer?: boolean;
+	warmDependencies?: boolean;
+}
+
+export async function gotoIDE(page: Page, options: IDEOptions = {}): Promise<string> {
 	const cookie = await ensureTestSession();
 	const { url, projectId } = await createProject(options.template);
 	const context = page.context();
@@ -121,14 +128,16 @@ export async function gotoIDE(
 		}
 	}
 
-	if (options.warmContainer) {
+	if (options.warmContainer || options.warmDependencies) {
 		// Prepare rootless Docker networking before navigating Chromium. Vite
 		// still starts during promotion, after the preview has loaded on Worker.
 		const api = hc<DevelopmentTestRoutes>(`${BASE_URL}/p/${projectId}/api`, { fetch, headers: { Cookie: cookie } });
-		const response = await api.__test['computer-exec'].$post({ json: { command: 'true', backend: 'container' } });
+		const response = await api.__test['computer-exec'].$post({
+			json: { command: options.warmDependencies ? 'bun install --no-save' : 'true', backend: 'container', sessionId: 'native-preview' },
+		});
 		if (!response.ok) throw new Error(`Failed to prepare container networking: ${response.status}`);
 		const { result } = await response.json();
-		if (result.exitCode !== 0 || result.syncStatus !== 'complete') throw new Error('Container networking preparation failed');
+		if (result.exitCode !== 0 || result.syncStatus !== 'complete') throw new Error(`Native container setup failed: ${result.stderr}`);
 	}
 
 	if (options.warmPreview) {
