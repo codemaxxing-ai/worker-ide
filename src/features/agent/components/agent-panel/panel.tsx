@@ -916,11 +916,11 @@ export function AgentPanel({ projectId, className }: { projectId: string; classN
 		return committedMessages;
 	}, [committedMessages, streamingAssistantMessage]);
 
-	let inputPlaceholder = 'Ask anything...';
+	let inputPlaceholder = 'Code anything...';
 	if (agentMode === 'plan') {
-		inputPlaceholder = 'Describe what to plan...';
+		inputPlaceholder = 'Plan anything...';
 	} else if (agentMode === 'ask') {
-		inputPlaceholder = 'Ask a question...';
+		inputPlaceholder = 'Ask anything...';
 	}
 
 	return (

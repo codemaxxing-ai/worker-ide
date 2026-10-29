@@ -19,7 +19,7 @@ export const AI_MODELS = [
 	},
 	{
 		id: '@cf/deepseek-ai/deepseek-v4.1-flash-1017',
-		label: 'DeepSeek V4.1 Flash (1017)',
+		label: 'DeepSeek V4.1 Flash',
 		description: 'Multimodal coding and reasoning model from DeepSeek',
 		provider: 'workers-ai',
 		contextWindow: 1_048_576,
