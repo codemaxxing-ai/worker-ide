@@ -113,6 +113,10 @@
 			"deleted_classes": ["VinextPreviewHost"],
 			"tag": "v9",
 		},
+		{
+			"new_sqlite_classes": ["OrganizationContainerCapacity"],
+			"tag": "v10",
+		},
 	],
 	"r2_buckets": [
 		{

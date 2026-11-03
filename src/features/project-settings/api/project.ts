@@ -9,6 +9,7 @@ export interface ProjectPermissions {
 }
 
 export interface ProjectMeta {
+	alwaysUseContainer: boolean;
 	name: string;
 	assetSettings?: AssetSettings;
 	bindingsConfig?: BindingsConfig;
@@ -56,6 +57,7 @@ function normalizeProjectMeta(value: unknown): ProjectMeta {
 
 	return {
 		name,
+		alwaysUseContainer: Reflect.get(value, 'alwaysUseContainer') === true,
 		organizationId,
 		organizationSlug: typeof organizationSlugValue === 'string' ? organizationSlugValue : undefined,
 		permissions: normalizeProjectPermissions(permissionsValue),
@@ -75,7 +77,7 @@ export async function fetchProjectMeta(projectId: string): Promise<ProjectMeta> 
 
 export async function updateProjectMeta(
 	projectId: string,
-	meta: { name?: string; assetSettings?: AssetSettings; bindingsConfig?: BindingsConfig },
+	meta: { name?: string; assetSettings?: AssetSettings; bindingsConfig?: BindingsConfig; alwaysUseContainer?: boolean },
 ): Promise<ProjectMeta> {
 	const api = createApiClient(projectId);
 	const response = await api.project.meta.$put({ json: meta });

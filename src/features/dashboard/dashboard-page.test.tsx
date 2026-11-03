@@ -425,6 +425,8 @@ describe('DashboardPage', () => {
 
 	it('shows warning and disables Create Project button in template modal when project limit is reached', async () => {
 		vi.mocked(fetchOrgLimits).mockResolvedValue({
+			maxRunningContainers: 3,
+			currentRunningContainers: 0,
 			currentProjects: 10,
 			maxProjects: 10,
 			maxMembers: 5,
@@ -454,6 +456,8 @@ describe('DashboardPage', () => {
 
 	it('does not show warning in template modal when project limit is not reached', async () => {
 		vi.mocked(fetchOrgLimits).mockResolvedValue({
+			maxRunningContainers: 3,
+			currentRunningContainers: 0,
 			currentProjects: 5,
 			maxProjects: 10,
 			maxMembers: 5,
@@ -483,6 +487,8 @@ describe('DashboardPage', () => {
 	it('shows warning and disables Clone button in clone modal when project limit is reached', async () => {
 		const user = userEvent.setup();
 		vi.mocked(fetchOrgLimits).mockResolvedValue({
+			maxRunningContainers: 3,
+			currentRunningContainers: 0,
 			currentProjects: 10,
 			maxProjects: 10,
 			maxMembers: 5,

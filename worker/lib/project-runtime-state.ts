@@ -1,20 +1,48 @@
 import { emptyRuntimeStatus } from '@shared/runtime-status';
 
+import type { ContainerCapacity } from '@shared/container-capacity';
 import type { RuntimeBackend, RuntimeDecision, RuntimePhase, RuntimeReason, RuntimeStatus, RuntimeSurface } from '@shared/runtime-status';
 
 interface RuntimeStorage {
 	get<T>(key: string): T | undefined;
 	put<T>(key: string, value: T): void;
+	delete(key: string): unknown;
 }
 
 /** Durable promotion and versioned status prevent stale Worker requests undoing an upgrade. */
 export class ProjectRuntimeState {
 	constructor(private readonly storage: RuntimeStorage) {}
 	get promoted(): boolean {
-		return this.storage.get<boolean>('project-runtime-promoted') === true;
+		return this.promotionReason !== undefined;
 	}
-	promote(): void {
-		this.storage.put('project-runtime-promoted', true);
+	get promotionReason(): RuntimeReason | undefined {
+		return this.storage.get<RuntimeReason>('project-runtime-session');
+	}
+	promote(reason: RuntimeReason = 'resource-limit'): void {
+		if (!this.promoted) this.storage.put('project-runtime-session', reason);
+	}
+	endSession(): void {
+		const observedContainer = this.storage.get<boolean>('project-runtime-observed-container');
+		const decision = this.storage.get<RuntimeDecision>('project-runtime-decision');
+		this.storage.delete('project-runtime-session');
+		this.storage.delete('project-runtime-promoted');
+		this.storage.delete('project-runtime-observed-container');
+		if (observedContainer && decision?.backend === 'container') this.select('worker', 'simple-project');
+	}
+	reconcile(running: boolean): void {
+		if (running) {
+			this.storage.put('project-runtime-observed-container', true);
+			const decision = this.storage.get<RuntimeDecision>('project-runtime-decision');
+			if (decision?.backend === 'container') this.promote(decision.reason);
+			return;
+		}
+		if (this.storage.get<boolean>('project-runtime-observed-container')) this.endSession();
+	}
+	get alwaysUseContainer(): boolean {
+		return this.storage.get<boolean>('project-always-use-container') === true;
+	}
+	set alwaysUseContainer(value: boolean) {
+		this.storage.put('project-always-use-container', value);
 	}
 	select(backend: RuntimeBackend, reason: RuntimeReason): RuntimeDecision {
 		const previous = this.storage.get<RuntimeDecision>('project-runtime-decision');
@@ -26,7 +54,7 @@ export class ProjectRuntimeState {
 	get status(): RuntimeStatus {
 		return this.storage.get<RuntimeStatus>('project-runtime-status') ?? emptyRuntimeStatus();
 	}
-	update(surface: RuntimeSurface, decision: RuntimeDecision, phase: RuntimePhase): RuntimeStatus | undefined {
+	update(surface: RuntimeSurface, decision: RuntimeDecision, phase: RuntimePhase, capacity?: ContainerCapacity): RuntimeStatus | undefined {
 		const selected = this.storage.get<RuntimeDecision>('project-runtime-decision');
 		const status = this.status;
 		const previous = status[surface];
@@ -36,11 +64,12 @@ export class ProjectRuntimeState {
 		if (pending && previous.phase === 'ready' && previous.backend === decision.backend && previous.generation === decision.generation)
 			return;
 		const next = {
-			backend: pending || (surface === 'preview' && phase === 'error') ? previous.backend : decision.backend,
+			backend: pending || (surface === 'preview' && (phase === 'error' || phase === 'blocked')) ? previous.backend : decision.backend,
 			target: decision.backend,
 			phase: pending && previous.backend !== undefined && previous.backend !== decision.backend ? 'switching' : phase,
 			reason: decision.reason,
 			generation: decision.generation,
+			...(capacity ? { capacity } : {}),
 		};
 		if (JSON.stringify(previous) === JSON.stringify(next)) return;
 		const updated = { ...status, [surface]: next, revision: status.revision + 1, updatedAt: Date.now() };

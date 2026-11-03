@@ -1,6 +1,7 @@
 import { getOrgLimits } from './constants/plans';
 import {
 	ENTITLEMENT_ORG_MAX_MEMBERS,
+	ENTITLEMENT_ORG_MAX_RUNNING_CONTAINERS,
 	ENTITLEMENT_ORG_MAX_PROJECTS,
 	ENTITLEMENT_ORG_STORAGE_QUOTA_BYTES,
 	ENTITLEMENT_PROJECT_STORAGE_QUOTA_BYTES,
@@ -27,6 +28,7 @@ export function buildEntitlementCacheKey(scopeId: string, key: string): string {
 }
 
 export interface ResolvedOrgLimits {
+	maxRunningContainers: number;
 	maxProjects: number;
 	maxMembers: number;
 	maxPendingInvitations: number;
@@ -44,6 +46,7 @@ export interface ResolvedProjectLimits {
 export const EFFECTIVE_LIMIT_USER_MAX_FREE_ORGANIZATIONS = 'user:maxFreeOrganizations';
 export const EFFECTIVE_LIMIT_ORG_MAX_PROJECTS = 'org:maxProjects';
 export const EFFECTIVE_LIMIT_ORG_MAX_MEMBERS = 'org:maxMembers';
+export const EFFECTIVE_LIMIT_ORG_MAX_RUNNING_CONTAINERS = 'org:maxRunningContainers';
 export const EFFECTIVE_LIMIT_ORG_MAX_PENDING_INVITATIONS = 'org:maxPendingInvitations';
 export const EFFECTIVE_LIMIT_ORG_STORAGE_QUOTA_BYTES = 'org:storageQuotaBytes';
 export const EFFECTIVE_LIMIT_PROJECT_STORAGE_QUOTA_BYTES = 'project:storageQuotaBytes';
@@ -52,6 +55,7 @@ export type EffectiveLimitKey =
 	| typeof EFFECTIVE_LIMIT_USER_MAX_FREE_ORGANIZATIONS
 	| typeof EFFECTIVE_LIMIT_ORG_MAX_PROJECTS
 	| typeof EFFECTIVE_LIMIT_ORG_MAX_MEMBERS
+	| typeof EFFECTIVE_LIMIT_ORG_MAX_RUNNING_CONTAINERS
 	| typeof EFFECTIVE_LIMIT_ORG_MAX_PENDING_INVITATIONS
 	| typeof EFFECTIVE_LIMIT_ORG_STORAGE_QUOTA_BYTES
 	| typeof EFFECTIVE_LIMIT_PROJECT_STORAGE_QUOTA_BYTES;
@@ -114,6 +118,13 @@ function resolveNumberEntitlement(entitlements: Map<string, EntitlementValue>, k
 }
 
 const EFFECTIVE_LIMIT_REGISTRY: EffectiveLimitRegistry = {
+	[EFFECTIVE_LIMIT_ORG_MAX_RUNNING_CONTAINERS]: {
+		kind: 'org',
+		resolve: (context) => {
+			const value = getNumber(context.orgEntitlements, ENTITLEMENT_ORG_MAX_RUNNING_CONTAINERS);
+			return value !== undefined && Number.isSafeInteger(value) && value >= 0 ? value : getPlanLimit(context.plan, 'maxRunningContainers');
+		},
+	},
 	[EFFECTIVE_LIMIT_USER_MAX_FREE_ORGANIZATIONS]: {
 		kind: 'user',
 		resolve: (context) => resolveNumberEntitlement(context.userEntitlements, ENTITLEMENT_USER_MAX_FREE_ORGS, DEFAULT_MAX_FREE_ORGS),
@@ -167,6 +178,7 @@ export function resolveEffectiveLimits(context: EffectiveLimitContext): Resolved
 		}
 		case 'org': {
 			return {
+				maxRunningContainers: resolveEffectiveLimit(EFFECTIVE_LIMIT_ORG_MAX_RUNNING_CONTAINERS, context),
 				maxProjects: resolveEffectiveLimit(EFFECTIVE_LIMIT_ORG_MAX_PROJECTS, context),
 				maxMembers: resolveEffectiveLimit(EFFECTIVE_LIMIT_ORG_MAX_MEMBERS, context),
 				maxPendingInvitations: resolveEffectiveLimit(EFFECTIVE_LIMIT_ORG_MAX_PENDING_INVITATIONS, context),

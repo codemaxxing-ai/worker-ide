@@ -24,6 +24,7 @@ export const HttpErrorCode = {
 
 	// Build / deploy
 	BUILD_FAILED: 'BUILD_FAILED',
+	CONTAINER_LIMIT_REACHED: 'CONTAINER_LIMIT_REACHED',
 	UPSTREAM_ERROR: 'UPSTREAM_ERROR',
 
 	// Data integrity
@@ -62,6 +63,7 @@ export const DEFAULT_STATUS_CODES: Record<HttpErrorCode, number> = {
 	[HttpErrorCode.SNAPSHOT_NOT_FOUND]: 404,
 
 	[HttpErrorCode.BUILD_FAILED]: 400,
+	[HttpErrorCode.CONTAINER_LIMIT_REACHED]: 409,
 	[HttpErrorCode.UPSTREAM_ERROR]: 502,
 
 	[HttpErrorCode.DATA_CORRUPTED]: 422,

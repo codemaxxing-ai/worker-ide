@@ -13,7 +13,7 @@ import { visibilityBodySchema } from '@shared/validation';
 
 import * as schema from '../db/auth-schema';
 import { trackProjectEvent } from '../lib/analytics';
-import { coordinatorNamespace } from '../lib/durable-object-namespaces';
+import { coordinatorNamespace, organizationContainerCapacityNamespace } from '../lib/durable-object-namespaces';
 import { httpError } from '../lib/http-error';
 import { getEffectiveLimit } from '../lib/limits';
 import { assertOrgSuperAdmin } from '../lib/project-auth';
@@ -137,6 +137,7 @@ export const orgRoutes = new Hono<AuthedEnvironment>()
 
 		return c.json({
 			maxProjects,
+			...(await organizationContainerCapacityNamespace.getByName(`org:${orgId}`).status(orgId)),
 			currentProjects: projectCountRows[0]?.count ?? 0,
 			maxMembers,
 			currentMembers: memberCountRows[0]?.count ?? 0,

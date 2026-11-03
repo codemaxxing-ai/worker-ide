@@ -124,6 +124,7 @@ describe('resolveEffectiveLimits', () => {
 
 		expect(resolveEffectiveLimits(context)).toEqual({
 			maxProjects: 99,
+			maxRunningContainers: 10,
 			maxMembers: 25,
 			maxPendingInvitations: 25,
 			storageQuotaBytes: 500 * 1024 * 1024,

@@ -47,6 +47,7 @@ export const projectRoutes = new Hono<AppEnvironment>()
 		const assetSettings = await readAssetSettings(projectRoot);
 		const bindingsConfig = await readBindingsConfig(projectRoot);
 		return c.json({
+			...(await c.get('fsStub').getRuntimeSettings()),
 			name,
 			assetSettings,
 			bindingsConfig,
@@ -69,8 +70,10 @@ export const projectRoutes = new Hono<AppEnvironment>()
 		}
 
 		if (parsed.data.name || parsed.data.assetSettings !== undefined || parsed.data.bindingsConfig !== undefined) {
+			// File-backed configuration only; runtime preferences stay in durable metadata.
 			await c.get('fsStub').updateProjectConfiguration(parsed.data);
 		}
+		if (parsed.data.alwaysUseContainer !== undefined) await c.get('fsStub').setRuntimeSettings(parsed.data.alwaysUseContainer);
 
 		// Sync project name to D1 so dashboards and admin UI reflect the update
 		if (parsed.data.name) {
@@ -134,6 +137,7 @@ export const projectRoutes = new Hono<AppEnvironment>()
 		}
 
 		return c.json({
+			...(await c.get('fsStub').getRuntimeSettings()),
 			name,
 			assetSettings,
 			bindingsConfig,

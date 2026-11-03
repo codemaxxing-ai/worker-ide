@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { containerCapacitySchema } from './container-capacity';
+
 export const runtimeBackendSchema = z.enum(['worker', 'container']);
 export type RuntimeBackend = z.infer<typeof runtimeBackendSchema>;
 export const runtimeReasonSchema = z.enum(['simple-project', 'project-requirements', 'explicit-choice', 'resource-limit']);
@@ -13,7 +15,8 @@ export interface RuntimeDecision {
 const runtimeSurfaceSchema = z.object({
 	backend: runtimeBackendSchema.optional(),
 	target: runtimeBackendSchema.optional(),
-	phase: z.enum(['idle', 'starting', 'switching', 'ready', 'sleeping', 'error']),
+	phase: z.enum(['idle', 'starting', 'switching', 'ready', 'sleeping', 'error', 'blocked']),
+	capacity: containerCapacitySchema.optional(),
 	reason: runtimeReasonSchema.optional(),
 	generation: z.number(),
 });

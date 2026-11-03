@@ -6,9 +6,64 @@ import { WORKER_MODULE_BYTE_BUDGET } from '@shared/worker-resource-budget';
 import { ProjectRuntimeState } from './project-runtime-state';
 
 describe('durable runtime decisions', () => {
+	it('disabling the persistent setting keeps the selected container for the current session', async () => {
+		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), (project, state) => {
+			project.setRuntimeSettings(true);
+			const container = project.getBuildRuntimeDecision({});
+			project.setRuntimeSettings(false);
+			expect(project.getBuildRuntimeDecision({})).toEqual(container);
+			new ProjectRuntimeState(state.storage.kv).endSession();
+			expect(project.getBuildRuntimeDecision({}).backend).toBe('worker');
+		});
+	});
+	it('keeps the session during a container restart', async () => {
+		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), (project, state) => {
+			const runtime = new ProjectRuntimeState(state.storage.kv);
+			runtime.promote('explicit-choice');
+			const container = runtime.select('container', 'explicit-choice');
+			runtime.reconcile(true);
+			const admission = { starting: true };
+			Reflect.set(project, 'admissionInstance', { inspect: () => admission });
+			expect(project.getBuildRuntimeDecision({})).toEqual(container);
+			admission.starting = false;
+			expect(project.getBuildRuntimeDecision({}).backend).toBe('worker');
+		});
+	});
+	it('rejects late readiness from a stopped container session', async () => {
+		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), (_project, state) => {
+			const runtime = new ProjectRuntimeState(state.storage.kv);
+			runtime.promote('explicit-choice');
+			const container = runtime.select('container', 'explicit-choice');
+			runtime.reconcile(true);
+			runtime.update('preview', container, 'ready');
+			runtime.reconcile(false);
+			expect(runtime.promoted).toBe(false);
+			expect(runtime.update('preview', container, 'ready')).toBeUndefined();
+			expect(runtime.select('worker', 'simple-project').generation).toBeGreaterThan(container.generation);
+		});
+	});
+	it('ends temporary promotion on shutdown while metadata survives and files stay unchanged', async () => {
+		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
+			await project.wsWriteFile('/package.json', '{"name":"untouched","workerIde":{"runtime":"container"}}');
+			const before = await project.wsReadFile('/package.json');
+			expect(project.getBuildRuntimeDecision({ '/package.json': String(before) }).backend).toBe('worker');
+			const runtime = new ProjectRuntimeState(state.storage.kv);
+			runtime.promote('explicit-choice');
+			runtime.reconcile(true);
+			expect(project.getBuildRuntimeDecision({}).backend).toBe('worker');
+			project.setRuntimeSettings(true);
+			expect(project.getBuildRuntimeDecision({}).backend).toBe('container');
+			runtime.endSession();
+			expect(new ProjectRuntimeState(state.storage.kv).alwaysUseContainer).toBe(true);
+			project.setRuntimeSettings(false);
+			expect(project.getBuildRuntimeDecision({}).backend).toBe('worker');
+			expect(await project.wsReadFile('/package.json')).toBe(before);
+		});
+	});
 	it('reports a native wake or startup failure without selecting a stale runtime', async () => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
-			const decision = project.getBuildRuntimeDecision({ 'package.json': JSON.stringify({ workerIde: { runtime: 'container' } }) });
+			project.setRuntimeSettings(true);
+			const decision = project.getBuildRuntimeDecision({});
 			await project.reportRuntimeStatus('preview', decision, 'sleeping');
 			Reflect.set(project, 'serveNativePreview', async () => new Response('Ready'));
 			const request = new Request('https://preview.test/');
@@ -21,7 +76,9 @@ describe('durable runtime decisions', () => {
 				Reflect.get(project, 'nativePreviewFetch').call(project, request, 'https://ide.test', 'https://preview.test'),
 			).rejects.toThrow('Native startup failed');
 			expect(state.storage.kv.get('project-runtime-status')).toMatchObject({ preview: { backend: 'container', phase: 'error' } });
-			const worker = project.getBuildRuntimeDecision({ 'package.json': JSON.stringify({ workerIde: { runtime: 'worker' } }) });
+			project.setRuntimeSettings(false);
+			new ProjectRuntimeState(state.storage.kv).endSession();
+			const worker = project.getBuildRuntimeDecision({});
 			await project.reportRuntimeStatus('preview', worker, 'ready');
 			Reflect.set(project, 'serveNativePreview', async () => new Response('Old native socket'));
 			await Reflect.get(project, 'nativePreviewFetch').call(project, request, 'https://ide.test', 'https://preview.test');
@@ -66,8 +123,8 @@ describe('durable runtime decisions', () => {
 			expect(status.preview.phase).toBe('idle');
 			expect(project.getBuildRuntimeDecision(files)).toEqual(container);
 			expect(project.getBuildRuntimeDecision({ 'package.json': JSON.stringify({ workerIde: { runtime: 'worker' } }) })).toMatchObject({
-				backend: 'worker',
-				reason: 'explicit-choice',
+				backend: 'container',
+				reason: 'resource-limit',
 			});
 		});
 	});

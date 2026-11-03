@@ -10,15 +10,17 @@ import { Modal, ModalBody } from '@/components/ui/modal';
 
 import { ProjectSettingsModal } from './project-settings-modal';
 
-const { mockCreateApiClient, mockFetchProjectMeta, mockVisibilityGet } = vi.hoisted(() => ({
+const { mockCreateApiClient, mockFetchProjectMeta, mockVisibilityGet, mockUpdateProjectMeta } = vi.hoisted(() => ({
 	mockCreateApiClient: vi.fn(),
 	mockFetchProjectMeta: vi.fn(),
 	mockVisibilityGet: vi.fn(),
+	mockUpdateProjectMeta: vi.fn(),
 }));
 
 vi.mock('@/lib/api-client', () => ({
 	createApiClient: mockCreateApiClient,
 	fetchProjectMeta: mockFetchProjectMeta,
+	updateProjectMeta: mockUpdateProjectMeta,
 	deleteProject: vi.fn(),
 }));
 
@@ -42,6 +44,30 @@ function createTestQueryClient() {
 }
 
 describe('ProjectSettingsModal', () => {
+	it('saves the persistent container choice through metadata', async () => {
+		const user = userEvent.setup();
+		const visibilityPut = vi.fn(async () => Response.json({}));
+		mockCreateApiClient.mockReturnValue({
+			project: { visibility: { $get: async () => Response.json({ visibility: 'public' }), $put: visibilityPut } },
+		});
+		mockFetchProjectMeta.mockResolvedValue({
+			name: 'Example',
+			organizationId: 'org',
+			alwaysUseContainer: false,
+			permissions: { delete: true, updateVisibility: true },
+		});
+		mockUpdateProjectMeta.mockResolvedValue({ alwaysUseContainer: true });
+		render(
+			<QueryClientProvider client={createTestQueryClient()}>
+				<MemoryRouter>
+					<ProjectSettingsModal open onOpenChange={vi.fn()} projectId="project" />
+				</MemoryRouter>
+			</QueryClientProvider>,
+		);
+		await user.click(await screen.findByRole('checkbox', { name: 'Always use a container' }));
+		await user.click(screen.getByRole('button', { name: /Save/ }));
+		expect(mockUpdateProjectMeta).toHaveBeenCalledWith('project', { alwaysUseContainer: true });
+	});
 	it('keeps the shared backdrop visible while switching from the mobile More modal to project settings during loading', async () => {
 		const user = userEvent.setup();
 		const neverResolvingPromise = new Promise<never>(() => {});

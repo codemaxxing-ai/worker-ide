@@ -68,7 +68,7 @@ describe('Project container snapshot cache', () => {
 			const context: DurableObjectState = { ...state, storage: state.storage, id: state.id, container };
 			const cache = new ComputerContainerSnapshots(state.storage.kv, state.id.toString(), () => container, current.dependencies);
 			const onLaunch = vi.fn();
-			const host = new ComputerContainerHost(context, cache, onLaunch);
+			const host = new ComputerContainerHost(context, cache, onLaunch, { launch: (operation) => operation() });
 			await host.start({ ...specification, labels: { project: 'foreign' } });
 			expect(start).toHaveBeenLastCalledWith(
 				expect.objectContaining({ image: container.images.computer, labels: { project: state.id.toString() } }),

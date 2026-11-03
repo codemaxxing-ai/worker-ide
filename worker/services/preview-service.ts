@@ -12,7 +12,7 @@
  */
 import { parseJsonc } from '@shared/jsonc';
 import { resolveAssetSettings } from '@shared/types';
-import { isWorkerResourceLimit } from '@shared/worker-resource-budget';
+import { workerFallbackReason } from '@shared/worker-runtime-error';
 import { fs } from '@worker/lib/project-fs';
 
 import { filesystemNamespace } from '../lib/durable-object-namespaces';
@@ -22,7 +22,7 @@ import { previewTransitionScript } from '../lib/preview-transition-script';
 import { toDurableObjectId } from '../lib/project-id';
 import { withSpan } from '../lib/tracing';
 import { selectRuntime } from './vite-host/runtimes/registry';
-import { readRuntimeOverride, VITE_CONFIG_PATHS } from './vite-host/runtimes/runtime-selection';
+import { assertWorkerCapabilities, VITE_CONFIG_PATHS } from './vite-host/runtimes/runtime-selection';
 import { serveVinextPreview } from './vite-host/runtimes/vinext-preview';
 
 import type { PreviewBootstrap } from '../lib/preview-bootstrap';
@@ -70,6 +70,7 @@ export class PreviewService {
 				if (navigation) await project.reportRuntimeStatus('preview', decision, 'starting');
 				const assetSettings = preloadedAssetSettings ?? (await this.loadAssetSettings());
 				try {
+					if (decision.backend === 'worker') assertWorkerCapabilities(probe.files);
 					// Dependency/source edits can select a container on a module subrequest.
 					// Warm its document before notifying the already loaded preview to switch.
 					if (!navigation && decision.backend === 'container' && request.method === 'GET') {
@@ -98,13 +99,13 @@ export class PreviewService {
 					if (navigation) await project.reportRuntimeStatus('preview', decision, response.ok ? 'ready' : 'error');
 					return this.describeRuntime(response, decision, ideOrigin);
 				} catch (error) {
-					if (decision.backend !== 'worker' || !isWorkerResourceLimit(error) || readRuntimeOverride(probe.files) === 'worker') {
-						await project.reportRuntimeStatus('preview', decision, 'error');
+					const fallbackReason = workerFallbackReason(error);
+					if (decision.backend !== 'worker' || !fallbackReason || (request.method !== 'GET' && request.method !== 'HEAD')) {
+						await project.reportRuntimeError('preview', decision, error instanceof Error ? error.message : String(error));
 						throw error;
 					}
 					// Only retry preview GET/HEAD requests. Never replay application mutations.
-					if (request.method !== 'GET' && request.method !== 'HEAD') throw error;
-					decision = await project.promoteBuildRuntime('preview');
+					decision = await project.promoteBuildRuntime('preview', fallbackReason);
 					const native = selectRuntime(probe, 'container');
 					const readyUrl = new URL(request.url);
 					readyUrl.pathname = '/';
@@ -122,7 +123,7 @@ export class PreviewService {
 						await ready.body?.cancel();
 						return this.describeRuntime(await this.serve(native, request, ideOrigin, assetSettings, snapshotHash), decision, ideOrigin);
 					} catch (nativeError) {
-						await project.reportRuntimeStatus('preview', decision, 'error');
+						await project.reportRuntimeError('preview', decision, nativeError instanceof Error ? nativeError.message : String(nativeError));
 						throw nativeError;
 					}
 				}

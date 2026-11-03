@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { getOrgLimits } from '@shared/constants/plans';
 import {
 	ENTITLEMENT_ORG_MAX_MEMBERS,
+	ENTITLEMENT_ORG_MAX_RUNNING_CONTAINERS,
 	ENTITLEMENT_ORG_MAX_PROJECTS,
 	ENTITLEMENT_ORG_STORAGE_QUOTA_BYTES,
 	ENTITLEMENT_PROJECT_STORAGE_QUOTA_BYTES,
@@ -11,6 +12,7 @@ import {
 import {
 	DEFAULT_MAX_FREE_ORGS,
 	EFFECTIVE_LIMIT_ORG_MAX_MEMBERS,
+	EFFECTIVE_LIMIT_ORG_MAX_RUNNING_CONTAINERS,
 	EFFECTIVE_LIMIT_ORG_MAX_PENDING_INVITATIONS,
 	EFFECTIVE_LIMIT_ORG_MAX_PROJECTS,
 	EFFECTIVE_LIMIT_ORG_STORAGE_QUOTA_BYTES,
@@ -101,6 +103,14 @@ export async function getEffectiveLimit(
 	request: UserEffectiveLimitRequest | OrgEffectiveLimitRequest | ProjectEffectiveLimitRequest,
 ): Promise<number> {
 	switch (request.key) {
+		case EFFECTIVE_LIMIT_ORG_MAX_RUNNING_CONTAINERS: {
+			if (!('organizationId' in request)) throw new Error('Invalid organization effective limit request');
+			const [plan, override] = await Promise.all([
+				resolveOrganizationPlan(database, request),
+				getEntitlementNumber(database, request.organizationId, ENTITLEMENT_ORG_MAX_RUNNING_CONTAINERS),
+			]);
+			return override !== undefined && Number.isSafeInteger(override) && override >= 0 ? override : getOrgLimits(plan).maxRunningContainers;
+		}
 		case EFFECTIVE_LIMIT_USER_MAX_FREE_ORGANIZATIONS: {
 			if (!('userId' in request)) {
 				throw new Error('Invalid user effective limit request');

@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { emptyRuntimeStatus } from '@shared/runtime-status';
@@ -90,5 +91,51 @@ describe('Preview runtime toolbar', () => {
 		await screen.findByRole('status', { name: 'Container' });
 		await act(() => client.refetchQueries({ queryKey: ['runtime-status', 'project'] }));
 		expect(screen.getByRole('status', { name: 'Container' })).toBeInTheDocument();
+	});
+	it('shows icons without visible runtime text and switches through the typed endpoint', async () => {
+		const user = userEvent.setup();
+		setup();
+		const status = await screen.findByRole('status', { name: 'Worker' });
+		expect(status.textContent).toBe('');
+		expect(status.querySelector('svg')).toBeInTheDocument();
+		await user.click(screen.getByRole('button', { name: 'Runtime: Worker' }));
+		await user.click(await screen.findByRole('menuitem', { name: 'Switch to container' }));
+		await waitFor(() =>
+			expect(fetch).toHaveBeenCalledWith(
+				expect.stringContaining('/runtime/switch-to-container'),
+				expect.objectContaining({ method: 'POST' }),
+			),
+		);
+	});
+	it('offers retry at capacity and never offers a reverse switch', async () => {
+		const user = userEvent.setup();
+		const { client } = setup();
+		await screen.findByRole('status', { name: 'Worker' });
+		await act(() =>
+			client.setQueryData(['runtime-status', 'project'], {
+				...emptyRuntimeStatus(),
+				revision: 2,
+				preview: {
+					backend: 'worker',
+					target: 'container',
+					phase: 'blocked',
+					generation: 2,
+					capacity: { currentRunningContainers: 3, maxRunningContainers: 3 },
+				},
+			}),
+		);
+		await user.click(await screen.findByRole('button', { name: 'Runtime: Worker container limit reached' }));
+		expect(await screen.findByRole('menuitem', { name: 'Retry container' })).toBeEnabled();
+		expect(screen.getByText('Containers: 3/3')).toBeInTheDocument();
+		await user.keyboard('{Escape}');
+		await act(() =>
+			client.setQueryData(['runtime-status', 'project'], {
+				...emptyRuntimeStatus(),
+				revision: 3,
+				preview: { backend: 'container', phase: 'ready', generation: 3 },
+			}),
+		);
+		await user.click(await screen.findByRole('button', { name: 'Runtime: Container' }));
+		expect(screen.queryByRole('menuitem')).not.toBeInTheDocument();
 	});
 });

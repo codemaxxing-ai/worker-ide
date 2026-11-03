@@ -1,6 +1,9 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CircleAlert, CloudLightning, Container, LoaderCircle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { toast } from '@/components/ui/toast-store';
 import { Tooltip } from '@/components/ui/tooltip';
 import { createApiClient } from '@/lib/api/create-client';
 import { throwApiError } from '@/lib/api-error';
@@ -11,9 +14,9 @@ import { runtimeStatusSchema } from '@shared/runtime-status';
 import type { RuntimeBackend, RuntimeReason } from '@shared/runtime-status';
 
 const REASONS: Record<RuntimeReason, string> = {
-	'simple-project': 'Simple project',
+	'simple-project': 'Automatic',
 	'project-requirements': 'Project requires native Vite',
-	'explicit-choice': 'Project runtime setting',
+	'explicit-choice': 'Container selected',
 	'resource-limit': 'Worker compilation limit reached',
 };
 
@@ -24,8 +27,23 @@ export function RuntimeStatusIndicator({
 }: {
 	projectId: string;
 	previewOrigin: string | undefined;
-	iframeReference: React.RefObject<HTMLIFrameElement | null>;
+	iframeReference: React.RefObject<HTMLIFrameElement | null | undefined>;
 }) {
+	const queryClient = useQueryClient();
+	const switchRuntime = useMutation({
+		mutationFn: async () => {
+			const response = await createApiClient(projectId).runtime['switch-to-container'].$post({});
+			if (!response.ok) await throwApiError(response, 'Failed to start container');
+			return response.json();
+		},
+		onSuccess: (incoming) =>
+			queryClient.setQueryData(['runtime-status', projectId], (previous: unknown) => {
+				const parsed = runtimeStatusSchema.safeParse(previous);
+				return parsed.success && parsed.data.revision > incoming.revision ? previous : incoming;
+			}),
+		onError: (error) => toast.error(error.message),
+		onSettled: () => queryClient.invalidateQueries({ queryKey: ['runtime-status', projectId] }),
+	});
 	const [loadedRuntime, setLoadedRuntime] = useState<{ backend: RuntimeBackend; generation: number }>();
 	const loadedBackend = loadedRuntime?.backend;
 	const loadedGeneration = loadedRuntime?.generation ?? 0;
@@ -86,11 +104,14 @@ export function RuntimeStatusIndicator({
 	}, [status, loadedBackend, loadedGeneration, previewOrigin, iframeReference]);
 	const preview = status?.preview;
 	const pending =
-		preview &&
-		preview.generation >= loadedGeneration &&
-		(preview?.phase === 'starting' ||
-			preview?.phase === 'switching' ||
-			(loadedBackend && preview?.phase === 'ready' && loadedBackend !== preview.backend));
+		switchRuntime.isPending ||
+		Boolean(
+			preview &&
+			preview.generation >= loadedGeneration &&
+			(preview?.phase === 'starting' ||
+				preview?.phase === 'switching' ||
+				(loadedBackend && preview?.phase === 'ready' && loadedBackend !== preview.backend)),
+		);
 	const backend = loadedBackend ?? preview?.backend;
 	const target = preview?.target;
 	const name = (value: RuntimeBackend | undefined) => (value === 'container' ? 'Container' : value === 'worker' ? 'Worker' : undefined);
@@ -99,23 +120,57 @@ export function RuntimeStatusIndicator({
 			? 'Runtime unavailable'
 			: pending
 				? `${name(backend) && backend !== target ? `${name(backend)} → ` : ''}${name(target) ?? 'Runtime'} starting`
-				: `${name(backend) ?? 'Runtime'}${preview?.phase === 'sleeping' ? ' sleeping' : preview?.phase === 'error' ? ' error' : backend ? '' : ' idle'}`;
+				: `${name(backend) ?? 'Runtime'}${preview?.phase === 'sleeping' ? ' sleeping' : preview?.phase === 'blocked' ? ' container limit reached' : preview?.phase === 'error' ? ' error' : backend ? '' : ' idle'}`;
 	const detail = preview?.reason ? REASONS[preview.reason] : 'Preview runtime';
 	const build = status?.build;
+	const failed = preview?.phase === 'error' || preview?.phase === 'blocked';
+	const capacity = preview?.capacity;
+	const tooltip = `${label} · ${detail}${capacity ? ` · Containers: ${capacity.currentRunningContainers}/${capacity.maxRunningContainers}` : ''}${build?.backend ? ` · Build: ${name(build.backend)} (${build.phase})` : ''}`;
+	const RuntimeIcon = backend === 'container' ? Container : CloudLightning;
 	return (
-		<Tooltip content={`${detail}${build?.backend ? ` · Build: ${name(build.backend)} (${build.phase})` : ''}`}>
-			<span
-				role="status"
-				aria-live="polite"
-				aria-label={label}
-				className={cn(
-					'truncate text-[10px] text-text-secondary',
-					pending && 'text-amber-500',
-					preview?.phase === 'error' && 'text-red-500',
+		<DropdownMenu>
+			<Tooltip content={tooltip}>
+				<span role="status" aria-live="polite" aria-label={label}>
+					<DropdownMenuTrigger disabled={pending}>
+						<button
+							id="preview-runtime-control"
+							type="button"
+							aria-label={`Runtime: ${label}`}
+							className={cn(
+								`
+									relative flex size-7 items-center justify-center rounded-sm
+									text-text-secondary
+									hover:bg-bg-tertiary
+									focus-visible:outline-2 focus-visible:outline-accent
+								`,
+								pending && 'text-amber-500',
+								failed && 'text-red-500',
+							)}
+						>
+							<RuntimeIcon aria-hidden="true" className="size-4" />
+							{pending ? (
+								<LoaderCircle aria-hidden="true" className="absolute -right-0.5 -bottom-0.5 size-2.5 animate-spin" />
+							) : failed ? (
+								<CircleAlert aria-hidden="true" className="absolute -right-0.5 -bottom-0.5 size-2.5" />
+							) : undefined}
+						</button>
+					</DropdownMenuTrigger>
+				</span>
+			</Tooltip>
+			<DropdownMenuContent>
+				<DropdownMenuLabel>{label}</DropdownMenuLabel>
+				{capacity && (
+					<DropdownMenuLabel>
+						Containers: {capacity.currentRunningContainers}/{capacity.maxRunningContainers}
+					</DropdownMenuLabel>
 				)}
-			>
-				{label}
-			</span>
-		</Tooltip>
+				{(backend !== 'container' || failed || preview?.phase === 'sleeping') && (
+					<DropdownMenuItem disabled={pending} onSelect={() => switchRuntime.mutate()}>
+						<Container aria-hidden="true" className="size-4" />
+						{failed || preview?.phase === 'sleeping' ? 'Retry container' : 'Switch to container'}
+					</DropdownMenuItem>
+				)}
+			</DropdownMenuContent>
+		</DropdownMenu>
 	);
 }

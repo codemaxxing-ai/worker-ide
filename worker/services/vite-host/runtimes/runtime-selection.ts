@@ -1,6 +1,13 @@
+import { Parser } from 'acorn';
+import { tsPlugin } from 'acorn-typescript';
 import { z } from 'zod';
 
+import { WorkerCapabilityError } from '@shared/worker-runtime-error';
+
 import templateViteConfig from '../../../fixtures/minimal/vite.config.ts?raw';
+
+// @ts-expect-error -- acorn-typescript's published plugin signature differs from acorn's compatible runtime API.
+const ConfigurationParser = Parser.extend(tsPlugin());
 
 export const VITE_CONFIG_PATHS = [
 	'vite.config.ts',
@@ -12,7 +19,6 @@ export const VITE_CONFIG_PATHS = [
 ];
 
 const manifestSchema = z.object({
-	workerIde: z.object({ runtime: z.enum(['auto', 'worker', 'container']).optional() }).optional(),
 	dependencies: z.record(z.string(), z.string()).optional(),
 	devDependencies: z.record(z.string(), z.string()).optional(),
 });
@@ -30,24 +36,16 @@ export function declaresVinext(files: Record<string, string>): boolean {
 	return manifest?.dependencies?.vinext !== undefined || manifest?.devDependencies?.vinext !== undefined;
 }
 
-export function readRuntimeOverride(files: Record<string, string>): 'auto' | 'worker' | 'container' | undefined {
-	return readManifest(files)?.workerIde?.runtime;
-}
-
-/** A configuration the Worker host does not implement must run through real Vite. */
-export function selectBuildBackend(files: Record<string, string>): 'worker' | 'container' {
-	const manifest = readManifest(files);
-	if (!manifest) return 'worker';
-	const override = manifest.workerIde?.runtime;
-	if (override === 'worker' || override === 'container') return override;
+/** Check the configuration at compilation time; never silently discard user plugins. */
+export function assertWorkerCapabilities(files: Record<string, string>): void {
 	const configurations = VITE_CONFIG_PATHS.map((path) => files[`/${path}`] ?? files[path]).filter((value) => value !== undefined);
-	if (configurations.some((configuration) => configuration.trim() !== templateViteConfig.trim())) return 'container';
-	const dependencies = { ...manifest.dependencies, ...manifest.devDependencies };
-	if (
-		Object.keys(dependencies).some(
-			(name) => name === 'vinext' || name.startsWith('vite-plugin-') || name.startsWith('@sveltejs/') || name === '@vitejs/plugin-vue',
-		)
-	)
-		return 'container';
-	return 'worker';
+	for (const configuration of configurations) {
+		if (configuration.trim() === templateViteConfig.trim()) continue;
+		// Invalid configuration remains a syntax error, not an automatic promotion.
+		ConfigurationParser.parse(configuration, { ecmaVersion: 'latest', sourceType: 'module', locations: true });
+		throw new WorkerCapabilityError('Custom Vite configuration requires native Vite');
+	}
+	if (declaresVinext(files) && !Object.keys(files).some((path) => path.replace(/^\/+/, '').startsWith('app/'))) {
+		throw new WorkerCapabilityError('This vinext router requires native Vite');
+	}
 }

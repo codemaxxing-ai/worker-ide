@@ -9,6 +9,8 @@ export async function deleteProject(organizationId: string, projectId: string): 
 	}
 }
 export interface OrgLimits {
+	maxRunningContainers: number;
+	currentRunningContainers: number;
 	maxProjects: number;
 	currentProjects: number;
 	maxMembers: number;

@@ -15,18 +15,13 @@ import { vinextRuntime } from './vinext';
 import type { FrameworkRuntime, ProjectProbe } from './types';
 import type { RuntimeBackend } from '@shared/runtime-status';
 
-/**
- * All registered runtimes, in detection-priority order. The last entry
- * ({@link reactSpaRuntime}) is the catch-all, so every project resolves to a
- * runtime — there is no separate legacy pipeline.
- */
+/** Registered framework adapters and their explicitly selected native fallbacks. */
 const RUNTIMES: readonly FrameworkRuntime[] = [containerVinextRuntime, containerViteRuntime, vinextRuntime, reactSpaRuntime];
 
-/** The runtime that claims this project (always defined — react-spa is catch-all). */
+/** Framework detection starts on Workers unless the shared runtime decision selects a container. */
 export function selectRuntime(probe: ProjectProbe, backend?: RuntimeBackend): FrameworkRuntime {
 	if (backend === 'container') return declaresVinext(probe.files) ? containerVinextRuntime : containerViteRuntime;
-	if (backend === 'worker') return vinextRuntime.detect(probe) ? vinextRuntime : reactSpaRuntime;
-	return RUNTIMES.find((runtime) => runtime.detect(probe)) ?? reactSpaRuntime;
+	return declaresVinext(probe.files) ? vinextRuntime : reactSpaRuntime;
 }
 
 /** Look up a runtime by id (used by surfaces that already resolved detection). */

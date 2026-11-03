@@ -3,15 +3,18 @@ import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
+import { readContainerCapacityError } from '@shared/container-capacity';
 import { HttpErrorCode } from '@shared/http-errors';
 import { EFFECTIVE_LIMIT_ORG_MAX_PROJECTS } from '@shared/limits';
 import { transferInitiateBodySchema } from '@shared/validation';
 
 import * as schema from '../db/auth-schema';
 import { trackAuthEvent } from '../lib/analytics';
+import { filesystemNamespace } from '../lib/durable-object-namespaces';
 import { httpError } from '../lib/http-error';
 import { getEffectiveLimit } from '../lib/limits';
 import { assertOrgAdmin } from '../lib/project-auth';
+import { toDurableObjectId } from '../lib/project-id';
 
 import type { AuthedEnvironment } from '../types';
 
@@ -275,17 +278,18 @@ export const transferRoutes = new Hono<AuthedEnvironment>()
 			);
 		}
 
-		// Move the project and mark transfer as accepted
-		const now = new Date();
-		await database
-			.update(schema.project)
-			.set({ organizationId: transfer.targetOrganizationId, updatedAt: now })
-			.where(eq(schema.project.id, transfer.projectId));
-
-		await database
-			.update(schema.projectTransfer)
-			.set({ status: 'accepted', resolvedAt: now, resolvedByUserId: userId })
-			.where(eq(schema.projectTransfer.id, transferId));
+		try {
+			await filesystemNamespace
+				.get(toDurableObjectId(filesystemNamespace, transfer.projectId))
+				.transferProjectOwnership(transferId, userId);
+		} catch (error) {
+			if (readContainerCapacityError(error))
+				throw httpError(
+					HttpErrorCode.CONTAINER_LIMIT_REACHED,
+					error instanceof Error ? error.message : 'Organization container limit reached',
+				);
+			throw error;
+		}
 
 		trackAuthEvent({ userId, eventType: 'project_transfer', organizationId: transfer.targetOrganizationId, request: c.req.raw });
 

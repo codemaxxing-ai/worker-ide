@@ -6,6 +6,7 @@ import { NonRetryableError } from 'cloudflare:workflows';
 import { SNAPSHOT_EXCLUDED_DIRECTORIES } from '@shared/constants';
 import { sanitizeR2BucketName } from '@shared/deploy-helpers';
 import { isWorkerResourceLimit, WorkerResourceLimitError } from '@shared/worker-resource-budget';
+import { workerFallbackReason } from '@shared/worker-runtime-error';
 
 import {
 	bundleFrontend,
@@ -29,6 +30,7 @@ import { toDurableObjectId } from '../lib/project-id';
 import { withSpan } from '../lib/tracing';
 import { getBuildArtifact } from '../services/vite-host/build-artifact-client';
 import { selectRuntime } from '../services/vite-host/runtimes/registry';
+import { assertWorkerCapabilities } from '../services/vite-host/runtimes/runtime-selection';
 
 import type { DeployResult, DeployWorkflowParameters } from '@shared/deploy-types';
 import type { RuntimeDecision } from '@shared/runtime-status';
@@ -123,14 +125,15 @@ export class DeployWorkflow extends WorkflowEntrypoint<Env, DeployWorkflowParame
 			if (runtime.hosting === 'container') await this.bundleAndUploadNative(step, parameters, filesystemStub, inputs, snapshotHash);
 			else {
 				try {
+					assertWorkerCapabilities(inputs.allFiles);
 					await (runtime.hosting === 'artifact'
 						? this.bundleAndUploadRuntime(step, parameters, inputs, runtime.id)
 						: this.bundleAndUploadStatic(step, parameters, filesystemStub, inputs));
 				} catch (error) {
 					// Only compiler failures are tagged. Upload failures do not restart builds.
-					if (!(error instanceof Error) || !error.message.includes('WORKER_RESOURCE_LIMIT') || decision.reason === 'explicit-choice')
-						throw error;
-					decision = await filesystemStub.promoteBuildRuntime('build');
+					const fallbackReason = workerFallbackReason(error);
+					if (!fallbackReason) throw error;
+					decision = await filesystemStub.promoteBuildRuntime('build', fallbackReason);
 					await this.bundleAndUploadNative(step, parameters, filesystemStub, inputs, snapshotHash);
 				}
 			}
@@ -174,7 +177,7 @@ export class DeployWorkflow extends WorkflowEntrypoint<Env, DeployWorkflowParame
 
 			return result;
 		} catch (error) {
-			if (decision) await filesystemStub.reportRuntimeStatus('build', decision, 'error');
+			if (decision) await filesystemStub.reportRuntimeError('build', decision, extractErrorMessage(error));
 			const message = extractErrorMessage(error);
 			trackProjectEvent({
 				organizationId: parameters.organizationId,

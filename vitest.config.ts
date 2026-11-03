@@ -77,6 +77,7 @@ export default defineConfig({
 							},
 							// Internal Durable Objects need explicit bindings for tests.
 							durableObjects: {
+								OrganizationContainerCapacity: { className: 'OrganizationContainerCapacity', useSQLite: true },
 								AgentRunner: { className: 'AgentRunner', useSQLite: true },
 								ProjectCoordinatorV2: { className: 'ProjectCoordinatorV2', useSQLite: true },
 								SubAgentWorker: { className: 'SubAgentWorker', useSQLite: true },

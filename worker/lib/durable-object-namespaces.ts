@@ -45,3 +45,5 @@ export const agentRunnerNamespace = lazyNamespace(() => exports.AgentRunner);
  * Used for per-project metadata (storage usage tracking, etc.).
  */
 export const projectMetadataNamespace = lazyNamespace(() => exports.ProjectMetadata);
+
+export const organizationContainerCapacityNamespace = lazyNamespace(() => exports.OrganizationContainerCapacity);

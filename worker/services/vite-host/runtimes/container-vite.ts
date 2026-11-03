@@ -1,4 +1,3 @@
-import { declaresVinext, selectBuildBackend } from './runtime-selection';
 import { filesystemNamespace } from '../../../lib/durable-object-namespaces';
 import { stripPreviewRequestCredentials } from '../../../lib/preview-request-headers';
 import { finalizePreviewResponse } from '../../../lib/preview-response-headers';
@@ -13,11 +12,8 @@ class ContainerViteRuntime implements ContainerFrameworkRuntime {
 		this.id = framework === 'vinext' ? 'container-vinext' : 'container-vite';
 	}
 
-	detect(probe: ProjectProbe): boolean {
-		return (
-			selectBuildBackend(probe.files) === 'container' &&
-			(this.framework === 'vinext' ? declaresVinext(probe.files) : !declaresVinext(probe.files))
-		);
+	detect(_probe: ProjectProbe): boolean {
+		return false;
 	}
 
 	async serve(request: Request, context: StatelessPreviewContext): Promise<Response> {

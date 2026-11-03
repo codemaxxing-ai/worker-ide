@@ -2,6 +2,8 @@ import { env } from 'cloudflare:workers';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
+import { readContainerCapacityError } from '@shared/container-capacity';
+
 import { PROJECT_ROOT } from './project-context';
 import { hasValidWebSocketOrigin } from './security';
 import * as authSchema from '../db/auth-schema';
@@ -21,6 +23,7 @@ import {
 	serializePreviewAccessCookie,
 } from '../lib/preview-access';
 import { PREVIEW_BOOTSTRAP_INPUTS } from '../lib/preview-bootstrap';
+import { finalizePreviewResponse } from '../lib/preview-response-headers';
 import { DEV_PREVIEW_SECRET } from '../lib/preview-secret';
 import { runWithProjectStub } from '../lib/project-fs';
 import { toDurableObjectId } from '../lib/project-id';
@@ -247,6 +250,18 @@ export async function handlePreviewRequest(request: Request, projectId: string, 
 		const assetSettings = await previewService.loadAssetSettings();
 
 		return previewService.routePreviewRequest(request, appOrigin, assetSettings, previewBootstrap.snapshotHash, previewBootstrap);
+	}).catch((error: unknown) => {
+		const capacity = readContainerCapacityError(error);
+		if (!capacity) throw error;
+		return finalizePreviewResponse(
+			errorPage({
+				heading: 'Container limit reached',
+				message: `Organization containers: ${capacity.currentRunningContainers}/${capacity.maxRunningContainers}. Retry when a container stops.`,
+				homeUrl,
+				status: 409,
+			}),
+			{ ideOrigin: appOrigin },
+		);
 	});
 
 	if (accessExpiresAt !== undefined && response.headers.get('Content-Type')?.includes('text/html')) {

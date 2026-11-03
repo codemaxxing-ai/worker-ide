@@ -1,6 +1,7 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ContainerLimitReachedError } from '@shared/container-capacity';
 import { resolveAssetSettings } from '@shared/types';
 import { WorkerResourceLimitError } from '@shared/worker-resource-budget';
 
@@ -19,6 +20,29 @@ async function fixture() {
 
 describe('adaptive preview host', () => {
 	afterEach(() => vi.restoreAllMocks());
+	it('keeps the serving Worker and reports blocked capacity when fallback cannot start', async () => {
+		const { project, service, bootstrap } = await fixture();
+		await project.reportRuntimeStatus('preview', bootstrap.runtimeDecision, 'ready');
+		vi.spyOn(reactSpaRuntime, 'serve').mockRejectedValue(new WorkerResourceLimitError());
+		const capacity = { currentRunningContainers: 3, maxRunningContainers: 3 };
+		vi.spyOn(containerViteRuntime, 'serve').mockRejectedValue(new ContainerLimitReachedError(capacity));
+		await expect(
+			service.routePreviewRequest(new Request('https://preview.test/'), 'https://ide.test', resolveAssetSettings(), 'snapshot', bootstrap),
+		).rejects.toThrow('CONTAINER_LIMIT_REACHED');
+		const status = await project.getRuntimeStatus();
+		expect(status.preview).toMatchObject({ backend: 'worker', target: 'container', phase: 'blocked', capacity });
+	});
+	it('falls back for unsupported Vite configuration without trying to serve an incorrect Worker build', async () => {
+		const { service, bootstrap } = await fixture();
+		const worker = vi.spyOn(reactSpaRuntime, 'serve');
+		const native = vi.spyOn(containerViteRuntime, 'serve').mockResolvedValue(new Response('Ready'));
+		await service.routePreviewRequest(new Request('https://preview.test/'), 'https://ide.test', resolveAssetSettings(), 'snapshot', {
+			...bootstrap,
+			configurationFiles: { '/vite.config.ts': 'export default { plugins: [customPlugin()] }' },
+		});
+		expect(worker).not.toHaveBeenCalled();
+		expect(native).toHaveBeenCalledOnce();
+	});
 	it('warms a container after a Worker resource failure and annotates its response', async () => {
 		const { project, service, bootstrap } = await fixture();
 		vi.spyOn(reactSpaRuntime, 'serve').mockRejectedValue(new WorkerResourceLimitError());

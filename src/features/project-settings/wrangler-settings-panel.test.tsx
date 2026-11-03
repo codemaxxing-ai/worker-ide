@@ -38,6 +38,7 @@ describe('WranglerSettingsPanel', () => {
 			name: 'demo-project',
 			assetSettings: {},
 			bindingsConfig: storageEnabled ? { storage: true } : {},
+			alwaysUseContainer: false,
 			organizationId: 'org-1',
 			organizationSlug: 'demo-org',
 			permissions: {
@@ -56,6 +57,7 @@ describe('WranglerSettingsPanel', () => {
 				name: 'demo-project',
 				assetSettings: meta.assetSettings,
 				bindingsConfig: storageEnabled ? { storage: true } : {},
+				alwaysUseContainer: false,
 				organizationId: 'org-1',
 				organizationSlug: 'demo-org',
 				permissions: {

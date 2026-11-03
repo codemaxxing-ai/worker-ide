@@ -1,6 +1,7 @@
 import { WorkspaceContainerAPI } from '@cloudflare/computer/backends/container';
 import { z } from 'zod';
 
+import type { ProjectContainerAdmission } from './project-container-admission';
 import type { ContainerLaunchSpec, ContainerRuntimeInfo } from '@cloudflare/computer/backends/container';
 
 const SNAPSHOT_KEY = 'computer-container-snapshot';
@@ -160,24 +161,31 @@ export class ComputerContainerHost extends WorkspaceContainerAPI {
 	#snapshots: ComputerContainerSnapshots;
 	#onLaunch: () => void;
 
-	constructor(state: DurableObjectState, snapshots: ComputerContainerSnapshots, onLaunch: () => void) {
+	constructor(
+		state: DurableObjectState,
+		snapshots: ComputerContainerSnapshots,
+		onLaunch: () => void,
+		private readonly admission: Pick<ProjectContainerAdmission, 'launch'>,
+	) {
 		super(state);
 		this.#snapshots = snapshots;
 		this.#onLaunch = onLaunch;
 	}
 
 	override async start(specification: ContainerLaunchSpec): Promise<ContainerRuntimeInfo> {
-		const result = await this.#snapshots.start(
-			specification,
-			(launch) => super.start(launch),
-			(launch) => super.restart(launch),
+		const result = await this.admission.launch(() =>
+			this.#snapshots.start(
+				specification,
+				(launch) => super.start(launch),
+				(launch) => super.restart(launch),
+			),
 		);
 		if (result.outcome !== 'adopted') this.#onLaunch();
 		return result;
 	}
 
 	override async restart(specification: ContainerLaunchSpec): Promise<ContainerRuntimeInfo> {
-		const result = await this.#snapshots.restart(specification, (launch) => super.restart(launch));
+		const result = await this.admission.launch(() => this.#snapshots.restart(specification, (launch) => super.restart(launch)));
 		this.#onLaunch();
 		return result;
 	}

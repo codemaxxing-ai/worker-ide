@@ -8,7 +8,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Modal, ModalBody, ModalFooter } from '@/components/ui/modal';
 import { ModalContentSkeleton } from '@/components/ui/skeleton';
 import { toast } from '@/components/ui/toast-store';
-import { createApiClient, deleteProject, fetchProjectMeta } from '@/lib/api-client';
+import { createApiClient, deleteProject, fetchProjectMeta, updateProjectMeta } from '@/lib/api-client';
 import { throwApiError } from '@/lib/api-error';
 import { invalidateProjectAccess } from '@/lib/project-access';
 import { cn } from '@/lib/utils';
@@ -99,6 +99,12 @@ function ProjectSettingsContent({
 	});
 
 	const [visibility, setVisibility] = useState<Visibility>('public');
+	const [alwaysUseContainer, setAlwaysUseContainer] = useState(false);
+	const [lastRuntimeSetting, setLastRuntimeSetting] = useState<boolean | undefined>();
+	if (metaQuery.data && metaQuery.data.alwaysUseContainer !== lastRuntimeSetting) {
+		setLastRuntimeSetting(metaQuery.data.alwaysUseContainer);
+		setAlwaysUseContainer(metaQuery.data.alwaysUseContainer);
+	}
 	const [lastSyncedVisibility, setLastSyncedVisibility] = useState<Visibility | undefined>();
 
 	if (visibilityQuery.data && visibilityQuery.data !== lastSyncedVisibility) {
@@ -111,6 +117,8 @@ function ProjectSettingsContent({
 		setError(undefined);
 		try {
 			await updateVisibility(projectId, visibility);
+			await updateProjectMeta(projectId, { alwaysUseContainer });
+			await queryClient.invalidateQueries({ queryKey: ['project-meta', projectId] });
 			onOpenChange(false);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Failed to save settings';
@@ -118,7 +126,7 @@ function ProjectSettingsContent({
 		} finally {
 			setIsSaving(false);
 		}
-	}, [projectId, visibility, onOpenChange]);
+	}, [projectId, visibility, alwaysUseContainer, onOpenChange, queryClient]);
 
 	const handleDelete = useCallback(async () => {
 		const projectMeta = metaQuery.data;
@@ -181,6 +189,19 @@ function ProjectSettingsContent({
 								</div>
 							)}
 
+							<label htmlFor="project-always-use-container" className="flex items-center gap-2 text-xs text-text-primary">
+								<input
+									id="project-always-use-container"
+									type="checkbox"
+									checked={alwaysUseContainer}
+									onChange={(event) => setAlwaysUseContainer(event.target.checked)}
+									className="
+										accent-accent
+										focus-visible:outline-2 focus-visible:outline-accent
+									"
+								/>
+								Always use a container
+							</label>
 							<fieldset className="flex flex-col gap-2">
 								<legend className="text-xs font-medium text-text-secondary">Preview Visibility</legend>
 								<p className="text-xs text-text-secondary/70">Controls who can access the live preview of this project.</p>

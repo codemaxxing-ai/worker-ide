@@ -31,6 +31,7 @@ export function deserializeEntitlementValue(raw: string, valueType: EntitlementV
  */
 export const ENTITLEMENT_ORG_MAX_PROJECTS = 'org:max_projects' as const;
 export const ENTITLEMENT_ORG_MAX_MEMBERS = 'org:max_members' as const;
+export const ENTITLEMENT_ORG_MAX_RUNNING_CONTAINERS = 'org:max_running_containers';
 export const ENTITLEMENT_ORG_STORAGE_QUOTA_BYTES = 'org:storage_quota_bytes' as const;
 
 /**
@@ -48,6 +49,7 @@ export const ENTITLEMENT_PROJECT_STORAGE_QUOTA_BYTES = 'project:storage_quota_by
 export type EntitlementKey =
 	| typeof ENTITLEMENT_ORG_MAX_PROJECTS
 	| typeof ENTITLEMENT_ORG_MAX_MEMBERS
+	| typeof ENTITLEMENT_ORG_MAX_RUNNING_CONTAINERS
 	| typeof ENTITLEMENT_ORG_STORAGE_QUOTA_BYTES
 	| typeof ENTITLEMENT_USER_MAX_FREE_ORGS
 	| typeof ENTITLEMENT_PROJECT_STORAGE_QUOTA_BYTES;
@@ -72,6 +74,7 @@ function numberEntitlement(description: string): EntitlementRegistryEntry {
 export const ENTITLEMENT_REGISTRY: Record<EntitlementKey, EntitlementRegistryEntry> = {
 	[ENTITLEMENT_ORG_MAX_PROJECTS]: numberEntitlement('Maximum active projects per organization'),
 	[ENTITLEMENT_ORG_MAX_MEMBERS]: numberEntitlement('Maximum members per organization'),
+	[ENTITLEMENT_ORG_MAX_RUNNING_CONTAINERS]: numberEntitlement('Maximum simultaneously running containers per organization'),
 	[ENTITLEMENT_ORG_STORAGE_QUOTA_BYTES]: numberEntitlement('Maximum object storage bytes per project (org default)'),
 	[ENTITLEMENT_USER_MAX_FREE_ORGS]: numberEntitlement('Maximum free organizations a user can belong to'),
 	[ENTITLEMENT_PROJECT_STORAGE_QUOTA_BYTES]: numberEntitlement('Maximum object storage bytes for this project (overrides org)'),

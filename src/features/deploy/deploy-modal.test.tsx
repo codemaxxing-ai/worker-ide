@@ -28,6 +28,7 @@ vi.mock('@/lib/api-client', () => ({
 function createProjectMeta(overrides: Partial<ProjectMeta> = {}): ProjectMeta {
 	return {
 		name: 'my-project',
+		alwaysUseContainer: false,
 		organizationId: 'org-1',
 		permissions: {
 			delete: true,

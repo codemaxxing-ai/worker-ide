@@ -43,6 +43,7 @@ export const bindingsConfigSchema = z.object({
 export type BindingsConfigInput = z.infer<typeof bindingsConfigSchema>;
 
 export const projectMetaSchema = z.object({
+	alwaysUseContainer: z.boolean().optional(),
 	name: z
 		.string()
 		.min(1, 'Name is required')

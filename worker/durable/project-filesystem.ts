@@ -10,6 +10,7 @@ import { DurableObject, exports } from 'cloudflare:workers';
 import { z } from 'zod';
 
 import { PROTECTED_SYSTEM_FILES, SNAPSHOT_EXCLUDED_DIRECTORIES } from '@shared/constants';
+import { readContainerCapacityError } from '@shared/container-capacity';
 import { classifyOrigin } from '@shared/domain';
 import { toolInputSchemas } from '@shared/validation/tools';
 import { WorkerBuildBudget, isWorkerResourceLimit } from '@shared/worker-resource-budget';
@@ -33,6 +34,7 @@ import { applyManagedConfiguration } from '../lib/managed-configuration';
 import { nativeBuildSchema } from '../lib/native-build';
 import { collectNativePreviewSource } from '../lib/native-preview-source';
 import { waitForNativeRuntime } from '../lib/native-runtime-readiness';
+import { ProjectContainerAdmission } from '../lib/project-container-admission';
 import { runWithProjectFs } from '../lib/project-fs';
 import { generateProjectId } from '../lib/project-id';
 import { ProjectRuntimeState } from '../lib/project-runtime-state';
@@ -47,7 +49,6 @@ import { hashSnapshot } from '../lib/snapshot-hash';
 import { withSpan } from '../lib/tracing';
 import { WorkspaceFsAdapter } from '../lib/workspace-fs-adapter';
 import { guardProtectedFile } from '../services/agent/protected-file-guard';
-import { readRuntimeOverride, selectBuildBackend } from '../services/vite-host/runtimes/runtime-selection';
 
 import type { GitAuthor, GitStatusResponse } from './git-service';
 import type { ComputerOutputObserver } from '../lib/computer-output-observer';
@@ -56,8 +57,9 @@ import type { PreviewBootstrap, PreviewBootstrapInputs } from '../lib/preview-bo
 import type { RequestOriginContext } from '../services/agent/request-origin-context';
 import type { FileInfo, FileStat } from '@cloudflare/shell';
 import type { ComputerExecOptions, ComputerExecResult, ComputerReviewOptions } from '@shared/computer';
+import type { ContainerCapacity } from '@shared/container-capacity';
 import type { ProjectFilesystemRpc } from '@shared/project-filesystem-rpc';
-import type { RuntimeDecision, RuntimePhase, RuntimeStatus, RuntimeSurface } from '@shared/runtime-status';
+import type { RuntimeDecision, RuntimePhase, RuntimeStatus, RuntimeSurface, RuntimeReason } from '@shared/runtime-status';
 import type { AssetSettings, BindingsConfig, GitBranchInfo, GitCommitEntry, GitFileDiff, GitMergeResult } from '@shared/types';
 
 interface SeedFile {
@@ -132,6 +134,46 @@ const COMPUTER_MUTATIONS = new Set([
  * the remote. There is no in-memory filesystem.
  */
 export class ProjectFilesystem extends DurableObject<Env> implements ProjectFilesystemRpc {
+	private admissionInstance?: ProjectContainerAdmission;
+	constructor(state: DurableObjectState, environment: Env) {
+		super(state, environment);
+		if (state.container?.running) {
+			this.runtimeState.reconcile(true);
+		} else {
+			this.runtimeState.endSession();
+		}
+		if (state.container?.running || state.storage.kv.get('container-capacity-reservation')) {
+			state.waitUntil(
+				this.containerAdmission.restore().catch((error: unknown) => console.error('Container lifecycle recovery failed', error)),
+			);
+		}
+	}
+	private get containerAdmission(): ProjectContainerAdmission {
+		return (this.admissionInstance ??= new ProjectContainerAdmission(this.ctx, this.env, this.projectId, async () => {
+			this.nativePreviewConfiguration = undefined;
+			this.ctx.storage.kv.delete('computer-native-preview');
+			const preview = this.runtimeState.status.preview;
+			this.runtimeState.endSession();
+			if (preview.backend === 'container' && preview.phase !== 'sleeping')
+				await this.reportRuntimeStatus(
+					'preview',
+					{ backend: 'container', generation: preview.generation, reason: preview.reason ?? 'resource-limit' },
+					'sleeping',
+				);
+		}));
+	}
+	inspectContainerAllocation() {
+		return this.containerAdmission.inspect();
+	}
+	async transferProjectOwnership(transferId: string, userId: string): Promise<void> {
+		await this.containerAdmission.transfer(transferId, userId);
+	}
+	getRuntimeSettings(): { alwaysUseContainer: boolean } {
+		return { alwaysUseContainer: this.runtimeState.alwaysUseContainer };
+	}
+	setRuntimeSettings(alwaysUseContainer: boolean): void {
+		this.runtimeState.alwaysUseContainer = alwaysUseContainer;
+	}
 	private computerInstance?: Computer;
 	private computerAdapter?: ComputerWorkspace;
 	private containerInstance?: ContainerBackend;
@@ -159,10 +201,16 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 	}
 
 	getWorkspaceContainer(): ComputerContainerHost {
-		return (this.containerHost ??= new ComputerContainerHost(this.ctx, this.containerSnapshots, () => {
-			this.nativePreviewConfiguration = undefined;
-			this.ctx.storage.kv.delete('computer-native-preview');
-		}));
+		return (this.containerHost ??= new ComputerContainerHost(
+			this.ctx,
+			this.containerSnapshots,
+			() => {
+				this.runtimeState.reconcile(this.ctx.container?.running === true);
+				this.nativePreviewConfiguration = undefined;
+				this.ctx.storage.kv.delete('computer-native-preview');
+			},
+			this.containerAdmission,
+		));
 	}
 
 	private get runtimeState(): ProjectRuntimeState {
@@ -170,10 +218,9 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 	}
 
 	getBuildRuntimeDecision(files: Record<string, string>): RuntimeDecision {
-		const override = readRuntimeOverride(files);
-		if (override === 'worker' || override === 'container') return this.runtimeState.select(override, 'explicit-choice');
-		if (selectBuildBackend(files) === 'container') return this.runtimeState.select('container', 'project-requirements');
-		if (this.runtimeState.promoted) return this.runtimeState.select('container', 'resource-limit');
+		if (!this.containerAdmission.inspect().starting) this.runtimeState.reconcile(this.ctx.container?.running === true);
+		if (this.runtimeState.alwaysUseContainer) this.runtimeState.promote('explicit-choice');
+		if (this.runtimeState.promotionReason) return this.runtimeState.select('container', this.runtimeState.promotionReason);
 		try {
 			const budget = new WorkerBuildBudget();
 			for (const [filename, contents] of Object.entries(files)) if (/\.(?:[mc]?[jt]sx?|css)$/.test(filename)) budget.addSource(contents);
@@ -185,15 +232,26 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 		return this.runtimeState.select('worker', 'simple-project');
 	}
 
-	async promoteBuildRuntime(surface: RuntimeSurface): Promise<RuntimeDecision> {
-		this.runtimeState.promote();
-		const decision = this.runtimeState.select('container', 'resource-limit');
+	async promoteBuildRuntime(surface: RuntimeSurface, reason: RuntimeReason = 'resource-limit'): Promise<RuntimeDecision> {
+		this.runtimeState.promote(reason);
+		const decision = this.runtimeState.select('container', this.runtimeState.promotionReason ?? reason);
+		console.info({
+			event: reason === 'explicit-choice' ? 'runtime.manual-promotion' : 'runtime.fallback',
+			projectId: this.projectId,
+			surface,
+			reason,
+		});
 		await this.reportRuntimeStatus(surface, decision, 'starting');
 		return decision;
 	}
 
-	async reportRuntimeStatus(surface: RuntimeSurface, decision: RuntimeDecision, phase: RuntimePhase): Promise<void> {
-		const status = this.runtimeState.update(surface, decision, phase);
+	async reportRuntimeStatus(
+		surface: RuntimeSurface,
+		decision: RuntimeDecision,
+		phase: RuntimePhase,
+		capacity?: ContainerCapacity,
+	): Promise<void> {
+		const status = this.runtimeState.update(surface, decision, phase, capacity);
 		if (!status) return;
 		await coordinatorNamespace
 			.getByName(`project:${this.projectId}`)
@@ -205,14 +263,25 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 
 	async getRuntimeStatus(): Promise<RuntimeStatus> {
 		const status = this.runtimeState.status;
-		if (status.preview.backend === 'container' && status.preview.phase === 'ready' && !this.ctx.container?.running) {
+		if (
+			status.preview.backend === 'container' &&
+			status.preview.phase === 'ready' &&
+			!this.ctx.container?.running &&
+			!this.containerAdmission.inspect().starting
+		) {
 			await this.reportRuntimeStatus(
 				'preview',
 				{ backend: 'container', generation: status.preview.generation, reason: status.preview.reason ?? 'project-requirements' },
 				'sleeping',
 			);
 		}
+		if (!this.containerAdmission.inspect().starting) this.runtimeState.reconcile(this.ctx.container?.running === true);
 		return this.runtimeState.status;
+	}
+	async reportRuntimeError(surface: RuntimeSurface, decision: RuntimeDecision, message: string): Promise<void> {
+		const capacity = readContainerCapacityError(new Error(message));
+		await this.reportRuntimeStatus(surface, decision, capacity ? 'blocked' : 'error', capacity);
+		if (!this.ctx.container?.running && !this.containerAdmission.inspect().starting) this.runtimeState.endSession();
 	}
 
 	private get projectId(): string {
@@ -343,7 +412,7 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 			if (decision) await this.reportRuntimeStatus('preview', decision, response.status < 500 ? 'ready' : 'error');
 			return response;
 		} catch (error) {
-			if (decision) await this.reportRuntimeStatus('preview', decision, 'error');
+			if (decision) await this.reportRuntimeError('preview', decision, error instanceof Error ? error.message : String(error));
 			throw error;
 		}
 	}
@@ -1104,6 +1173,7 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 		await this.queue.run('destroyStorage', [], async () => {
 			this.containerSnapshots.clear();
 			if (this.ctx.container?.running) await this.ctx.container.destroy();
+			await this.containerAdmission.stopped();
 			const tables = this.ctx.storage.sql
 				.exec<{ name: string }>(
 					"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('computer_mutation_queue', 'computer_mutation_payload')",

@@ -20,6 +20,28 @@ const html = `<html><head><title>Runtime handover</title></head><body style="hei
 	</script></body></html>`;
 test.use({ nativeProjectOptions: { template: 'minimal', files: { '/index.html': html }, warmDependencies: true } });
 
+test('switches from the runtime icon without changing package.json or offering a reverse switch', async ({
+	page,
+	nativeProject: projectId,
+}) => {
+	await expect(page.getByRole('status', { name: 'Worker', exact: true })).toBeVisible();
+	await expect(page.getByRole('status', { name: 'Worker', exact: true })).toHaveText('');
+	const cookies = await page.context().cookies(page.url());
+	const api = hc<ApiRoutes>(`${new URL(page.url()).origin}/p/${projectId}/api`, {
+		fetch: localFetch,
+		headers: { Cookie: cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ') },
+	});
+	const manifest = await api.file.$get({ query: { path: '/package.json' } });
+	const before = await manifest.json();
+	await page.getByRole('button', { name: 'Runtime: Worker', exact: true }).click();
+	await page.getByRole('menuitem', { name: 'Switch to container' }).click();
+	await expect(page.getByRole('status', { name: 'Container', exact: true })).toBeVisible({ timeout: 90_000 });
+	const reread = await api.file.$get({ query: { path: '/package.json' } });
+	expect(await reread.json()).toEqual(before);
+	await page.getByRole('button', { name: 'Runtime: Container', exact: true }).click();
+	await expect(page.getByRole('menuitem')).toHaveCount(0);
+});
+
 test('promotes a project by size and preserves preview state in the same iframe', async ({ page, nativeProject: projectId }) => {
 	const iframe = page.locator('iframe[title="Project Preview"]');
 	const frame = page.frameLocator('iframe[title="Project Preview"]');

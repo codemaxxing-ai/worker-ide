@@ -1,4 +1,12 @@
-export { AgentRunner, DurableObjectFilesystem, ProjectCoordinatorV2, ProjectMetadata, SessionTurnAgent, SubAgentWorker } from './durable';
+export {
+	AgentRunner,
+	DurableObjectFilesystem,
+	ProjectCoordinatorV2,
+	ProjectMetadata,
+	OrganizationContainerCapacity,
+	SessionTurnAgent,
+	SubAgentWorker,
+} from './durable';
 // The browser/codemode tools run their durable runtime inside a Durable Object
 // facet, so the facet class must be exported from the worker entry.
 export { CodemodeRuntime } from '@cloudflare/codemode';

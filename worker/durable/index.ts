@@ -1,6 +1,7 @@
 export { AgentRunner } from './agent-runner';
 export { ProjectCoordinatorV2 } from './project-coordinator';
 export { ProjectMetadata } from './project-metadata';
+export { OrganizationContainerCapacity } from './organization-container-capacity';
 export { SessionTurnAgent } from './session-turn-agent';
 export { SubAgentWorker } from './sub-agent-worker';
 
