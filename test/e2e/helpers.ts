@@ -94,6 +94,7 @@ export interface IDEOptions {
 	warmPreview?: boolean;
 	warmContainer?: boolean;
 	warmDependencies?: boolean;
+	alwaysUseContainer?: boolean;
 }
 
 export async function gotoIDE(page: Page, options: IDEOptions = {}): Promise<string> {
@@ -119,6 +120,12 @@ export async function gotoIDE(page: Page, options: IDEOptions = {}): Promise<str
 			sameSite: 'Lax',
 		},
 	]);
+
+	if (options.alwaysUseContainer) {
+		const api = hc<ApiRoutes>(`${BASE_URL}/p/${projectId}/api`, { fetch, headers: { Cookie: cookie } });
+		const response = await api.project.meta.$put({ json: { alwaysUseContainer: true } });
+		if (!response.ok) throw new Error(`Failed to select container runtime: ${response.status}`);
+	}
 
 	if (options.files) {
 		const api = hc<ApiRoutes>(`${BASE_URL}/p/${projectId}/api`, { fetch, headers: { Cookie: cookie } });
