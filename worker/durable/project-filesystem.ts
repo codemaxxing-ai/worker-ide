@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer';
 
 import { Workspace as Computer } from '@cloudflare/computer';
-import { ContainerBackend, withWorkspaceContainer } from '@cloudflare/computer/backends/container';
+import { ContainerBackend } from '@cloudflare/computer/backends/container';
 import { WorkerShellBackend } from '@cloudflare/computer/backends/worker-shell';
 import { createGitClient } from '@cloudflare/computer/git';
 import jqCommands from '@cloudflare/computer/shell/jq';
@@ -17,6 +17,7 @@ import { WorkerBuildBudget, isWorkerResourceLimit } from '@shared/worker-resourc
 import { GitService } from './git-service';
 import { selectComputerBackend } from '../lib/computer-backend';
 import { ComputerChanges } from '../lib/computer-changes';
+import { ComputerContainerHost, ComputerContainerSnapshots } from '../lib/computer-container-snapshots';
 import { drainComputerOutput } from '../lib/computer-execution';
 import { ComputerMutationQueue, ComputerSynchronizationPending } from '../lib/computer-mutation-queue';
 import { ComputerOutputPublisher } from '../lib/computer-output-observer';
@@ -130,17 +131,40 @@ const COMPUTER_MUTATIONS = new Set([
  * against that Workspace via {@link GitService}; Cloudflare Artifacts remains
  * the remote. There is no in-memory filesystem.
  */
-class ProjectFilesystemBase extends DurableObject<Env> {}
-
-export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemBase) implements ProjectFilesystemRpc {
+export class ProjectFilesystem extends DurableObject<Env> implements ProjectFilesystemRpc {
 	private computerInstance?: Computer;
 	private computerAdapter?: ComputerWorkspace;
 	private containerInstance?: ContainerBackend;
+	private containerHost?: ComputerContainerHost;
+	private containerSnapshotsInstance?: ComputerContainerSnapshots;
 	private queueInstance?: ComputerMutationQueue;
 	private changesInstance?: ComputerChanges;
 	private nativePreviewStarting?: Promise<void>;
 	private nativePreviewConfiguration?: string;
 	private nativePreviewMonitor?: Promise<void>;
+	private get containerSnapshots(): ComputerContainerSnapshots {
+		return (this.containerSnapshotsInstance ??= new ComputerContainerSnapshots(
+			this.ctx.storage.kv,
+			this.ctx.id.toString(),
+			() => this.ctx.container,
+			async () => {
+				const inputs: Record<string, string> = {};
+				for (const filename of ['package.json', 'bun.lock', 'bun.lockb', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml']) {
+					const content = await this.workspace.readFile(`/${filename}`);
+					if (typeof content === 'string') inputs[filename] = content;
+				}
+				return hashSnapshot(inputs);
+			},
+		));
+	}
+
+	getWorkspaceContainer(): ComputerContainerHost {
+		return (this.containerHost ??= new ComputerContainerHost(this.ctx, this.containerSnapshots, () => {
+			this.nativePreviewConfiguration = undefined;
+			this.ctx.storage.kv.delete('computer-native-preview');
+		}));
+	}
+
 	private get runtimeState(): ProjectRuntimeState {
 		return new ProjectRuntimeState(this.ctx.storage.kv);
 	}
@@ -684,6 +708,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 				response = { ...response, syncStatus: 'complete' };
 				this.ctx.storage.kv.put(key, { status: response.status, sessionId, backend, result: response });
 				protectedFiles.clear(identifier);
+				if (backend === 'container' && options.nativeRuntime && response.status === 'completed') await this.containerSnapshots.capture();
 				publisher.publish({
 					executionId: identifier,
 					stdout: response.stdout,
@@ -1077,6 +1102,7 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 
 	async destroyStorage(): Promise<void> {
 		await this.queue.run('destroyStorage', [], async () => {
+			this.containerSnapshots.clear();
 			if (this.ctx.container?.running) await this.ctx.container.destroy();
 			const tables = this.ctx.storage.sql
 				.exec<{ name: string }>(
@@ -1092,6 +1118,8 @@ export class ProjectFilesystem extends withWorkspaceContainer(ProjectFilesystemB
 			this.computerInstance = undefined;
 			this.computerAdapter = undefined;
 			this.containerInstance = undefined;
+			this.containerHost = undefined;
+			this.containerSnapshotsInstance = undefined;
 			this.changesInstance = undefined;
 		});
 	}

@@ -3,6 +3,7 @@ import { ShellWorker, WorkerShellBackend } from '@cloudflare/computer/backends/w
 import { createExecutionContext, env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 
+import { ComputerContainerSnapshots } from './computer-container-snapshots';
 import { ComputerOutputObserver } from './computer-output-observer';
 import { computerStorage } from './computer-storage';
 
@@ -15,6 +16,75 @@ class ControlledShell extends ShellWorker {
 }
 
 describe('Computer execution lifecycle without Docker', () => {
+	it('captures native dependency snapshots after synchronization and before releasing the mutation queue', async () => {
+		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
+			const shell = new ControlledShell(createExecutionContext(), { HOST: { getWorkspace: () => project.__getWorkspaceStub() } });
+			const computer = new Computer({
+				storage: computerStorage(state.storage),
+				backends: [
+					new WorkerShellBackend({ id: 'container', source: { type: 'external-runtime', connect: () => shell }, egress: { mode: 'none' } }),
+				],
+			});
+			Reflect.set(project, 'computerInstance', computer);
+			Reflect.set(project, 'getWorkspaceContainer', () => ({ setInactivityTimeout: async () => {} }));
+			Reflect.set(project, 'pushNativeSource', async () => {});
+			vi.spyOn(computer, 'push').mockImplementation(async function* () {});
+			const pulling = Promise.withResolvers<void>();
+			const synchronized = Promise.withResolvers<void>();
+			vi.spyOn(computer, 'pull').mockImplementation(async function* () {
+				pulling.resolve();
+				await synchronized.promise;
+				yield* [];
+			});
+			const capturing = Promise.withResolvers<void>();
+			const captured = Promise.withResolvers<ContainerSnapshot>();
+			const snapshotContainer = vi.fn(async () => {
+				capturing.resolve();
+				return captured.promise;
+			});
+			const cache = new ComputerContainerSnapshots(
+				state.storage.kv,
+				state.id.toString(),
+				() => ({
+					running: true,
+					images: { computer: 'image' },
+					inspect: async () => ({ image: 'image', labels: { project: state.id.toString() } }),
+					snapshotContainer,
+				}),
+				async () => 'dependencies',
+			);
+			Reflect.set(project, 'containerSnapshotsInstance', cache);
+			const capture = vi.spyOn(cache, 'capture');
+			shell.setCommand(async () => ({ stdout: 'prepared', stderr: '', exitCode: 0 }));
+			const id = crypto.randomUUID();
+			const execution = project.computerExec('prepare', { id, backend: 'container', nativeRuntime: true }, 'session');
+			await pulling.promise;
+			expect(snapshotContainer).not.toHaveBeenCalled();
+			let editorFinished = false;
+			const editor = project.writeFileContent('/after-snapshot.txt', 'current source').then(() => {
+				editorFinished = true;
+			});
+			synchronized.resolve();
+			await capturing.promise;
+			expect(editorFinished).toBe(false);
+			expect(state.storage.kv.get(`computer-execution:${id}`)).toMatchObject({ result: { syncStatus: 'complete' } });
+			captured.resolve({ id: 'private-cache', size: 1024 });
+			expect(await execution).toMatchObject({ status: 'completed', syncStatus: 'complete' });
+			await editor;
+			expect(snapshotContainer).toHaveBeenCalledOnce();
+			await project.computerExec('prepare', { id, backend: 'container', nativeRuntime: true }, 'session');
+			expect(snapshotContainer).toHaveBeenCalledOnce();
+			shell.setCommand(async () => ({ stdout: '', stderr: 'setup failed', exitCode: 1 }));
+			await project.computerExec('failed setup', { id: crypto.randomUUID(), backend: 'container', nativeRuntime: true }, 'session');
+			expect(capture).toHaveBeenCalledOnce();
+			shell.setCommand(async () => ({ stdout: 'ordinary command', stderr: '', exitCode: 0 }));
+			await project.computerExec('ordinary command', { id: crypto.randomUUID(), backend: 'container' }, 'session');
+			expect(capture).toHaveBeenCalledOnce();
+			expect(await project.wsReadFile('/after-snapshot.txt')).toBe('current source');
+			await computer.close();
+		});
+	});
+
 	it.each([false, true])(
 		'publishes before exit and keeps FIFO ownership through synchronization (disconnected: %s)',
 		async (disconnected) => {

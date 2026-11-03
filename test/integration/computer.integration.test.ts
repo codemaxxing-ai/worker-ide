@@ -69,6 +69,27 @@ describe('Computer live runtime', () => {
 		expect(data.result.stdout.trim()).toBe('computerd');
 	});
 
+	it('forwards the gateway CA configuration into native command subprocesses', async () => {
+		const runtime = hc<DevelopmentTestRoutes>(`${BASE_URL}/p/${projectId}/api`, { headers: { Cookie: cookie } });
+		const response = await runtime.__test['computer-exec'].$post({
+			json: {
+				backend: 'container',
+				command:
+					"node -e \"const { readFileSync } = require('node:fs'); const names = ['NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'REQUESTS_CA_BUNDLE']; for (const name of names) { const filename = process.env[name]; if (!filename || !readFileSync(filename, 'utf8').includes('-----BEGIN CERTIFICATE-----')) throw new Error(name + ' is missing a CA bundle'); } console.log(JSON.stringify(Object.fromEntries(names.map(name => [name, process.env[name]]))))\"",
+			},
+		});
+		if (!response.ok) await throwApiError(response, 'Cannot inspect native command certificate trust');
+		const data = await response.json();
+		expect(data.result.exitCode, data.result.stderr).toBe(0);
+		expect(data.result.stdout.trim()).toBe(
+			JSON.stringify({
+				NODE_EXTRA_CA_CERTS: '/etc/cloudflare/certs/cloudflare-containers-ca.crt',
+				SSL_CERT_FILE: '/etc/ssl/certs/ca-certificates.crt',
+				REQUESTS_CA_BUNDLE: '/etc/ssl/certs/ca-certificates.crt',
+			}),
+		);
+	});
+
 	it('installs packages, runs native tools and synchronizes bytes and symlinks in both directions', async () => {
 		const api = hc<ApiRoutes>(`${BASE_URL}/p/${projectId}/api`, { headers: { Cookie: cookie } });
 		const runtime = hc<DevelopmentTestRoutes>(`${BASE_URL}/p/${projectId}/api`, { headers: { Cookie: cookie } });
