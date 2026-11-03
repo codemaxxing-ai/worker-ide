@@ -1,13 +1,7 @@
-import { Parser } from 'acorn';
-import { tsPlugin } from 'acorn-typescript';
-import { z } from 'zod';
-
 import { WorkerCapabilityError } from '@shared/worker-runtime-error';
 
-import templateViteConfig from '../../../fixtures/minimal/vite.config.ts?raw';
-
-// @ts-expect-error -- acorn-typescript's published plugin signature differs from acorn's compatible runtime API.
-const ConfigurationParser = Parser.extend(tsPlugin());
+import { isVinextProject } from '../vinext-detection';
+import { assertWorkerViteConfig } from './worker-vite-config';
 
 export const VITE_CONFIG_PATHS = [
 	'vite.config.ts',
@@ -18,34 +12,16 @@ export const VITE_CONFIG_PATHS = [
 	'vite.config.cjs',
 ];
 
-const manifestSchema = z.object({
-	dependencies: z.record(z.string(), z.string()).optional(),
-	devDependencies: z.record(z.string(), z.string()).optional(),
-});
-
-function readManifest(files: Record<string, string>): z.infer<typeof manifestSchema> | undefined {
-	try {
-		return manifestSchema.parse(JSON.parse(files['/package.json'] ?? files['package.json'] ?? '{}'));
-	} catch {
-		return;
-	}
-}
-
-export function declaresVinext(files: Record<string, string>): boolean {
-	const manifest = readManifest(files);
-	return manifest?.dependencies?.vinext !== undefined || manifest?.devDependencies?.vinext !== undefined;
-}
-
 /** Check the configuration at compilation time; never silently discard user plugins. */
 export function assertWorkerCapabilities(files: Record<string, string>): void {
-	const configurations = VITE_CONFIG_PATHS.map((path) => files[`/${path}`] ?? files[path]).filter((value) => value !== undefined);
-	for (const configuration of configurations) {
-		if (configuration.trim() === templateViteConfig.trim()) continue;
-		// Invalid configuration remains a syntax error, not an automatic promotion.
-		ConfigurationParser.parse(configuration, { ecmaVersion: 'latest', sourceType: 'module', locations: true });
-		throw new WorkerCapabilityError('Custom Vite configuration requires native Vite');
+	for (const path of VITE_CONFIG_PATHS) {
+		const configuration = files[`/${path}`] ?? files[path];
+		if (configuration !== undefined) assertWorkerViteConfig(configuration, path);
 	}
-	if (declaresVinext(files) && !Object.keys(files).some((path) => path.replace(/^\/+/, '').startsWith('app/'))) {
+	if (!isVinextProject(files)) return;
+	const paths = Object.keys(files).map((path) => path.replace(/^\/+/, ''));
+	if (paths.some((path) => path.startsWith('app/'))) return;
+	if (paths.some((path) => /^(?:pages|src\/(?:app|pages))\//.test(path)))
 		throw new WorkerCapabilityError('This vinext router requires native Vite');
-	}
+	throw new Error('vinext requires an app or pages directory');
 }

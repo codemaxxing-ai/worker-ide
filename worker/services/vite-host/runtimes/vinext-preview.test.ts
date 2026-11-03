@@ -32,7 +32,6 @@ describe('Worker vinext preview bootstrap', () => {
 		const runtime: ArtifactFrameworkRuntime = {
 			id: 'vinext',
 			hosting: 'artifact',
-			detect: () => true,
 			serverCompatibilityFlags: [],
 			hmrGlue: () => '',
 			route: async () => new Response('<html><head></head><body>Hello</body></html>', { headers: { 'Content-Type': 'text/html' } }),

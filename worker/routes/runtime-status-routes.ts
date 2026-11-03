@@ -34,8 +34,6 @@ export const runtimeStatusRoutes = new Hono<AppEnvironment>()
 			const response = await new PreviewService(context.get('projectRoot'), projectId).routePreviewRequest(
 				new Request(`${origin}/`),
 				domains.appOrigin,
-				undefined,
-				bootstrap.snapshotHash,
 				bootstrap,
 			);
 			await response.body?.cancel();

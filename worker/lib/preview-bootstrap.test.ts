@@ -12,6 +12,8 @@ function bootstrap(overrides: Partial<PreviewBootstrap> = {}): PreviewBootstrap 
 		indexHtml: undefined,
 		routerFirstEntries: {},
 		snapshotHash: '',
+		configurationFiles: {},
+		runtimeDecision: { backend: 'worker', reason: 'simple-project', generation: 1 },
 		...overrides,
 	};
 }

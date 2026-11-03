@@ -2,7 +2,7 @@
  * Framework runtime abstraction for the in-worker Vite Surface Host.
  *
  * A {@link FrameworkRuntime} encapsulates everything framework-specific about a
- * project type — detection, build, preview serving, HMR, and deploy packaging —
+ * project type — preview serving, HMR, and deploy packaging —
  * behind one interface. vinext and plain React are implemented as adapters;
  * adding Svelte or TanStack Start later means implementing this interface and
  * registering it (see `registry.ts`). The cacheable build entrypoint, preview router,
@@ -50,8 +50,6 @@ export interface StatelessPreviewContext {
 interface BaseRuntime {
 	/** Stable identifier (also used in cache keys + logs). */
 	readonly id: string;
-	/** Whether this runtime claims the given project. */
-	detect(probe: ProjectProbe): boolean;
 }
 
 /**
@@ -63,7 +61,7 @@ interface BaseRuntime {
  * of this interface — it runs in the dedicated `vite-host` worker (see
  * `runtimes/vinext-build.ts` and `auxiliary/vite-host`) so the request-serving
  * isolate never loads esbuild-wasm or the ~20 MB of vendored source.
- * This interface is the light artifact-facing contract: detection, request routing
+ * This interface is the light artifact-facing contract: request routing
  * across an already-built module set, and the browser HMR glue.
  */
 export interface ArtifactFrameworkRuntime extends BaseRuntime {

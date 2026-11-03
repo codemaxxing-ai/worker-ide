@@ -6,16 +6,11 @@
  * Its preview is cheap and per-request (no warm build), so it is `stateless` and
  * served inline in the worker by {@link StaticReactPreview}.
  */
-import type { ProjectProbe, StatelessFrameworkRuntime, StatelessPreviewContext } from './types';
+import type { StatelessFrameworkRuntime, StatelessPreviewContext } from './types';
 
 class ReactSpaRuntime implements StatelessFrameworkRuntime {
 	readonly id = 'react-spa';
 	readonly hosting = 'stateless' as const;
-
-	/** The catch-all runtime: it claims every project no other runtime did. */
-	detect(_probe: ProjectProbe): boolean {
-		return true;
-	}
 
 	async serve(request: Request, context: StatelessPreviewContext): Promise<Response> {
 		// Lazily import the static preview so the registry stays light: its module

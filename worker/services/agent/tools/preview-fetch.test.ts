@@ -4,24 +4,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Mocks — must be declared before importing the module under test
 // ---------------------------------------------------------------------------
 
-const mockServeFile = vi.fn<(request: Request, baseUrl: string, assetSettings?: unknown) => Promise<Response>>();
-const mockHandlePreviewAPI = vi.fn<(request: Request, apiPath: string) => Promise<Response>>();
-const mockLoadAssetSettings = vi.fn();
-const mockMatchesRunWorkerFirst = vi.fn();
+const mockRoutePreviewRequest = vi.fn<(request: Request, ideOrigin: string) => Promise<Response>>();
 
 vi.mock('../../preview-service', () => ({
 	PreviewService: vi.fn(function () {
-		return {
-			serveFile: mockServeFile,
-			handlePreviewAPI: mockHandlePreviewAPI,
-			loadAssetSettings: mockLoadAssetSettings,
-			matchesRunWorkerFirst: mockMatchesRunWorkerFirst,
-			routePreviewRequest: vi.fn(async (request: Request, ideOrigin: string, assetSettings: { run_worker_first: boolean | string[] }) => {
-				return mockMatchesRunWorkerFirst(new URL(request.url).pathname, assetSettings.run_worker_first)
-					? mockHandlePreviewAPI(request, new URL(request.url).pathname)
-					: mockServeFile(request, ideOrigin, assetSettings);
-			}),
-		};
+		return { routePreviewRequest: mockRoutePreviewRequest };
 	}),
 }));
 
@@ -66,74 +53,40 @@ function makeResponse(body: string, options: { status?: number; contentType?: st
 
 describe('preview_fetch', () => {
 	beforeEach(() => {
-		mockServeFile.mockReset();
-		mockHandlePreviewAPI.mockReset();
-		mockLoadAssetSettings.mockReset();
-		mockMatchesRunWorkerFirst.mockReset();
-
-		// Default: asset settings with no run_worker_first, paths don't match worker-first
-		mockLoadAssetSettings.mockResolvedValue({ run_worker_first: false });
-		mockMatchesRunWorkerFirst.mockReturnValue(false);
+		mockRoutePreviewRequest.mockReset();
 	});
 
-	// ── Routing ──────────────────────────────────────────────────────────
-
-	it('routes non-worker-first /api/* paths to serveFile', async () => {
-		mockServeFile.mockResolvedValue(makeResponse('{"users":[]}', { contentType: 'application/json' }));
-
-		const result = await execute({ path: '/api/users' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
-
-		expect(mockServeFile).toHaveBeenCalledOnce();
-		expect(mockHandlePreviewAPI).not.toHaveBeenCalled();
-		expect(result.output).toContain('200');
-		expect(result.output).toContain('{"users":[]}');
-	});
-
-	it('routes non-API paths to serveFile', async () => {
-		mockServeFile.mockResolvedValue(makeResponse('<html><body>Hello</body></html>'));
-
+	it('dispatches through the shared runtime preview service', async () => {
+		mockRoutePreviewRequest.mockResolvedValue(makeResponse('<html><body>Hello</body></html>'));
 		const result = await execute({ path: '/' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
-
-		expect(mockServeFile).toHaveBeenCalledOnce();
-		expect(mockHandlePreviewAPI).not.toHaveBeenCalled();
+		expect(mockRoutePreviewRequest).toHaveBeenCalledOnce();
+		expect(mockRoutePreviewRequest.mock.calls[0][1]).toBe('https://codemaxxing.app');
 		expect(result.output).toContain('200');
-	});
-
-	it('routes run_worker_first matching paths to handlePreviewAPI', async () => {
-		mockMatchesRunWorkerFirst.mockReturnValue(true);
-		mockHandlePreviewAPI.mockResolvedValue(makeResponse('Worker response'));
-
-		const result = await execute({ path: '/custom-route' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
-
-		expect(mockHandlePreviewAPI).toHaveBeenCalledOnce();
-		expect(mockServeFile).not.toHaveBeenCalled();
-		expect(result.output).toContain('Worker response');
 	});
 
 	it('normalizes paths without leading slash', async () => {
-		mockServeFile.mockResolvedValue(makeResponse('OK', { contentType: 'text/plain' }));
+		mockRoutePreviewRequest.mockResolvedValue(makeResponse('OK', { contentType: 'text/plain' }));
 
 		await execute({ path: 'about' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
 
 		// The request should have been made with /about
-		const requestArgument = mockServeFile.mock.calls[0][0];
+		const requestArgument = mockRoutePreviewRequest.mock.calls[0][0];
 		expect(new URL(requestArgument.url).pathname).toBe('/about');
 	});
 
 	// ── HTTP methods ─────────────────────────────────────────────────────
 
 	it('defaults to GET method', async () => {
-		mockServeFile.mockResolvedValue(makeResponse('OK', { contentType: 'text/plain' }));
+		mockRoutePreviewRequest.mockResolvedValue(makeResponse('OK', { contentType: 'text/plain' }));
 
 		await execute({ path: '/' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
 
-		const requestArgument = mockServeFile.mock.calls[0][0];
+		const requestArgument = mockRoutePreviewRequest.mock.calls[0][0];
 		expect(requestArgument.method).toBe('GET');
 	});
 
 	it('supports POST method with body', async () => {
-		mockMatchesRunWorkerFirst.mockReturnValue(true);
-		mockHandlePreviewAPI.mockResolvedValue(
+		mockRoutePreviewRequest.mockResolvedValue(
 			makeResponse('{"id":1}', { contentType: 'application/json', status: 201, statusText: 'Created' }),
 		);
 
@@ -148,14 +101,13 @@ describe('preview_fetch', () => {
 			createMockContext({ projectId: 'project123' }),
 		);
 
-		const requestArgument = mockHandlePreviewAPI.mock.calls[0][0];
+		const requestArgument = mockRoutePreviewRequest.mock.calls[0][0];
 		expect(requestArgument.method).toBe('POST');
 		expect(result.output).toContain('201');
 	});
 
 	it('supports PUT method', async () => {
-		mockMatchesRunWorkerFirst.mockReturnValue(true);
-		mockHandlePreviewAPI.mockResolvedValue(makeResponse('updated', { contentType: 'text/plain' }));
+		mockRoutePreviewRequest.mockResolvedValue(makeResponse('updated', { contentType: 'text/plain' }));
 
 		await execute(
 			{ path: '/api/users/1', method: 'PUT', body: '{"name":"Bob"}' },
@@ -163,13 +115,12 @@ describe('preview_fetch', () => {
 			createMockContext({ projectId: 'project123' }),
 		);
 
-		const requestArgument = mockHandlePreviewAPI.mock.calls[0][0];
+		const requestArgument = mockRoutePreviewRequest.mock.calls[0][0];
 		expect(requestArgument.method).toBe('PUT');
 	});
 
 	it('supports DELETE method', async () => {
-		mockMatchesRunWorkerFirst.mockReturnValue(true);
-		mockHandlePreviewAPI.mockResolvedValue(makeResponse('', { status: 204, statusText: 'No Content' }));
+		mockRoutePreviewRequest.mockResolvedValue(makeResponse('', { status: 204, statusText: 'No Content' }));
 
 		const result = await execute(
 			{ path: '/api/users/1', method: 'DELETE' },
@@ -177,7 +128,7 @@ describe('preview_fetch', () => {
 			createMockContext({ projectId: 'project123' }),
 		);
 
-		const requestArgument = mockHandlePreviewAPI.mock.calls[0][0];
+		const requestArgument = mockRoutePreviewRequest.mock.calls[0][0];
 		expect(requestArgument.method).toBe('DELETE');
 		expect(result.output).toContain('204');
 	});
@@ -191,8 +142,7 @@ describe('preview_fetch', () => {
 	// ── Headers ──────────────────────────────────────────────────────────
 
 	it('passes parsed headers to the request', async () => {
-		mockMatchesRunWorkerFirst.mockReturnValue(true);
-		mockHandlePreviewAPI.mockResolvedValue(makeResponse('ok', { contentType: 'text/plain' }));
+		mockRoutePreviewRequest.mockResolvedValue(makeResponse('ok', { contentType: 'text/plain' }));
 
 		await execute(
 			{ path: '/api/data', headers: '{"Authorization": "Bearer abc123", "Accept": "application/json"}' },
@@ -200,7 +150,7 @@ describe('preview_fetch', () => {
 			createMockContext({ projectId: 'project123' }),
 		);
 
-		const requestArgument = mockHandlePreviewAPI.mock.calls[0][0];
+		const requestArgument = mockRoutePreviewRequest.mock.calls[0][0];
 		expect(requestArgument.headers.get('Authorization')).toBe('Bearer abc123');
 		expect(requestArgument.headers.get('Accept')).toBe('application/json');
 	});
@@ -221,7 +171,7 @@ describe('preview_fetch', () => {
 
 	it('returns raw HTML by default', async () => {
 		const html = '<html><body><h1>Hello</h1></body></html>';
-		mockServeFile.mockResolvedValue(makeResponse(html));
+		mockRoutePreviewRequest.mockResolvedValue(makeResponse(html));
 
 		const result = await execute({ path: '/' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
 
@@ -232,7 +182,7 @@ describe('preview_fetch', () => {
 
 	it('converts HTML to markdown when format=markdown', async () => {
 		const html = '<html><body><h1>Hello</h1></body></html>';
-		mockServeFile.mockResolvedValue(makeResponse(html));
+		mockRoutePreviewRequest.mockResolvedValue(makeResponse(html));
 
 		const result = await execute({ path: '/', format: 'markdown' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
 
@@ -242,8 +192,7 @@ describe('preview_fetch', () => {
 
 	it('skips markdown conversion for non-HTML content', async () => {
 		const json = '{"data": "test"}';
-		mockMatchesRunWorkerFirst.mockReturnValue(true);
-		mockHandlePreviewAPI.mockResolvedValue(makeResponse(json, { contentType: 'application/json' }));
+		mockRoutePreviewRequest.mockResolvedValue(makeResponse(json, { contentType: 'application/json' }));
 
 		const result = await execute(
 			{ path: '/api/data', format: 'markdown' },
@@ -258,7 +207,7 @@ describe('preview_fetch', () => {
 	// ── Response metadata ────────────────────────────────────────────────
 
 	it('includes status code and headers in output', async () => {
-		mockServeFile.mockResolvedValue(
+		mockRoutePreviewRequest.mockResolvedValue(
 			new Response('Not Found', {
 				status: 404,
 				statusText: 'Not Found',
@@ -275,7 +224,7 @@ describe('preview_fetch', () => {
 	});
 
 	it('returns structured metadata', async () => {
-		mockServeFile.mockResolvedValue(makeResponse('OK', { contentType: 'text/plain' }));
+		mockRoutePreviewRequest.mockResolvedValue(makeResponse('OK', { contentType: 'text/plain' }));
 
 		const result = await execute({ path: '/' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
 
@@ -289,7 +238,7 @@ describe('preview_fetch', () => {
 
 	it('truncates large responses', async () => {
 		const largeBody = 'x'.repeat(60_000);
-		mockServeFile.mockResolvedValue(makeResponse(largeBody, { contentType: 'text/plain' }));
+		mockRoutePreviewRequest.mockResolvedValue(makeResponse(largeBody, { contentType: 'text/plain' }));
 
 		const result = await execute({ path: '/' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
 
@@ -300,7 +249,7 @@ describe('preview_fetch', () => {
 	// ── Error handling ───────────────────────────────────────────────────
 
 	it('returns preview errors as results (not thrown)', async () => {
-		mockServeFile.mockRejectedValue(new Error('Bundle failed: syntax error in src/main.tsx'));
+		mockRoutePreviewRequest.mockRejectedValue(new Error('Bundle failed: syntax error in src/main.tsx'));
 
 		const result = await execute({ path: '/' }, createMockSendEvent(), createMockContext({ projectId: 'project123' }));
 
@@ -319,7 +268,7 @@ describe('preview_fetch', () => {
 	// ── Status events ────────────────────────────────────────────────────
 
 	it('sends status events', async () => {
-		mockServeFile.mockResolvedValue(makeResponse('OK', { contentType: 'text/plain' }));
+		mockRoutePreviewRequest.mockResolvedValue(makeResponse('OK', { contentType: 'text/plain' }));
 		const sendEvent = createMockSendEvent();
 
 		await execute({ path: '/' }, sendEvent, createMockContext({ projectId: 'project123' }));
@@ -329,7 +278,7 @@ describe('preview_fetch', () => {
 	});
 
 	it('sends markdown conversion status event when format=markdown', async () => {
-		mockServeFile.mockResolvedValue(makeResponse('<html><body>Hello</body></html>'));
+		mockRoutePreviewRequest.mockResolvedValue(makeResponse('<html><body>Hello</body></html>'));
 		const sendEvent = createMockSendEvent();
 
 		await execute({ path: '/', format: 'markdown' }, sendEvent, createMockContext({ projectId: 'project123' }));

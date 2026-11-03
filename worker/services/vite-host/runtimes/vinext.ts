@@ -2,18 +2,17 @@
  * vinext App Router on Vite) framework runtime — the light, DO-facing
  * half.
  *
- * This module holds only what the preview Durable Object needs: detection,
+ * This module holds only what the preview Durable Object needs:
  * request routing across an already-built module set, the server isolate's
  * compatibility flags, and the browser HMR glue. The expensive build (esbuild +
  * the vendored React/RSC source) lives in `./vinext-build`, which runs in the
  * dedicated `vite-host` worker so this module — and anything that imports the
  * runtime registry — never loads esbuild-wasm or the ~20 MB of vendored source.
  */
-import { routeAppRequest } from '../runtime/app-runtime';
-import { isVinextProject } from '../vinext-detection';
 import { buildHmrGlue } from './shared';
+import { routeAppRequest } from '../runtime/app-runtime';
 
-import type { ArtifactFrameworkRuntime, ProjectProbe, RuntimeRouteContext } from './types';
+import type { ArtifactFrameworkRuntime, RuntimeRouteContext } from './types';
 
 /**
  * IDE-managed config files excluded from the vinext build input.
@@ -42,10 +41,6 @@ class VinextRuntime implements ArtifactFrameworkRuntime {
 	readonly id = 'vinext';
 	readonly hosting = 'artifact' as const;
 	readonly serverCompatibilityFlags = ['nodejs_compat', 'enable_nodejs_fs_module'] as const;
-
-	detect(probe: ProjectProbe): boolean {
-		return isVinextProject(probe.files);
-	}
 
 	route(request: Request, context: RuntimeRouteContext): Promise<Response> {
 		return routeAppRequest(request, { clientOutput: context.clientOutput, server: context.getServer(), buildId: context.buildId });

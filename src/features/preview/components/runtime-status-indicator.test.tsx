@@ -59,6 +59,10 @@ describe('Preview runtime toolbar', () => {
 			client.setQueryData(['runtime-status', 'project'], { ...emptyRuntimeStatus(), preview, revision: 2 });
 		});
 		await screen.findByRole('status', { name: 'Worker → Container starting' });
+		const control = screen.getByRole('button', { name: 'Runtime: Worker → Container starting' });
+		expect(control).toHaveAttribute('aria-busy', 'true');
+		expect(control.querySelectorAll('svg')).toHaveLength(1);
+		expect(control.querySelector('.animate-spin')).not.toBeInTheDocument();
 		expect(send).not.toHaveBeenCalled();
 		act(() => {
 			client.setQueryData(['runtime-status', 'project'], {

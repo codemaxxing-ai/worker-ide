@@ -22,7 +22,7 @@ describe('Worker-first runtime selection', () => {
 		expect(() => assertWorkerCapabilities(files)).not.toThrow();
 	});
 	it('detects unsupported configuration at compile time', () => {
-		const files = { '/vite.config.mts': 'export default { plugins: [customPlugin()] }' };
+		const files = { '/vite.config.mts': 'export default { resolve: { alias: { custom: "/src/custom" } } }' };
 		expect(selectRuntime({ files }).id).toBe('react-spa');
 		expect(() => assertWorkerCapabilities(files)).toThrow('WORKER_CAPABILITY_REQUIRED');
 	});
@@ -33,6 +33,11 @@ describe('Worker-first runtime selection', () => {
 		expect(() =>
 			assertWorkerCapabilities({ '/package.json': JSON.stringify({ dependencies: { vinext: '^0.1.8' } }), '/src/app/page.tsx': '' }),
 		).toThrow('WORKER_CAPABILITY_REQUIRED');
+	});
+	it('keeps missing application routes as an error', () => {
+		expect(() => assertWorkerCapabilities({ '/package.json': JSON.stringify({ dependencies: { vinext: '^0.1.8' } }) })).toThrow(
+			'vinext requires an app or pages directory',
+		);
 	});
 	it.each(['worker', 'container'])('ignores legacy %s manifest overrides without modifying files', (runtime) => {
 		const files = { '/package.json': JSON.stringify({ workerIde: { runtime } }) };

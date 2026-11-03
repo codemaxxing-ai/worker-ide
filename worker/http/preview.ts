@@ -247,9 +247,7 @@ export async function handlePreviewRequest(request: Request, projectId: string, 
 		// browser-only preview code out of the Worker startup module graph.
 		const { PreviewService } = await import('../services/preview-service');
 		const previewService = new PreviewService(PROJECT_ROOT, projectId);
-		const assetSettings = await previewService.loadAssetSettings();
-
-		return previewService.routePreviewRequest(request, appOrigin, assetSettings, previewBootstrap.snapshotHash, previewBootstrap);
+		return previewService.routePreviewRequest(request, appOrigin, previewBootstrap);
 	}).catch((error: unknown) => {
 		const capacity = readContainerCapacityError(error);
 		if (!capacity) throw error;

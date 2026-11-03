@@ -38,7 +38,7 @@ export interface PreviewBootstrapInputs {
 	routerDirectories: string[];
 	/** Directories excluded from the build-snapshot hash (see {@link PreviewBootstrap.snapshotHash}). */
 	excludedDirectories: readonly string[];
-	configurationPaths?: readonly string[];
+	configurationPaths: readonly string[];
 }
 
 /** The raw snapshot returned by a single preview bootstrap round trip. */
@@ -60,8 +60,8 @@ export interface PreviewBootstrap {
 	 * `hashSnapshot(collectProjectSnapshot(excludedDirectories))`.
 	 */
 	snapshotHash: string;
-	configurationFiles?: Record<string, string>;
-	runtimeDecision?: RuntimeDecision;
+	configurationFiles: Record<string, string>;
+	runtimeDecision: RuntimeDecision;
 }
 
 /**

@@ -183,7 +183,6 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 	private changesInstance?: ComputerChanges;
 	private nativePreviewStarting?: Promise<void>;
 	private nativePreviewConfiguration?: string;
-	private nativePreviewMonitor?: Promise<void>;
 	private get containerSnapshots(): ComputerContainerSnapshots {
 		return (this.containerSnapshotsInstance ??= new ComputerContainerSnapshots(
 			this.ctx.storage.kv,
@@ -482,20 +481,7 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 			if (protocol?.startsWith('worker-ide-vite')) forwarded.headers.set('Sec-WebSocket-Protocol', protocol.slice('worker-ide-'.length));
 		}
 		try {
-			const response = await this.getWorkspaceContainer().fetchPort(5173, forwarded);
-			if (!this.nativePreviewMonitor && this.ctx.container) {
-				this.nativePreviewMonitor = this.ctx.container
-					.monitor()
-					.catch(() => {})
-					.then(async () => {
-						this.nativePreviewMonitor = undefined;
-						if (this.ctx.container?.running) return;
-						this.nativePreviewConfiguration = undefined;
-						await this.getRuntimeStatus();
-					});
-				this.ctx.waitUntil(this.nativePreviewMonitor);
-			}
-			return response;
+			return await this.getWorkspaceContainer().fetchPort(5173, forwarded);
 		} catch (error) {
 			this.nativePreviewConfiguration = undefined;
 			throw error;
@@ -1084,7 +1070,7 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 			this.workspace.readFile(inputs.indexHtmlPath).then((value) => value ?? undefined),
 			hashSnapshot(snapshot),
 			Promise.all(
-				(inputs.configurationPaths ?? []).map(async (path) => ({ path: `/${path}`, content: await this.workspace.readFile(`/${path}`) })),
+				inputs.configurationPaths.map(async (path) => ({ path: `/${path}`, content: await this.workspace.readFile(`/${path}`) })),
 			),
 			...inputs.routerDirectories.map((directory) => this.workspace.readDir(`/${directory}`).catch(() => [])),
 		]);

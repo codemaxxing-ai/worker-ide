@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { MemoryRouter } from 'react-router';
@@ -64,7 +64,12 @@ describe('ProjectSettingsModal', () => {
 				</MemoryRouter>
 			</QueryClientProvider>,
 		);
-		await user.click(await screen.findByRole('checkbox', { name: 'Always use a container' }));
+		const runtime = await screen.findByRole('group', { name: 'Runtime' });
+		const toggle = within(runtime).getByRole('switch', { name: 'Always use a container' });
+		expect(toggle).not.toBeChecked();
+		toggle.focus();
+		await user.keyboard(' ');
+		expect(toggle).toBeChecked();
 		await user.click(screen.getByRole('button', { name: /Save/ }));
 		expect(mockUpdateProjectMeta).toHaveBeenCalledWith('project', { alwaysUseContainer: true });
 	});

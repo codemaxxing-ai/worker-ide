@@ -138,7 +138,6 @@ export async function execute(
 		// where eval() is blocked (workerd).
 		const { PreviewService } = await import('../../preview-service');
 		const previewService = new PreviewService(context.projectRoot, context.projectId);
-		const assetSettings = await previewService.loadAssetSettings();
 
 		const origins = context.requestOriginContext ?? getDomainConfiguration(env);
 		const secret = import.meta.env.DEV ? env.PREVIEW_SECRET || DEV_PREVIEW_SECRET : env.PREVIEW_SECRET;
@@ -162,7 +161,7 @@ export async function execute(
 		}
 		const request = new Request(syntheticUrl.toString(), requestInit);
 
-		const response = await previewService.routePreviewRequest(request, origins.appOrigin, assetSettings);
+		const response = await previewService.routePreviewRequest(request, origins.appOrigin);
 
 		// Read response body
 		const contentType = response.headers.get('content-type') ?? '';

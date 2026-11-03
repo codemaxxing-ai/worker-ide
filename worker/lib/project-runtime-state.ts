@@ -9,31 +9,28 @@ interface RuntimeStorage {
 	delete(key: string): unknown;
 }
 
-/** Durable promotion and versioned status prevent stale Worker requests undoing an upgrade. */
+/** Current container sessions survive restarts; generations reject stale completions. */
 export class ProjectRuntimeState {
 	constructor(private readonly storage: RuntimeStorage) {}
 	get promoted(): boolean {
 		return this.promotionReason !== undefined;
 	}
 	get promotionReason(): RuntimeReason | undefined {
-		return this.storage.get<RuntimeReason>('project-runtime-session');
+		return this.storage.get<RuntimeReason>('project-container-session');
 	}
 	promote(reason: RuntimeReason = 'resource-limit'): void {
-		if (!this.promoted) this.storage.put('project-runtime-session', reason);
+		if (!this.promoted) this.storage.put('project-container-session', reason);
 	}
 	endSession(): void {
 		const observedContainer = this.storage.get<boolean>('project-runtime-observed-container');
 		const decision = this.storage.get<RuntimeDecision>('project-runtime-decision');
-		this.storage.delete('project-runtime-session');
-		this.storage.delete('project-runtime-promoted');
+		this.storage.delete('project-container-session');
 		this.storage.delete('project-runtime-observed-container');
 		if (observedContainer && decision?.backend === 'container') this.select('worker', 'simple-project');
 	}
 	reconcile(running: boolean): void {
 		if (running) {
 			this.storage.put('project-runtime-observed-container', true);
-			const decision = this.storage.get<RuntimeDecision>('project-runtime-decision');
-			if (decision?.backend === 'container') this.promote(decision.reason);
 			return;
 		}
 		if (this.storage.get<boolean>('project-runtime-observed-container')) this.endSession();

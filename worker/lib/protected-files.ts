@@ -15,8 +15,7 @@ import type { AssetSettings, BindingsConfig } from '@shared/types';
  * vinext projects manage their own framework-shaped config, so the IDE must
  * generate vinext-appropriate `wrangler.jsonc`/`vite.config.ts`/`package.json`
  * for them rather than the Worker-SPA defaults (which would clobber the project).
- * Mirrors the runtime detector by combining the `package.json` manifest with the
- * presence of an `app/` or `pages/` directory.
+ * Shares the runtime's manifest-based framework detector.
  */
 async function detectVinextProject(projectRoot: string): Promise<boolean> {
 	let packageJsonRaw: string;
@@ -25,18 +24,7 @@ async function detectVinextProject(projectRoot: string): Promise<boolean> {
 	} catch {
 		return false;
 	}
-	const files: Record<string, string> = { '/package.json': packageJsonRaw };
-	for (const directory of ['app', 'pages']) {
-		try {
-			const entries = await fs.readdir(`${projectRoot}/${directory}`);
-			if (entries.length > 0) {
-				files[`/${directory}/.marker`] = '';
-			}
-		} catch {
-			// Directory absent — ignore.
-		}
-	}
-	return isVinextProject(files);
+	return isVinextProject({ '/package.json': packageJsonRaw });
 }
 
 interface ProjectFileFlags {

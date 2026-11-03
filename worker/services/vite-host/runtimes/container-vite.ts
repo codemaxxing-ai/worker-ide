@@ -3,17 +3,13 @@ import { stripPreviewRequestCredentials } from '../../../lib/preview-request-hea
 import { finalizePreviewResponse } from '../../../lib/preview-response-headers';
 import { toDurableObjectId } from '../../../lib/project-id';
 
-import type { ContainerFrameworkRuntime, ProjectProbe, StatelessPreviewContext } from './types';
+import type { ContainerFrameworkRuntime, StatelessPreviewContext } from './types';
 
 class ContainerViteRuntime implements ContainerFrameworkRuntime {
 	readonly id: string;
 	readonly hosting = 'container';
 	constructor(private readonly framework: 'vinext' | 'spa') {
 		this.id = framework === 'vinext' ? 'container-vinext' : 'container-vite';
-	}
-
-	detect(_probe: ProjectProbe): boolean {
-		return false;
 	}
 
 	async serve(request: Request, context: StatelessPreviewContext): Promise<Response> {

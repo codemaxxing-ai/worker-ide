@@ -1,15 +1,12 @@
 /**
  * Framework runtime registry.
  *
- * Detection is keyed off a cheap project probe (package.json + tree) and used by
- * every surface — the preview router, cacheable build entrypoint, and deploy
- * workflow — so a project resolves to the same runtime everywhere. Runtimes are
- * tried in order; the first to claim the project wins. Projects that no runtime
- * claims fall back to the legacy esbuild preview/deploy pipeline.
+ * Preview and deployment use the same manifest-based framework selection and
+ * shared Worker/Container session decision.
  */
+import { isVinextProject } from '../vinext-detection';
 import { containerVinextRuntime, containerViteRuntime } from './container-vite';
 import { reactSpaRuntime } from './react-spa';
-import { declaresVinext } from './runtime-selection';
 import { vinextRuntime } from './vinext';
 
 import type { FrameworkRuntime, ProjectProbe } from './types';
@@ -20,8 +17,9 @@ const RUNTIMES: readonly FrameworkRuntime[] = [containerVinextRuntime, container
 
 /** Framework detection starts on Workers unless the shared runtime decision selects a container. */
 export function selectRuntime(probe: ProjectProbe, backend?: RuntimeBackend): FrameworkRuntime {
-	if (backend === 'container') return declaresVinext(probe.files) ? containerVinextRuntime : containerViteRuntime;
-	return declaresVinext(probe.files) ? vinextRuntime : reactSpaRuntime;
+	const vinext = isVinextProject(probe.files);
+	if (backend === 'container') return vinext ? containerVinextRuntime : containerViteRuntime;
+	return vinext ? vinextRuntime : reactSpaRuntime;
 }
 
 /** Look up a runtime by id (used by surfaces that already resolved detection). */

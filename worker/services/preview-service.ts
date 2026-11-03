@@ -1,28 +1,24 @@
 /**
  * Preview entry point (stateless worker side) — a thin runtime dispatcher.
  *
- * Every project resolves to a {@link FrameworkRuntime} via the registry (keyed on
- * a cheap package.json + tree probe). There is no special-cased legacy path:
+ * Every project resolves to a {@link FrameworkRuntime} via the registry:
  *  - an `artifact` runtime (vinext, …) retrieves its immutable build through the
  *    cacheable BuildArtifact Worker entrypoint;
  *  - a `stateless` runtime (the static React SPA + worker) serves the request
  *    inline.
- * The public API (`loadAssetSettings`, `routePreviewRequest`) is unchanged, so
- * `worker/index.ts` and the agent preview tool keep working without changes.
  */
 import { parseJsonc } from '@shared/jsonc';
 import { resolveAssetSettings } from '@shared/types';
 import { workerFallbackReason } from '@shared/worker-runtime-error';
-import { fs } from '@worker/lib/project-fs';
 
 import { filesystemNamespace } from '../lib/durable-object-namespaces';
-import { buildDetectionProbe } from '../lib/preview-bootstrap';
+import { buildDetectionProbe, PREVIEW_BOOTSTRAP_INPUTS } from '../lib/preview-bootstrap';
 import { finalizePreviewResponse } from '../lib/preview-response-headers';
 import { previewTransitionScript } from '../lib/preview-transition-script';
 import { toDurableObjectId } from '../lib/project-id';
 import { withSpan } from '../lib/tracing';
 import { selectRuntime } from './vite-host/runtimes/registry';
-import { assertWorkerCapabilities, VITE_CONFIG_PATHS } from './vite-host/runtimes/runtime-selection';
+import { assertWorkerCapabilities } from './vite-host/runtimes/runtime-selection';
 import { serveVinextPreview } from './vite-host/runtimes/vinext-preview';
 
 import type { PreviewBootstrap } from '../lib/preview-bootstrap';
@@ -36,39 +32,23 @@ export class PreviewService {
 		private readonly projectId: string,
 	) {}
 
-	/** Asset settings from the project's `wrangler.jsonc` (defaults when absent). */
-	async loadAssetSettings(): Promise<ResolvedAssetSettings> {
-		let raw: string | undefined;
-		try {
-			raw = await fs.readFile(`${this.projectRoot}/wrangler.jsonc`, 'utf8');
-		} catch {
-			raw = undefined;
-		}
-		const value = resolveWranglerAssetSettings(raw);
-		return value;
-	}
-
 	/** Resolve the project's runtime and serve (or forward) the preview request. */
-	async routePreviewRequest(
-		request: Request,
-		ideOrigin: string,
-		preloadedAssetSettings?: ResolvedAssetSettings,
-		snapshotHash?: string,
-		bootstrap?: PreviewBootstrap,
-	): Promise<Response> {
+	async routePreviewRequest(request: Request, ideOrigin: string, preloadedBootstrap?: PreviewBootstrap): Promise<Response> {
 		return withSpan(
 			'preview.route',
 			async (span) => {
-				const probe = bootstrap === undefined ? { files: await this.collectDetectionFiles() } : buildDetectionProbe(bootstrap);
 				const project = filesystemNamespace.get(toDurableObjectId(filesystemNamespace, this.projectId));
-				let decision = bootstrap?.runtimeDecision ?? (await project.getBuildRuntimeDecision(probe.files));
+				const bootstrap = preloadedBootstrap ?? (await project.collectPreviewBootstrap(PREVIEW_BOOTSTRAP_INPUTS));
+				const probe = buildDetectionProbe(bootstrap);
+				const snapshotHash = bootstrap.snapshotHash;
+				let decision = bootstrap.runtimeDecision;
 				const runtime = selectRuntime(probe, decision.backend);
 				span.setAttribute('runtime.id', runtime.id);
 				span.setAttribute('runtime.hosting', runtime.hosting);
 				const navigation =
 					request.method === 'GET' && (new URL(request.url).pathname === '/' || request.headers.get('Accept')?.includes('text/html'));
 				if (navigation) await project.reportRuntimeStatus('preview', decision, 'starting');
-				const assetSettings = preloadedAssetSettings ?? (await this.loadAssetSettings());
+				const assetSettings = resolveWranglerAssetSettings(bootstrap.wranglerJsonc);
 				try {
 					if (decision.backend === 'worker') assertWorkerCapabilities(probe.files);
 					// Dependency/source edits can select a container on a module subrequest.
@@ -138,10 +118,9 @@ export class PreviewService {
 		request: Request,
 		ideOrigin: string,
 		assetSettings: ResolvedAssetSettings,
-		snapshotHash?: string,
+		snapshotHash: string,
 	): Promise<Response> {
 		if (runtime.hosting === 'artifact') {
-			if (snapshotHash === undefined) throw new Error('Missing snapshot hash for build runtime');
 			return finalizePreviewResponse(
 				await serveVinextPreview({ request, projectId: this.projectId, projectRoot: this.projectRoot, ideOrigin, snapshotHash, runtime }),
 				{ ideOrigin },
@@ -164,45 +143,6 @@ export class PreviewService {
 				},
 			})
 			.transform(described);
-	}
-
-	/**
-	 * Minimal snapshot for runtime detection: the manifest plus entry/router probes.
-	 *
-	 * Every read here is a cross-Durable-Object round trip to the filesystem DO
-	 * (~hundreds of ms of pure latency each), so they are issued CONCURRENTLY and
-	 * awaited once via `Promise.all` rather than sequentially. Sequential awaits
-	 * turned a ~150ms-of-work probe into ~5 serial round trips (~700ms+); batching
-	 * collapses that to a single round-trip's latency. Semantics are unchanged: a
-	 * missing `package.json` means "not detectable" (empty result), `index.html`
-	 * is optional, and each router directory contributes its first entry.
-	 */
-	private async collectDetectionFiles(): Promise<Record<string, string>> {
-		const routerDirectories = ['app', 'pages', 'src'];
-		const [packageJson, indexHtml, configurationEntries, ...directoryEntries] = await Promise.all([
-			fs.readFile(`${this.projectRoot}/package.json`, 'utf8').catch(() => {}),
-			fs.readFile(`${this.projectRoot}/index.html`, 'utf8').catch(() => {}),
-			Promise.all(VITE_CONFIG_PATHS.map(async (path) => [path, await fs.readFile(`${this.projectRoot}/${path}`, 'utf8').catch(() => {})])),
-			...routerDirectories.map((directory) => fs.readdir(`${this.projectRoot}/${directory}`).catch(() => [])),
-		]);
-
-		const files: Record<string, string> = {};
-		if (packageJson === undefined) {
-			// No manifest — nothing to detect against.
-			return files;
-		}
-		files['/package.json'] = packageJson;
-		for (const [path, content] of configurationEntries) if (path !== undefined && content !== undefined) files[`/${path}`] = content;
-		if (indexHtml !== undefined) {
-			files['/index.html'] = indexHtml;
-		}
-		for (const [index, directory] of routerDirectories.entries()) {
-			const entries = directoryEntries[index];
-			if (entries.length > 0) {
-				files[`/${directory}/${entries[0]}`] = '';
-			}
-		}
-		return files;
 	}
 }
 

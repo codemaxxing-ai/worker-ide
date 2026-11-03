@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CircleAlert, CloudLightning, Container, LoaderCircle } from 'lucide-react';
+import { CircleAlert, CloudLightning, Container } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -136,6 +136,7 @@ export function RuntimeStatusIndicator({
 							id="preview-runtime-control"
 							type="button"
 							aria-label={`Runtime: ${label}`}
+							aria-busy={pending}
 							className={cn(
 								`
 									relative flex size-7 items-center justify-center rounded-sm
@@ -148,11 +149,7 @@ export function RuntimeStatusIndicator({
 							)}
 						>
 							<RuntimeIcon aria-hidden="true" className="size-4" />
-							{pending ? (
-								<LoaderCircle aria-hidden="true" className="absolute -right-0.5 -bottom-0.5 size-2.5 animate-spin" />
-							) : failed ? (
-								<CircleAlert aria-hidden="true" className="absolute -right-0.5 -bottom-0.5 size-2.5" />
-							) : undefined}
+							{failed && <CircleAlert aria-hidden="true" className="absolute -right-0.5 -bottom-0.5 size-2.5" />}
 						</button>
 					</DropdownMenuTrigger>
 				</span>

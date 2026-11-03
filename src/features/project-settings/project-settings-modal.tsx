@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Eye, EyeOff } from 'lucide-react';
+import { Container, Eye, EyeOff } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -162,7 +162,7 @@ function ProjectSettingsContent({
 
 	return (
 		<>
-			<Modal open={open} onOpenChange={onOpenChange} title="Project Settings" className="w-[420px]">
+			<Modal open={open} onOpenChange={onOpenChange} title="Project Settings" className="w-[480px]">
 				{visibilityQuery.isLoading || metaQuery.isLoading ? (
 					<ModalBody className="min-h-40">
 						<ModalContentSkeleton />
@@ -182,34 +182,26 @@ function ProjectSettingsContent({
 					</>
 				) : (
 					<>
-						<ModalBody className="flex flex-col gap-4">
+						<ModalBody className="flex flex-col gap-6">
 							{error && (
 								<div className="rounded-sm border border-red-500/30 bg-red-500/10 p-2.5">
 									<p className="text-xs text-red-500">{error}</p>
 								</div>
 							)}
 
-							<label htmlFor="project-always-use-container" className="flex items-center gap-2 text-xs text-text-primary">
-								<input
-									id="project-always-use-container"
-									type="checkbox"
-									checked={alwaysUseContainer}
-									onChange={(event) => setAlwaysUseContainer(event.target.checked)}
-									className="
-										accent-accent
-										focus-visible:outline-2 focus-visible:outline-accent
-									"
-								/>
-								Always use a container
-							</label>
 							<fieldset className="flex flex-col gap-2">
-								<legend className="text-xs font-medium text-text-secondary">Preview Visibility</legend>
-								<p className="text-xs text-text-secondary/70">Controls who can access the live preview of this project.</p>
-								<div className="flex flex-col gap-1.5">
+								<legend
+									className="
+										mb-3 text-xs font-medium tracking-wider text-text-secondary uppercase
+									"
+								>
+									Preview visibility
+								</legend>
+								<div className="grid grid-cols-2 gap-2">
 									<label
 										className={cn(
 											`
-												flex cursor-pointer items-start gap-2.5 rounded-sm border p-2.5
+												flex cursor-pointer items-start gap-2.5 rounded-lg border p-3
 												transition-colors
 											`,
 											visibility === 'public' ? 'border-accent bg-accent/5' : 'border-border hover:border-accent/50',
@@ -234,13 +226,13 @@ function ProjectSettingsContent({
 												<Eye className="size-3.5" />
 												Public
 											</span>
-											<span className="text-xs text-text-secondary/70">Anyone with the link can view the preview.</span>
+											<span className="text-xs text-text-secondary">Anyone with the link.</span>
 										</div>
 									</label>
 									<label
 										className={cn(
 											`
-												flex cursor-pointer items-start gap-2.5 rounded-sm border p-2.5
+												flex cursor-pointer items-start gap-2.5 rounded-lg border p-3
 												transition-colors
 											`,
 											visibility === 'private' ? 'border-accent bg-accent/5' : 'border-border hover:border-accent/50',
@@ -265,9 +257,57 @@ function ProjectSettingsContent({
 												<EyeOff className="size-3.5" />
 												Private
 											</span>
-											<span className="text-xs text-text-secondary/70">Only organization members can view the preview.</span>
+											<span className="text-xs text-text-secondary">Organization members.</span>
 										</div>
 									</label>
+								</div>
+							</fieldset>
+
+							<fieldset className="flex flex-col gap-2">
+								<legend
+									className="
+										mb-3 text-xs font-medium tracking-wider text-text-secondary uppercase
+									"
+								>
+									Runtime
+								</legend>
+								<div
+									className="
+										rounded-lg border border-border bg-bg-secondary/40 px-4 py-3
+									"
+								>
+									<div className="flex items-center justify-between gap-4">
+										<div className="flex min-w-0 items-center gap-2.5">
+											<Container aria-hidden="true" className="size-4 shrink-0 text-text-secondary" />
+											<label htmlFor="project-always-use-container" className="text-sm font-medium text-text-primary">
+												Always use a container
+											</label>
+										</div>
+										<input
+											id="project-always-use-container"
+											type="checkbox"
+											role="switch"
+											aria-describedby="project-runtime-description"
+											checked={alwaysUseContainer}
+											onChange={(event) => setAlwaysUseContainer(event.target.checked)}
+											className="
+												relative h-5 w-9 shrink-0 cursor-pointer appearance-none
+												rounded-full bg-border transition-colors
+												before:absolute before:top-0.5 before:left-0.5 before:size-4
+												before:rounded-full before:bg-text-primary
+												before:transition-transform
+												checked:bg-accent
+												checked:before:translate-x-4 checked:before:bg-bg-primary
+												focus-visible:outline-2 focus-visible:outline-offset-2
+												focus-visible:outline-accent
+											"
+										/>
+									</div>
+									<p id="project-runtime-description" className="mt-2 text-xs text-text-secondary">
+										{alwaysUseContainer
+											? 'Use a container for every preview and build.'
+											: 'Worker by default. Falls back to a container when needed.'}
+									</p>
 								</div>
 							</fieldset>
 

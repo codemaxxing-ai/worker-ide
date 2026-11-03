@@ -6,6 +6,18 @@ import { WORKER_MODULE_BYTE_BUDGET } from '@shared/worker-resource-budget';
 import { ProjectRuntimeState } from './project-runtime-state';
 
 describe('durable runtime decisions', () => {
+	it('does not turn obsolete decisions or promotion keys into a current container session', async () => {
+		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), (_project, state) => {
+			state.storage.kv.put('project-runtime-promoted', true);
+			state.storage.kv.put('project-runtime-session', 'project-requirements');
+			state.storage.kv.put('project-runtime-decision', { backend: 'container', reason: 'project-requirements', generation: 5 });
+			const runtime = new ProjectRuntimeState(state.storage.kv);
+			runtime.reconcile(true);
+			expect(runtime.promoted).toBe(false);
+			expect(runtime.alwaysUseContainer).toBe(false);
+			expect(runtime.select('worker', 'simple-project')).toEqual({ backend: 'worker', reason: 'simple-project', generation: 6 });
+		});
+	});
 	it('disabling the persistent setting keeps the selected container for the current session', async () => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), (project, state) => {
 			project.setRuntimeSettings(true);

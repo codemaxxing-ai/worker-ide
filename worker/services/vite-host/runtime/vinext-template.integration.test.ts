@@ -12,6 +12,7 @@ import { WORKERS_COMPATIBILITY_DATE } from '@shared/constants';
 import { routeAppRequest } from './app-runtime';
 import { getServerEntrypoint, serverModulesFromOutput } from './loader-runner';
 import { getTemplate } from '../../../templates';
+import { assertWorkerCapabilities } from '../runtimes/runtime-selection';
 import { buildVinext } from '../runtimes/vinext-build';
 
 /**
@@ -26,7 +27,12 @@ function templateSnapshot(): Record<string, string> {
 
 describe('vinext starter template', () => {
 	it('builds and renders the App Router template with a client component', async () => {
-		const build = await buildVinext(templateSnapshot(), { hostDevelopment: false });
+		const snapshot = {
+			...templateSnapshot(),
+			'/vite.config.ts': `import vinext from 'vinext'; export default { plugins: [vinext()] };`,
+		};
+		assertWorkerCapabilities(snapshot);
+		const build = await buildVinext(snapshot, { hostDevelopment: false });
 
 		const server = getServerEntrypoint({
 			loader: env.LOADER,

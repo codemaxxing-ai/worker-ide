@@ -50,8 +50,8 @@ describe('isVinextProject', () => {
 		).toBe(false);
 	});
 
-	it('returns false when no router directory exists', () => {
-		expect(isVinextProject({ '/package.json': vinextManifest })).toBe(false);
+	it('leaves router discovery and validation to the selected host', () => {
+		expect(isVinextProject({ '/package.json': vinextManifest })).toBe(true);
 	});
 
 	it('returns false when there is no package.json', () => {
