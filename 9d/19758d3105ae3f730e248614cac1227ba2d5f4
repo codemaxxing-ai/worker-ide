@@ -1,0 +1,33 @@
+Dockerfile.computer
+  s_80abf84941e6e3::t_f6388bc1ff8906 1-2,8-10
+README.md
+  s_80abf84941e6e3::t_15367e7a644690 40
+docs/computer-workspace.md
+  s_80abf84941e6e3::t_f357214ffd3965 37
+test/integration/computer.integration.test.ts
+  s_80abf84941e6e3::t_a7f8042d4bbdb4 72-92
+worker/durable/project-filesystem.ts
+  s_80abf84941e6e3::t_3c42f39376a765 4,20,134,138-139,145-167,711,1105,1121-1122
+worker/lib/computer-container-snapshots.test.ts
+  s_80abf84941e6e3::t_5c634bef532e23 1-284
+worker/lib/computer-container-snapshots.ts
+  s_80abf84941e6e3::t_697dfb24623911 1-184
+worker/lib/computer-exec.test.ts
+  s_80abf84941e6e3::t_567195cbf72709 6,19-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9d19758d3105ae3f730e248614cac1227ba2d5f4",
+  "prompts": {},
+  "sessions": {
+    "s_80abf84941e6e3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a2bc-0259-7c71-8904-6b949f7133be",
+        "model": "unknown"
+      },
+      "human_author": "Timo Wilhelm <twilhelm@cloudflare.com>"
+    }
+  }
+}
