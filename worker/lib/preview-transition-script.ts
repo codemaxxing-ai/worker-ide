@@ -14,7 +14,7 @@ export function previewTransitionScript(decision: RuntimeDecision, ideOrigin: st
 		var send = function(message) { if (parent !== window) parent.postMessage(message, configuration.ideOrigin); };
 		var save = function(backend,application) {
 			try {
-				var saved = {backend:backend,previousBackend:configuration.backend,timestamp:Date.now(),path:location.pathname + location.search,scrollX:scrollX,scrollY:scrollY,application:application,fields:fields().slice(0,200).map(function(field,index) { return {id:field.id,name:field.name,index:index,tag:field.tagName,type:field.type,value:field.value,checked:field.checked,focused:document.activeElement===field}; })};
+				var saved = {backend:backend,previousGeneration:configuration.generation,timestamp:Date.now(),path:location.pathname + location.search,scrollX:scrollX,scrollY:scrollY,application:application,fields:fields().slice(0,200).map(function(field,index) { return {id:field.id,name:field.name,index:index,tag:field.tagName,type:field.type,value:field.value,checked:field.checked,focused:document.activeElement===field}; })};
 				var text = bounded(saved);
 				if (!text) { delete saved.application; text = bounded(saved); }
 				if (text) sessionStorage.setItem(key,text);
@@ -28,7 +28,7 @@ export function previewTransitionScript(decision: RuntimeDecision, ideOrigin: st
 				if (text && new TextEncoder().encode(text).byteLength <= 1048576) saved = JSON.parse(text);
 			} catch (_) {}
 			try {
-			if (saved && saved.path === location.pathname + location.search && (saved.backend === configuration.backend || (saved.backend === 'auto' && saved.previousBackend !== configuration.backend)) && Date.now() - saved.timestamp >= 0 && Date.now() - saved.timestamp < 300000) {
+			if (saved && saved.path === location.pathname + location.search && (saved.backend === configuration.backend || (saved.backend === 'auto' && saved.previousGeneration < configuration.generation)) && Date.now() - saved.timestamp >= 0 && Date.now() - saved.timestamp < 300000) {
 				await frame();
 				try { if (hooks() && typeof hooks().restore === 'function') await settle(hooks().restore(saved.application)); } catch (_) {}
 				await frame();
@@ -51,8 +51,8 @@ export function previewTransitionScript(decision: RuntimeDecision, ideOrigin: st
 			} catch (_) {}
 			send({type:'__preview-runtime-ready', backend:configuration.backend, generation:configuration.generation});
 		};
-		var transition = async function(backend) {
-			if (switching || backend === configuration.backend || !['worker','container'].includes(backend)) return;
+		var transition = async function(backend,generation) {
+			if (switching || !Number.isSafeInteger(generation) || generation <= configuration.generation || !['worker','container'].includes(backend)) return;
 			switching = true;
 			try {
 				var application;
@@ -64,7 +64,7 @@ export function previewTransitionScript(decision: RuntimeDecision, ideOrigin: st
 		};
 		window.addEventListener('message', function(event) {
 			if (event.source !== parent || event.origin !== configuration.ideOrigin) return;
-			if (event.data && event.data.type === '__preview-runtime-switch') void transition(event.data.backend);
+			if (event.data && event.data.type === '__preview-runtime-switch') void transition(event.data.backend,event.data.generation);
 		});
 		// A manifest/configuration edit can make the existing HMR client reload
 		// before the IDE receives readiness. Capture synchronous state on that path.
@@ -80,7 +80,7 @@ export function previewTransitionScript(decision: RuntimeDecision, ideOrigin: st
 		window.addEventListener('__preview-runtime-status', function(event) {
 			if (parent !== window) return;
 			var status = event.detail;
-			if (status && status.preview && status.preview.phase === 'ready') void transition(status.preview.backend);
+			if (status && status.preview && status.preview.phase === 'ready') void transition(status.preview.backend,status.preview.generation);
 		});
 	})(${configuration});`;
 }

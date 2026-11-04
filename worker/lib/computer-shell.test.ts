@@ -16,6 +16,19 @@ class OfflineShell extends ShellWorker {
 	};
 }
 describe('Computer isolate shell parity', () => {
+	it('allows restart preparation writes only while their original queue position is owned', async () => {
+		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
+			await project.writeFileContent('/source.txt', 'baseline');
+			state.storage.sql.exec(
+				"INSERT INTO computer_mutation_queue (operation, arguments, status) VALUES ('restartContainer', '[]', 'running')",
+			);
+			using workspace = await project.__getWorkspaceStub();
+			await workspace.fs.writeFile('/source.txt', 'prepared');
+			state.storage.sql.exec("UPDATE computer_mutation_queue SET status = 'complete'");
+			await expect(workspace.fs.writeFile('/source.txt', 'late write')).rejects.toThrow('original execution ownership');
+			expect(await project.wsReadFile('/source.txt')).toBe('prepared');
+		});
+	});
 	it('uses the configured Git client against the project tree while blocking remote commands', async () => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
 			await project.writeFileContent('/source.txt', 'baseline');

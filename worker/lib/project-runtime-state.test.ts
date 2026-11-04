@@ -1,11 +1,82 @@
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { buildPreviewOrigin } from '@shared/domain';
 import { WORKER_MODULE_BYTE_BUDGET } from '@shared/worker-resource-budget';
 
+import { generateProjectId } from './project-id';
 import { ProjectRuntimeState } from './project-runtime-state';
 
+import type { RuntimeDecision } from '@shared/runtime-status';
+
 describe('durable runtime decisions', () => {
+	it('waits for synchronization, coalesces restarts and warms a new shared generation', async () => {
+		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
+			await project.wsWriteFile('/package.json', '{"name":"restart-test"}');
+			const before = await project.wsReadFile('/package.json');
+			const runtime = new ProjectRuntimeState(state.storage.kv);
+			runtime.promote('explicit-choice');
+			const decision = runtime.select('container', 'explicit-choice');
+			await project.reportRuntimeStatus('preview', decision, 'ready');
+			Reflect.set(project, 'admissionInstance', { inspect: () => ({ starting: true }) });
+			const close = vi.fn(async () => {});
+			const push = vi.fn(async function* () {
+				yield;
+			});
+			const restartOnNextStart = vi.fn();
+			Reflect.set(project, 'computerInstance', { close, push });
+			Reflect.set(project, 'containerHost', { restartOnNextStart });
+			const warm = vi.fn(async () => {
+				const selected = state.storage.kv.get<RuntimeDecision>('project-runtime-decision');
+				if (!selected) throw new Error('Missing runtime decision');
+				await project.reportRuntimeStatus('preview', selected, 'ready');
+				return new Response('Ready');
+			});
+			Reflect.set(project, 'nativePreviewFetch', warm);
+			const synchronized = Promise.withResolvers<void>();
+			const active = Reflect.get(project, 'queue').run('active-command', [], () => synchronized.promise);
+			const first = project.restartContainer('https://preview.test', 'https://ide.test', 'https://content.test');
+			const second = project.restartContainer('https://preview.test', 'https://ide.test', 'https://content.test');
+			const external = project.fetch(new Request(buildPreviewOrigin(generateProjectId(state.id), '000000000000', env.CONTENT_ORIGIN)));
+			expect(close).not.toHaveBeenCalled();
+			expect(warm).not.toHaveBeenCalled();
+			synchronized.resolve();
+			await active;
+			const [result, duplicate] = await Promise.all([first, second]);
+			expect(close).toHaveBeenCalledOnce();
+			expect(restartOnNextStart).toHaveBeenCalledOnce();
+			expect(push).toHaveBeenCalledExactlyOnceWith('container');
+			await external;
+			expect(warm).toHaveBeenCalledTimes(2);
+			expect(result).toEqual(duplicate);
+			expect(result.preview).toMatchObject({ backend: 'container', phase: 'ready', generation: decision.generation + 1 });
+			expect(project.getRuntimeSettings()).toEqual({ alwaysUseContainer: false });
+			expect(await project.wsReadFile('/package.json')).toBe(before);
+			expect(runtime.update('preview', decision, 'ready')).toBeUndefined();
+		});
+	});
+	it('reports a failed restart while retaining the container preview and permits a fresh retry', async () => {
+		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
+			const runtime = new ProjectRuntimeState(state.storage.kv);
+			runtime.promote('explicit-choice');
+			await project.reportRuntimeStatus('preview', runtime.select('container', 'explicit-choice'), 'ready');
+			Reflect.set(project, 'admissionInstance', { inspect: () => ({ starting: true }) });
+			const push = vi.fn(() => {
+				throw new Error('Restart failed');
+			});
+			Reflect.set(project, 'computerInstance', { close: async () => {}, push });
+			Reflect.set(project, 'containerHost', { restartOnNextStart: () => {} });
+			await expect(project.restartContainer('https://preview.test', 'https://ide.test', 'https://content.test')).rejects.toThrow(
+				'Restart failed',
+			);
+			expect(runtime.status.preview).toMatchObject({ backend: 'container', target: 'container', phase: 'error', generation: 2 });
+			await expect(project.restartContainer('https://preview.test', 'https://ide.test', 'https://content.test')).rejects.toThrow(
+				'Restart failed',
+			);
+			expect(push).toHaveBeenCalledTimes(2);
+			expect(runtime.status.preview.generation).toBe(3);
+		});
+	});
 	it('does not turn obsolete decisions or promotion keys into a current container session', async () => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), (_project, state) => {
 			state.storage.kv.put('project-runtime-promoted', true);

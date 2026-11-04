@@ -72,7 +72,7 @@ describe('Preview runtime toolbar', () => {
 			});
 		});
 		await waitFor(() =>
-			expect(send).toHaveBeenCalledWith({ type: '__preview-runtime-switch', backend: 'container' }, 'https://preview.test'),
+			expect(send).toHaveBeenCalledWith({ type: '__preview-runtime-switch', backend: 'container', generation: 2 }, 'https://preview.test'),
 		);
 		message('container');
 		await screen.findByRole('status', { name: 'Container' });
@@ -140,6 +140,42 @@ describe('Preview runtime toolbar', () => {
 			}),
 		);
 		await user.click(await screen.findByRole('button', { name: 'Runtime: Container' }));
-		expect(screen.queryByRole('menuitem')).not.toBeInTheDocument();
+		expect(await screen.findByRole('menuitem', { name: 'Restart' })).toBeEnabled();
+		expect(screen.queryByRole('menuitem', { name: /switch/i })).not.toBeInTheDocument();
+	});
+	it('restarts through the typed endpoint and reloads only the new ready generation', async () => {
+		vi.stubGlobal('PointerEvent', MouseEvent);
+		const user = userEvent.setup();
+		const { client, send } = setup();
+		await screen.findByRole('status', { name: 'Worker' });
+		const preview = { backend: 'container', target: 'container', phase: 'ready', reason: 'explicit-choice', generation: 2 };
+		act(() => {
+			client.setQueryData(['runtime-status', 'project'], { ...emptyRuntimeStatus(), preview, revision: 2 });
+		});
+		message('container', 2);
+		send.mockClear();
+		const restart = Promise.withResolvers<Response>();
+		vi.mocked(fetch).mockImplementation(async (input) => {
+			if (String(input).endsWith('/runtime/restart-container')) return restart.promise;
+			return Response.json({ ...emptyRuntimeStatus(), preview, revision: 2 });
+		});
+		const control = await screen.findByRole('button', { name: 'Runtime: Container' });
+		control.focus();
+		await user.keyboard('{ArrowDown}');
+		const restartItem = await screen.findByRole('menuitem', { name: 'Restart' });
+		await waitFor(() => expect(restartItem).toHaveFocus());
+		await user.keyboard('{Enter}');
+		await screen.findByRole('button', { name: 'Runtime: Container restarting' });
+		expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/runtime/restart-container'), expect.objectContaining({ method: 'POST' }));
+		expect(send).not.toHaveBeenCalled();
+		const next = { ...emptyRuntimeStatus(), preview: { ...preview, generation: 3 }, revision: 4 };
+		restart.resolve(Response.json(next));
+		await waitFor(() =>
+			expect(send).toHaveBeenCalledWith({ type: '__preview-runtime-switch', backend: 'container', generation: 3 }, 'https://preview.test'),
+		);
+		message('container', 3);
+		await screen.findByRole('status', { name: 'Container' });
+		message('container', 2);
+		expect(screen.getByRole('button', { name: 'Runtime: Container' })).toHaveAttribute('aria-busy', 'false');
 	});
 });

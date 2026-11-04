@@ -47,4 +47,23 @@ export const runtimeStatusRoutes = new Hono<AppEnvironment>()
 				);
 			throw error;
 		}
+	})
+	.post('/runtime/restart-container', async (context) => {
+		const projectId = context.get('projectId');
+		const project = context.get('fsStub');
+		const status = await project.getRuntimeStatus();
+		if (status.preview.backend !== 'container') throw httpError(HttpErrorCode.VALIDATION_ERROR, 'Container runtime is not selected', 409);
+		const domains = getDomainConfiguration(context.env);
+		const secret = import.meta.env.DEV ? context.env.PREVIEW_SECRET || DEV_PREVIEW_SECRET : context.env.PREVIEW_SECRET;
+		const origin = buildPreviewOrigin(projectId, await generatePreviewToken(projectId, secret), domains.contentOrigin);
+		try {
+			return context.json(await project.restartContainer(origin, domains.appOrigin, domains.contentOrigin));
+		} catch (error) {
+			if (readContainerCapacityError(error))
+				throw httpError(
+					HttpErrorCode.CONTAINER_LIMIT_REACHED,
+					error instanceof Error ? error.message : 'Organization container limit reached',
+				);
+			throw error;
+		}
 	});

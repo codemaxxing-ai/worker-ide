@@ -160,6 +160,7 @@ export class ComputerContainerSnapshots {
 export class ComputerContainerHost extends WorkspaceContainerAPI {
 	#snapshots: ComputerContainerSnapshots;
 	#onLaunch: () => void;
+	#restartRequested = false;
 
 	constructor(
 		state: DurableObjectState,
@@ -172,7 +173,16 @@ export class ComputerContainerHost extends WorkspaceContainerAPI {
 		this.#onLaunch = onLaunch;
 	}
 
+	/** Reconnect through Computer so its launch environment and transport are rebuilt. */
+	restartOnNextStart(): void {
+		this.#restartRequested = true;
+	}
+
 	override async start(specification: ContainerLaunchSpec): Promise<ContainerRuntimeInfo> {
+		if (this.#restartRequested) {
+			this.#restartRequested = false;
+			return this.restart(specification);
+		}
 		const result = await this.admission.launch(() =>
 			this.#snapshots.start(
 				specification,

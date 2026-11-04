@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CircleAlert, CloudLightning, Container } from 'lucide-react';
+import { CircleAlert, CloudLightning, Container, RotateCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -30,10 +30,12 @@ export function RuntimeStatusIndicator({
 	iframeReference: React.RefObject<HTMLIFrameElement | null | undefined>;
 }) {
 	const queryClient = useQueryClient();
-	const switchRuntime = useMutation({
-		mutationFn: async () => {
-			const response = await createApiClient(projectId).runtime['switch-to-container'].$post({});
-			if (!response.ok) await throwApiError(response, 'Failed to start container');
+	const changeRuntime = useMutation({
+		mutationFn: async (action: 'switch' | 'restart') => {
+			const api = createApiClient(projectId);
+			const response =
+				action === 'restart' ? await api.runtime['restart-container'].$post({}) : await api.runtime['switch-to-container'].$post({});
+			if (!response.ok) await throwApiError(response, action === 'restart' ? 'Failed to restart container' : 'Failed to start container');
 			return response.json();
 		},
 		onSuccess: (incoming) =>
@@ -48,7 +50,7 @@ export function RuntimeStatusIndicator({
 	const loadedBackend = loadedRuntime?.backend;
 	const loadedGeneration = loadedRuntime?.generation ?? 0;
 	const latestGeneration = useRef(0);
-	const requestedBackend = useRef<RuntimeBackend | undefined>(undefined);
+	const requestedGeneration = useRef<number | undefined>(undefined);
 	const { data: status, isError } = useQuery({
 		queryKey: ['runtime-status', projectId],
 		queryFn: async () => {
@@ -78,7 +80,7 @@ export function RuntimeStatusIndicator({
 			)
 				return;
 			latestGeneration.current = data.generation;
-			requestedBackend.current = undefined;
+			requestedGeneration.current = undefined;
 			setLoadedRuntime({ backend: data.backend, generation: data.generation });
 		};
 		globalThis.addEventListener('message', receive);
@@ -92,25 +94,25 @@ export function RuntimeStatusIndicator({
 			preview.generation < loadedGeneration ||
 			preview?.phase !== 'ready' ||
 			!preview.backend ||
-			loadedBackend === preview.backend ||
-			requestedBackend.current === preview.backend ||
+			(loadedBackend === preview.backend && loadedGeneration === preview.generation) ||
+			requestedGeneration.current === preview.generation ||
 			!previewOrigin
 		)
 			return;
 		const window = iframeReference.current?.contentWindow;
 		if (!window) return;
-		requestedBackend.current = preview.backend;
-		window.postMessage({ type: '__preview-runtime-switch', backend: preview.backend }, previewOrigin);
+		requestedGeneration.current = preview.generation;
+		window.postMessage({ type: '__preview-runtime-switch', backend: preview.backend, generation: preview.generation }, previewOrigin);
 	}, [status, loadedBackend, loadedGeneration, previewOrigin, iframeReference]);
 	const preview = status?.preview;
 	const pending =
-		switchRuntime.isPending ||
+		changeRuntime.isPending ||
 		Boolean(
 			preview &&
 			preview.generation >= loadedGeneration &&
 			(preview?.phase === 'starting' ||
 				preview?.phase === 'switching' ||
-				(loadedBackend && preview?.phase === 'ready' && loadedBackend !== preview.backend)),
+				(loadedBackend && preview?.phase === 'ready' && (loadedBackend !== preview.backend || loadedGeneration < preview.generation))),
 		);
 	const backend = loadedBackend ?? preview?.backend;
 	const target = preview?.target;
@@ -119,7 +121,9 @@ export function RuntimeStatusIndicator({
 		isError && !preview
 			? 'Runtime unavailable'
 			: pending
-				? `${name(backend) && backend !== target ? `${name(backend)} → ` : ''}${name(target) ?? 'Runtime'} starting`
+				? changeRuntime.isPending && changeRuntime.variables === 'restart'
+					? 'Container restarting'
+					: `${name(backend) && backend !== target ? `${name(backend)} → ` : ''}${name(target) ?? 'Runtime'} starting`
 				: `${name(backend) ?? 'Runtime'}${preview?.phase === 'sleeping' ? ' sleeping' : preview?.phase === 'blocked' ? ' container limit reached' : preview?.phase === 'error' ? ' error' : backend ? '' : ' idle'}`;
 	const detail = preview?.reason ? REASONS[preview.reason] : 'Preview runtime';
 	const build = status?.build;
@@ -162,9 +166,15 @@ export function RuntimeStatusIndicator({
 					</DropdownMenuLabel>
 				)}
 				{(backend !== 'container' || failed || preview?.phase === 'sleeping') && (
-					<DropdownMenuItem disabled={pending} onSelect={() => switchRuntime.mutate()}>
+					<DropdownMenuItem disabled={pending} onSelect={() => changeRuntime.mutate('switch')}>
 						<Container aria-hidden="true" className="size-4" />
 						{failed || preview?.phase === 'sleeping' ? 'Retry container' : 'Switch to container'}
+					</DropdownMenuItem>
+				)}
+				{backend === 'container' && !failed && preview?.phase !== 'sleeping' && (
+					<DropdownMenuItem disabled={pending} onSelect={() => changeRuntime.mutate('restart')}>
+						<RotateCw aria-hidden="true" className="size-4" />
+						Restart
 					</DropdownMenuItem>
 				)}
 			</DropdownMenuContent>

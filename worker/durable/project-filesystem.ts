@@ -116,6 +116,7 @@ const COMPUTER_MUTATIONS = new Set([
 	'gitCreateTag',
 	'gitDeleteTag',
 	'computerExec',
+	'restartContainer',
 	'computerApplyTool',
 	'destroyStorage',
 	'restoreSnapshots',
@@ -183,6 +184,7 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 	private changesInstance?: ComputerChanges;
 	private nativePreviewStarting?: Promise<void>;
 	private nativePreviewConfiguration?: string;
+	private containerRestarting?: Promise<RuntimeStatus>;
 	private get containerSnapshots(): ComputerContainerSnapshots {
 		return (this.containerSnapshotsInstance ??= new ComputerContainerSnapshots(
 			this.ctx.storage.kv,
@@ -242,6 +244,33 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 		});
 		await this.reportRuntimeStatus(surface, decision, 'starting');
 		return decision;
+	}
+
+	async restartContainer(origin: string, ideOrigin: string, contentOrigin: string): Promise<RuntimeStatus> {
+		return (this.containerRestarting ??= this.queue
+			.run('restartContainer', [origin, ideOrigin, contentOrigin], async () => {
+				this.runtimeState.promote('explicit-choice');
+				const decision = this.runtimeState.select('container', this.runtimeState.promotionReason ?? 'explicit-choice', true);
+				await this.reportRuntimeStatus('preview', decision, 'starting');
+				console.info({ event: 'runtime.manual-restart', projectId: this.projectId, generation: decision.generation });
+				try {
+					await this.computer.close();
+					this.getWorkspaceContainer().restartOnNextStart();
+					for await (const _progress of this.computer.push('container')) {
+						/* Restart only after previous commands have synchronized and released the queue. */
+					}
+					const response = await this.nativePreviewFetch(new Request(`${origin}/`), ideOrigin, contentOrigin);
+					await response.body?.cancel();
+					if (!response.ok) throw new Error('Container preview could not restart');
+					return this.getRuntimeStatus();
+				} catch (error) {
+					await this.reportRuntimeError('preview', decision, error instanceof Error ? error.message : String(error));
+					throw error;
+				}
+			})
+			.finally(() => {
+				this.containerRestarting = undefined;
+			}));
 	}
 
 	async reportRuntimeStatus(
@@ -536,7 +565,7 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 					"SELECT sequence, operation FROM computer_mutation_queue WHERE status IN ('running', 'sync-pending') ORDER BY sequence LIMIT 1",
 				)
 				.toArray()[0];
-			if (!owner || owner.operation !== 'computerExec' || current?.sequence !== owner.sequence)
+			if (!owner || !['computerExec', 'restartContainer'].includes(owner.operation) || current?.sequence !== owner.sequence)
 				throw new Error('Runtime writes require the original execution ownership');
 		};
 		return new ComputerShellWorkspace(this.computer, assertOwner, async (path, descendants, followFinalLink) => {
@@ -551,8 +580,10 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 	}
 	async fetch(request: Request): Promise<Response> {
 		const configuration = getDomainConfiguration(this.env);
-		if (classifyOrigin(new URL(request.url).origin, configuration).type === 'preview')
+		if (classifyOrigin(new URL(request.url).origin, configuration).type === 'preview') {
+			await this.containerRestarting;
 			return this.nativePreviewFetch(request, configuration.appOrigin, configuration.contentOrigin);
+		}
 		void this.computer;
 		if (!this.containerInstance) throw new Error('Container backend is unavailable');
 		return this.containerInstance.handleFetch(request);

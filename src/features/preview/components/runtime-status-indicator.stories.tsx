@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
+import { expect, userEvent, waitFor, within } from 'storybook/test';
 
 import { emptyRuntimeStatus } from '@shared/runtime-status';
 
@@ -26,7 +27,16 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Worker: Story = { args: { preview: { backend: 'worker', phase: 'ready', generation: 1 } } };
-export const NativeContainer: Story = { args: { preview: { backend: 'container', phase: 'ready', generation: 1 } } };
+export const NativeContainer: Story = {
+	args: { preview: { backend: 'container', phase: 'ready', generation: 1 } },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole('button', { name: 'Runtime: Container' }));
+		const item = await within(document.body).findByRole('menuitem', { name: 'Restart' });
+		await waitFor(() => expect(item).toBeVisible());
+		await userEvent.keyboard('{Escape}');
+	},
+};
 export const Starting: Story = { args: { preview: { backend: 'worker', target: 'container', phase: 'switching', generation: 1 } } };
 export const AtCapacity: Story = {
 	args: {

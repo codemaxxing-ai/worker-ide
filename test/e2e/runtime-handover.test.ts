@@ -20,7 +20,7 @@ const html = `<html><head><title>Runtime handover</title></head><body style="hei
 	</script></body></html>`;
 test.use({ nativeProjectOptions: { template: 'minimal', files: { '/index.html': html }, warmDependencies: true } });
 
-test('switches from the runtime icon without changing package.json or offering a reverse switch', async ({
+test('switches and restarts from the runtime icon without changing package.json or offering a reverse switch', async ({
 	page,
 	nativeProject: projectId,
 }) => {
@@ -39,7 +39,24 @@ test('switches from the runtime icon without changing package.json or offering a
 	const reread = await api.file.$get({ query: { path: '/package.json' } });
 	expect(await reread.json()).toEqual(before);
 	await page.getByRole('button', { name: 'Runtime: Container', exact: true }).click();
-	await expect(page.getByRole('menuitem')).toHaveCount(0);
+	await expect(page.getByRole('menuitem', { name: /switch/i })).toHaveCount(0);
+	await expect(page.getByRole('menuitem', { name: 'Restart' })).toBeVisible();
+	await page.keyboard.press('Escape');
+	const frame = page.frameLocator('iframe[title="Project Preview"]');
+	await frame.getByRole('textbox', { name: 'Draft' }).fill('Keep this through restart');
+	await frame.getByRole('button', { name: 'Increment' }).click();
+	const statusBefore = await api['runtime-status'].$get({});
+	const beforeRestart = await statusBefore.json();
+	await page.getByRole('button', { name: 'Runtime: Container', exact: true }).click();
+	await page.getByRole('menuitem', { name: 'Restart' }).click();
+	await expect(page.getByRole('status', { name: 'Container', exact: true })).toBeVisible({ timeout: 90_000 });
+	await expect(frame.getByRole('textbox', { name: 'Draft' })).toHaveValue('Keep this through restart');
+	await expect(frame.locator('#counter')).toHaveText('1');
+	const statusAfter = await api['runtime-status'].$get({});
+	const afterRestart = await statusAfter.json();
+	expect(afterRestart.preview.generation).toBeGreaterThan(beforeRestart.preview.generation);
+	const manifestAfterRestart = await api.file.$get({ query: { path: '/package.json' } });
+	expect(await manifestAfterRestart.json()).toEqual(before);
 });
 
 test('promotes a project by size and preserves preview state in the same iframe', async ({ page, nativeProject: projectId }) => {

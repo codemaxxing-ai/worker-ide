@@ -90,6 +90,12 @@ describe('Project container snapshot cache', () => {
 			expect(start).toHaveBeenLastCalledWith(expect.objectContaining({ image: container.images.computer }));
 			expect(start.mock.lastCall?.[0]).not.toHaveProperty('containerSnapshot');
 			expect(onLaunch).toHaveBeenCalledTimes(3);
+			host.restartOnNextStart();
+			await host.start(specification);
+			expect(onLaunch).toHaveBeenCalledTimes(4);
+			expect(start.mock.lastCall?.[0]).not.toHaveProperty('containerSnapshot');
+			await host.start(specification);
+			expect(onLaunch).toHaveBeenCalledTimes(4);
 			await expect(host.start({ ...specification, containerSnapshot: { id: 'foreign' } })).rejects.toThrow('Caller-provided');
 			await container.destroy();
 		});

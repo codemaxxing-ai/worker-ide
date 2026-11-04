@@ -41,9 +41,9 @@ export class ProjectRuntimeState {
 	set alwaysUseContainer(value: boolean) {
 		this.storage.put('project-always-use-container', value);
 	}
-	select(backend: RuntimeBackend, reason: RuntimeReason): RuntimeDecision {
+	select(backend: RuntimeBackend, reason: RuntimeReason, newGeneration = false): RuntimeDecision {
 		const previous = this.storage.get<RuntimeDecision>('project-runtime-decision');
-		if (previous?.backend === backend && previous.reason === reason) return previous;
+		if (!newGeneration && previous?.backend === backend && previous.reason === reason) return previous;
 		const decision = { backend, reason, generation: (previous?.generation ?? 0) + 1 };
 		this.storage.put('project-runtime-decision', decision);
 		return decision;
