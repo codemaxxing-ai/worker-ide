@@ -11,11 +11,15 @@ describe('Computer backend selection', () => {
 		'printf "bun run build"; echo \'$(node --version)\'',
 		'for file in src/*.ts; do head -n 2 "$file"; done',
 		'printf changed > source.txt',
+		'test -f package.json && cat package.json',
 	])('keeps supported text and file commands in the isolate: %s', (command) => {
 		expect(selectComputerBackend(command)).toBe('shell');
 	});
 	it.each([
 		'bun install',
+		'bun run typecheck',
+		'./node_modules/.bin/tsc -b',
+		'bun run test -- test/component.test.tsx',
 		'NODE_ENV=production bun run build && cat dist/index.html',
 		'echo $(node --version)',
 		'cat input.txt | python3 transform.py',

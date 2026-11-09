@@ -53,7 +53,7 @@ const mocks = vi.hoisted(() => {
 			currentSession: {
 				sessionId: 'session-1',
 				status: 'running',
-				statusText: undefined,
+				statusText: '',
 				contextTokensUsed: 1200,
 				stopRequested: false,
 				pendingQuestion: undefined,
@@ -378,6 +378,7 @@ describe('AgentPanel footer controls', () => {
 		mocks.sessionLoading.isRestoringSession = false;
 		mocks.agentRuntime.segments = [];
 		mocks.agentRuntime.agent.state.currentSession.status = 'running';
+		mocks.agentRuntime.agent.state.currentSession.statusText = '';
 		mocks.agentRuntime.agent.state.currentSession.messages = [
 			{ id: 'message-1', role: 'user', parts: [{ type: 'text', content: 'Hello' }], createdAt: 1 },
 		];
@@ -389,6 +390,17 @@ describe('AgentPanel footer controls', () => {
 		mocks.speechToText.interimTranscript = '';
 		mocks.speechToText.amplitudes = [0.2, 0.4];
 		mocks.speechStop.mockReturnValue('');
+	});
+
+	it.each(['completed', 'error', 'aborted', 'idle'])('removes progress text when the session becomes %s', (status) => {
+		mocks.agentRuntime.agent.state.currentSession.statusText = 'Updating dependency: @types/three...';
+		const view = render(<AgentPanel projectId="project-1" />);
+		expect(screen.getByRole('status')).toHaveTextContent('Updating dependency: @types/three...');
+
+		mocks.agentRuntime.agent.state.currentSession.status = status;
+		view.rerender(<AgentPanel projectId="project-1" />);
+		expect(screen.queryByRole('status')).not.toBeInTheDocument();
+		expect(screen.queryByText('Updating dependency: @types/three...')).not.toBeInTheDocument();
 	});
 
 	it('keeps context, microphone, and send available during generation', () => {

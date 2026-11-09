@@ -26,11 +26,19 @@ export const AI_MODELS = [
 		maxOutput: 16_384,
 	},
 	{
-		id: '@cf/zai-org/glm-5.3-flash',
-		label: 'GLM 5.3 Flash',
-		description: 'Efficient multimodal coding model from Z.ai',
+		id: '@cf/google/gemma-4-26b-a4b-it',
+		label: 'Gemma 4 26B A4B',
+		description: 'Efficient multimodal model from Google',
 		provider: 'workers-ai',
-		contextWindow: 1_048_576,
+		contextWindow: 256_000,
+		maxOutput: 16_384,
+	},
+	{
+		id: '@cf/qwen/qwen3.8-27b',
+		label: 'Qwen 3.8 27B',
+		description: 'Multimodal reasoning and agentic model from Qwen',
+		provider: 'workers-ai',
+		contextWindow: 262_144,
 		maxOutput: 16_384,
 	},
 ] as const satisfies readonly AIModelConfig[];
@@ -44,7 +52,7 @@ export const AI_MODEL_IDS: readonly AIModelId[] = AI_MODELS.map((model) => model
 export const AI_MODEL_IDS_TUPLE = AI_MODEL_IDS as readonly [AIModelId, ...AIModelId[]];
 
 export const DEFAULT_AI_MODEL: AIModelId = '@cf/zai-org/glm-5.3' satisfies AIModelId;
-export const SUMMARIZATION_AI_MODEL: AIModelId = '@cf/zai-org/glm-5.3-flash' satisfies AIModelId;
+export const SUMMARIZATION_AI_MODEL: AIModelId = '@cf/google/gemma-4-26b-a4b-it' satisfies AIModelId;
 
 export function getModelLabel(modelId: string): string {
 	const model = AI_MODELS.find((m) => m.id === modelId);

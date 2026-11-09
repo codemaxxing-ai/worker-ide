@@ -17,6 +17,7 @@ import { setActiveSessionId } from '@/lib/project-storage';
 import { useStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 
+import { AgentStatus } from './agent-status';
 import { ComposerControls } from './composer-controls';
 import { ImageAttachmentStrip } from './image-attachment-strip';
 import {
@@ -1022,15 +1023,7 @@ export function AgentPanel({ projectId, className }: { projectId: string; classN
 							{displayError && (
 								<AgentError message={displayError.message} code={displayError.code} onRetry={handleRetry} onDismiss={handleDismissError} />
 							)}
-							{statusMessage ? (
-								<div
-									className="
-										shimmer-text flex animate-chat-item items-center gap-2 px-1 text-xs
-									"
-								>
-									{statusMessage}
-								</div>
-							) : undefined}
+							{isProcessing && statusMessage && <AgentStatus message={statusMessage} />}
 
 							{!isProcessing && committedMessages.length > 0 && (
 								<div className="flex animate-chat-item items-center justify-end gap-2 px-2">

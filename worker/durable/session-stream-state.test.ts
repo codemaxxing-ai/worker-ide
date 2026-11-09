@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { SessionStreamState } from './session-stream-state';
 
-import type { AgentSessionState } from '@shared/agent-state';
+import type { AgentSessionState, StreamEvent } from '@shared/agent-state';
 
 function createHarness() {
 	let current: AgentSessionState = {
@@ -39,6 +39,50 @@ function createHarness() {
 	});
 	return { stream, getCurrent: () => current, recordToolCall };
 }
+
+describe('transient progress status', () => {
+	it.each([false, true])('clears dependency progress when its tool finishes (error: %s)', async (isError) => {
+		const { stream, getCurrent } = createHarness();
+		await stream.handleEvent('session', { type: 'status', message: 'Updating dependency: @types/three...' });
+		expect(getCurrent().statusText).toBe('Updating dependency: @types/three...');
+		await stream.handleEvent('session', { type: 'tool-call-end', toolCallId: 'dependency', toolName: 'dependencies_update', isError });
+		expect(getCurrent().statusText).toBeUndefined();
+		expect(getCurrent().status).toBe('running');
+	});
+
+	it.each<StreamEvent>([
+		{ type: 'text-delta', delta: 'The dependency is registered.' },
+		{ type: 'reasoning-delta', delta: 'Check the next file.' },
+		{ type: 'turn-complete' },
+	])('clears old progress on $type', async (event) => {
+		const { stream, getCurrent } = createHarness();
+		await stream.handleEvent('session', { type: 'status', message: 'Updating dependency: @types/three...' });
+		await stream.handleEvent('session', event);
+		expect(getCurrent().statusText).toBeUndefined();
+		stream.disposeSession('session');
+	});
+
+	it.each<AgentSessionState['status']>(['completed', 'error', 'aborted', 'idle'])(
+		'ignores late progress for a %s session',
+		async (status) => {
+			const { stream, getCurrent } = createHarness();
+			getCurrent().status = status;
+			await stream.handleEvent('session', { type: 'status', message: 'Updating dependency: @types/three...' });
+			expect(getCurrent().statusText).toBeUndefined();
+		},
+	);
+
+	it('preserves stopping progress while tools and streamed content finish', async () => {
+		const { stream, getCurrent } = createHarness();
+		getCurrent().stopRequested = true;
+		getCurrent().statusText = 'Stopping...';
+		await stream.handleEvent('session', { type: 'status', message: 'Updating dependency: @types/three...' });
+		await stream.handleEvent('session', { type: 'tool-call-end', toolCallId: 'dependency', toolName: 'dependencies_update' });
+		await stream.handleEvent('session', { type: 'text-delta', delta: 'Done.' });
+		expect(getCurrent().statusText).toBe('Stopping...');
+		stream.disposeSession('session');
+	});
+});
 
 describe('streamed tool arguments', () => {
 	it.each([false, true])('uses complete arguments without duplicating the tool (input start: %s)', async (started) => {

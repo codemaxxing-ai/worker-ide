@@ -61,6 +61,8 @@ export class SessionStreamState {
 				break;
 			}
 			case 'status': {
+				const current = this.host.getCurrentSession();
+				if (current?.status !== 'running' || current.stopRequested) break;
 				this.host.updateSessionState(sessionId, { statusText: event.message });
 				break;
 			}
@@ -148,6 +150,7 @@ export class SessionStreamState {
 				break;
 			}
 			case 'turn-complete': {
+				this.clearStatusText(sessionId);
 				this.flushContentDelta(sessionId);
 				this.toolCallArgumentBuffers.delete(sessionId);
 				const session = await this.host.readSession(sessionId);
@@ -213,6 +216,7 @@ export class SessionStreamState {
 				break;
 			}
 			case 'tool-call-end': {
+				this.clearStatusText(sessionId);
 				this.flushContentDelta(sessionId);
 				this.toolCallArgumentBuffers.get(sessionId)?.delete(event.toolCallId);
 				const messages = this.appendToStreamingAssistantMessage(sessionId, (parts) => {
@@ -464,7 +468,15 @@ export class SessionStreamState {
 		}
 	}
 
+	private clearStatusText(sessionId: string): void {
+		const current = this.host.getCurrentSession();
+		if (current?.statusText && !current.stopRequested) {
+			this.host.updateSessionState(sessionId, { statusText: undefined });
+		}
+	}
+
 	private accumulateContentDelta(sessionId: string, type: 'reasoning' | 'text', content: string): void {
+		this.clearStatusText(sessionId);
 		const pending = this.pendingContentDeltas.get(sessionId);
 		if (pending && pending.type !== type) {
 			this.flushContentDelta(sessionId);

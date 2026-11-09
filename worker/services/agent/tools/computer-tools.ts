@@ -70,7 +70,7 @@ export function createComputerTools(context: ToolExecutorContext, mode: 'code' |
 			backends: {
 				auto: {
 					description:
-						'Select before execution: supported file/text commands use the isolate; native binaries, installs and tests use Linux. Explicit shell/container overrides remain available. Commands are never retried on another backend.',
+						'Prefer this backend. Supported file/text commands stay in the Worker isolate; native binaries and full test runners use Linux. Use Worker lint, test, preview and browser tools when sufficient. Reuse installed dependencies for native checks. Commands are never retried on another backend.',
 				},
 				shell: {
 					description:
@@ -78,7 +78,7 @@ export function createComputerTools(context: ToolExecutorContext, mode: 'code' |
 				},
 				container: {
 					description:
-						'Linux with Node 24, Bun, Git, Python and native build tools. Use when native commands or full test runners are needed. List dependencies before registering packages with dependencies_update. Worker previews and builds resolve packages without installation; install registered packages only when a required container command needs missing packages. Public HTTP(S) through the controlled gateway. Foreground commands only; deadline five minutes.',
+						'Linux with Node 24, Bun, Git, Python and native build tools. Use only for a concrete native requirement, such as full TypeScript checking, DOM/Vitest tests or native binaries. Worker lint, lightweight tests and Worker previews/builds need no container installation. Check existing package availability; install only dependencies missing from the required native runtime. Source/type errors do not justify installing. Public HTTP(S) through the controlled gateway. Foreground commands only; deadline five minutes.',
 				},
 			},
 		},

@@ -1,4 +1,4 @@
-import { expect, within } from 'storybook/test';
+import { expect, waitFor, within } from 'storybook/test';
 
 import { InlineToolCall } from './tool-call';
 
@@ -24,7 +24,9 @@ export const ContainerCommand: Story = {
 		},
 	},
 	play: async ({ canvasElement }) => {
-		await expect(within(canvasElement).getByText('container · Exit 0')).toBeVisible();
+		await waitFor(async () => {
+			await expect(within(canvasElement).getByText('container · Exit 0')).toBeVisible();
+		});
 	},
 };
 export const CancelledCommand: Story = {
@@ -38,7 +40,9 @@ export const CancelledCommand: Story = {
 		},
 	},
 	play: async ({ canvasElement }) => {
-		await expect(within(canvasElement).getByText('container · Cancelled')).toBeVisible();
+		await waitFor(async () => {
+			await expect(within(canvasElement).getByText('container · Cancelled')).toBeVisible();
+		});
 	},
 };
 
@@ -65,8 +69,10 @@ export const LiveCommandOutput: Story = {
 		]),
 	},
 	play: async ({ canvasElement }) => {
-		await expect(within(canvasElement).getByText('Running tests…')).toBeVisible();
-		await expect(within(canvasElement).getByText('A warning')).toBeVisible();
-		await expect(within(canvasElement).getByText('Output truncated')).toBeVisible();
+		await waitFor(async () => {
+			await expect(within(canvasElement).getByText('Running tests…')).toBeVisible();
+			await expect(within(canvasElement).getByText('A warning')).toBeVisible();
+			await expect(within(canvasElement).getByText('Output truncated')).toBeVisible();
+		});
 	},
 };

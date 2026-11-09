@@ -10,7 +10,7 @@ export const definition: ToolDefinition = {
 	description: stripIndent`
 		Add, remove, or update a project dependency. Dependencies are stored in package.json.
 		Use this tool instead of npm install, bun add, or editing the protected package.json. The IDE resolves packages for Worker previews and installs them for container previews and builds.
-		CRITICAL INSTRUCTION: You MUST register a dependency before importing it in code. Call dependencies_list before adding packages. Do not routinely run bun install after registration; Worker previews/builds resolve registered packages without it. Install only if a required native validation command needs missing container packages.
+		CRITICAL INSTRUCTION: You MUST register a dependency before importing it in code. Call dependencies_list before adding packages. Registration completes setup for Worker previews/builds; do not start a container or run bun install for these. Full TypeScript checks and native tests may need a container. Reuse installed dependencies; install only when a required native command needs packages missing from that runtime.
 	`,
 	input_schema: {
 		type: 'object',

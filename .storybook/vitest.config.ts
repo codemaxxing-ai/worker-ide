@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
 import { defineConfig } from 'vitest/config';
 
@@ -11,6 +12,7 @@ const projectRoot = path.join(dirname, '../');
 
 export default defineConfig({
 	plugins: [
+		tailwindcss(),
 		react(),
 		storybookTest({
 			configDir: path.join(projectRoot, '.storybook'),
