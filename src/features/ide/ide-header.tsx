@@ -8,6 +8,7 @@ import { InlineRenameField } from '@/components/ui/inline-rename-field';
 import { Modal, ModalBody } from '@/components/ui/modal';
 import { Tooltip } from '@/components/ui/tooltip';
 import { VersionBadge } from '@/components/version-badge';
+import { useAgentRuntime } from '@/features/agent/components/agent-runtime-context';
 import { NotificationToggle } from '@/features/notifications/index';
 import { UserMenu } from '@/features/user-menu/index';
 import { cn } from '@/lib/utils';
@@ -130,6 +131,7 @@ export function IDEHeader({
 									variant="ghost"
 									size="icon"
 									aria-label="Toggle Agent panel"
+									aria-pressed={agentPanelVisible}
 									onClick={toggleAgentPanel}
 									className={cn(agentPanelVisible && 'text-accent')}
 								>
@@ -278,4 +280,9 @@ export function IDEHeader({
 			</Modal>
 		</>
 	);
+}
+
+export function ProjectIDEHeader(properties: Omit<IDEHeaderProperties, 'isAgentProcessing'>) {
+	const { agent } = useAgentRuntime();
+	return <IDEHeader {...properties} isAgentProcessing={agent.state?.sessions.some((session) => session.isRunning) ?? false} />;
 }

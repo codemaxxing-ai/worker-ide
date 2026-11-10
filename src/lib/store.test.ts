@@ -14,12 +14,8 @@ beforeEach(() => {
 		files: [],
 		expandedDirs: new Set(),
 		isLoading: false,
-		history: [],
-		isProcessing: false,
-		statusMessage: undefined,
-		sessionId: undefined,
-		savedSessions: [],
 		pendingPreviewElementReferences: [],
+		agentMode: 'code',
 		participants: [],
 		localParticipantId: undefined,
 		localParticipantColor: undefined,
@@ -259,37 +255,11 @@ describe('File Tree slice', () => {
 	});
 });
 
-describe('AI slice', () => {
-	it('adds a message to history', () => {
-		useStore.getState().addMessage({
-			id: 'msg-1',
-			role: 'user',
-			parts: [{ type: 'text', content: 'Hello' }],
-		});
-
-		expect(useStore.getState().history).toHaveLength(1);
-		expect(useStore.getState().history[0].role).toBe('user');
-	});
-
-	it('clears history', () => {
-		useStore.getState().addMessage({
-			id: 'msg-1',
-			role: 'user',
-			parts: [{ type: 'text', content: 'Hello' }],
-		});
-		useStore.getState().clearHistory();
-
-		expect(useStore.getState().history).toHaveLength(0);
-	});
-
-	it('sets processing state', () => {
-		useStore.getState().setProcessing(true);
-		expect(useStore.getState().isProcessing).toBe(true);
-	});
-
-	it('sets status message', () => {
-		useStore.getState().setStatusMessage('Thinking...');
-		expect(useStore.getState().statusMessage).toBe('Thinking...');
+describe('Agent preferences', () => {
+	it('keeps default mode preferences without maintaining another transcript', () => {
+		useStore.getState().setAgentMode('ask');
+		expect(useStore.getState().agentMode).toBe('ask');
+		expect(useStore.getState()).not.toHaveProperty('history');
 	});
 });
 

@@ -155,8 +155,7 @@ export class AgentLogger {
 		}
 
 		// Allow re-flushing if new entries arrive after a previous flush.
-		// Safe because flushes are always sequential (first in createAgentStream,
-		// then in agent-runner's finally block after the stream completes).
+		// The chat serializes tool checkpoints and final outbox delivery.
 		if (this.flushed && this.entries.length > this.entriesAtFlush) {
 			this.flushed = false;
 		}

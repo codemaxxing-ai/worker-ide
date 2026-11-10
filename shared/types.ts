@@ -4,9 +4,6 @@ export {
 	type AgentMode,
 	type ToolErrorInfo,
 	type ToolMetadataInfo,
-	type AiSession,
-	type AiSessionSummary,
-	type AgentSessionStatus,
 	type TodoItem,
 	type TextPart,
 	type PreviewElementAttributes,
@@ -18,7 +15,6 @@ export {
 	type ReasoningPart,
 	type UserMessagePart,
 	type MessagePart,
-	type ChatMessage,
 } from './types/agent';
 
 export {

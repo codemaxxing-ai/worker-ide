@@ -1,9 +1,9 @@
 import { Buffer } from 'node:buffer';
 
-import type { FileInfo, FileStat } from '@cloudflare/shell';
+import type { WorkspaceFileInfo as FileInfo, WorkspaceFileInfo as FileStat } from '@shared/workspace-file';
 
 /**
- * The minimal subset of `@cloudflare/shell`'s `Workspace` that the node:fs-style
+ * The project workspace operations that the node:fs-style
  * adapter needs. A concrete `Workspace` (inside the Durable Object) satisfies
  * this directly; a cross-DO RPC proxy (`WorkspaceClient`, on the worker side)
  * implements the same shape by forwarding each call to the project DO.

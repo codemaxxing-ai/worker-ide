@@ -1,3 +1,4 @@
+import { routeSubAgentRequest } from 'agents';
 import { env } from 'cloudflare:workers';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -7,7 +8,7 @@ import { parseProjectRoute, PROJECT_ROOT } from './project-context';
 import { UNSAFE_METHODS, hasValidAppRequestOrigin, hasValidWebSocketOrigin } from './security';
 import * as authSchema from '../db/auth-schema';
 import { getDomainConfiguration } from '../lib/domain-configuration';
-import { agentRunnerNamespace, coordinatorNamespace, filesystemNamespace } from '../lib/durable-object-namespaces';
+import { projectAgentNamespace, coordinatorNamespace, filesystemNamespace } from '../lib/durable-object-namespaces';
 import { runWithProjectStub } from '../lib/project-fs';
 import { toDurableObjectId } from '../lib/project-id';
 import { apiRoutes } from '../routes';
@@ -121,7 +122,7 @@ projectApp.use('*', async (c, next) => {
 		);
 	}
 
-	// Agent SDK WebSocket — forward to the AgentRunner DO.
+	// Authenticated SDK transport for the project directory and its catalogued chats.
 	// The Agent class (from agents SDK) handles the WebSocket upgrade,
 	// state sync, and @callable RPC natively.
 	//
@@ -137,15 +138,18 @@ projectApp.use('*', async (c, next) => {
 		if (c.req.raw.headers.get('Upgrade') === 'websocket' && !hasValidWebSocketOrigin(c.req.raw, appOrigin)) {
 			return new Response('Forbidden', { status: 403 });
 		}
-		const agentStub = agentRunnerNamespace.getByName(`agent:${projectId}`);
+		const agentStub = projectAgentNamespace.getByName(`agent:${projectId}`);
 		const agentUrl = new URL(c.req.url);
+		const childPathIndex = subPath.indexOf('/sub/');
 		agentUrl.pathname = '/';
 		const agentHeaders = new Headers(c.req.raw.headers);
 		agentHeaders.set('x-partykit-room', `agent:${projectId}`);
 		agentHeaders.set('x-worker-ide-user-id', userId);
 		agentHeaders.set('x-worker-ide-app-origin', appOrigin);
 		agentHeaders.set('x-worker-ide-content-origin', getDomainConfiguration(c.env).contentOrigin);
-		return agentStub.fetch(new Request(agentUrl, { ...c.req.raw, headers: agentHeaders }));
+		const agentRequest = new Request(agentUrl, { ...c.req.raw, headers: agentHeaders });
+		if (childPathIndex !== -1) return routeSubAgentRequest(agentRequest, agentStub, { fromPath: subPath.slice(childPathIndex) });
+		return agentStub.fetch(agentRequest);
 	}
 
 	if (subPath === '/__ws' || subPath.startsWith('/__ws')) {

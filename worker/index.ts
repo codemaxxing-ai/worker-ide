@@ -1,5 +1,5 @@
 export {
-	AgentRunner,
+	ProjectAgent,
 	DurableObjectFilesystem,
 	ProjectCoordinatorV2,
 	ProjectMetadata,

@@ -1,78 +1,49 @@
+import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 
-import { MCP_SERVERS } from '@shared/constants';
+import { createConfiguredMcpConnectors } from './mcp';
+import { createMockContext } from './tools/test-helpers';
 
-import { callConfiguredMcpTool, createConfiguredMcpConnectors, registerConfiguredMcpServers } from './mcp';
-
-import type { Agent } from 'agents';
-
-function createAgent(overrides?: Record<string, unknown>): Agent<Env, unknown> {
-	return {
-		addMcpServer: vi.fn(),
-		mcp: {
-			waitForConnections: vi.fn(),
-			listServers: vi.fn(() => []),
-			mcpConnections: {},
-		},
-		...overrides,
-	} as unknown as Agent<Env, unknown>;
-}
-
-describe('configured MCP servers', () => {
-	it('registers each server with its stable ID', async () => {
-		const addMcpServer = vi.fn();
-		const agent = createAgent({ addMcpServer });
-
-		await registerConfiguredMcpServers(agent);
-
-		for (const server of MCP_SERVERS) {
-			expect(addMcpServer).toHaveBeenCalledWith(server.name, server.endpoint, { id: server.id });
-		}
+describe('shared project MCP catalog', () => {
+	it('exposes configured namespaces and calls the project proxy with validated inputs', async () => {
+		const project = env.DurableObjectFilesystem.getByName(crypto.randomUUID());
+		await runInDurableObject(project, async (_instance, state) => {
+			const call = vi.fn(async () => 'Documentation');
+			const connectors = await createConfiguredMcpConnectors(
+				createMockContext({
+					ctx: state,
+					callMcpTool: call,
+					listMcpTools: async () => [
+						{
+							serverId: 'cloudflare-docs',
+							name: 'search_cloudflare_documentation',
+							description: 'Search docs',
+							inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false },
+						},
+					],
+				}),
+			);
+			const connector = connectors[0];
+			if (!connector) throw new Error('Missing connector');
+			expect(connector.name()).toBe('cloudflare_docs');
+			expect(await connector.executeTool('search_cloudflare_documentation', { query: 'Durable Objects' }, { executionId: 'search' })).toBe(
+				'Documentation',
+			);
+			expect(call).toHaveBeenCalledWith('cloudflare-docs', 'search_cloudflare_documentation', { query: 'Durable Objects' });
+			await expect(connector.executeTool('search_cloudflare_documentation', { query: 42 }, { executionId: 'invalid' })).rejects.toThrow();
+			expect(call).toHaveBeenCalledOnce();
+		});
 	});
-
-	it('creates a named connector from a restored connection', async () => {
-		const waitForConnections = vi.fn();
-		const connection = { client: { callTool: vi.fn() }, tools: [] };
-		const agent = createAgent({
-			mcp: {
-				waitForConnections,
-				listServers: vi.fn(() => [{ id: 'cloudflare-docs' }]),
-				mcpConnections: { 'cloudflare-docs': connection },
-			},
+	it('does not expose servers outside the configured catalog', async () => {
+		const project = env.DurableObjectFilesystem.getByName(crypto.randomUUID());
+		await runInDurableObject(project, async (_instance, state) => {
+			const connectors = await createConfiguredMcpConnectors(
+				createMockContext({
+					ctx: state,
+					listMcpTools: async () => [{ serverId: 'unconfigured', name: 'danger', inputSchema: { type: 'object' } }],
+				}),
+			);
+			expect(connectors).toEqual([]);
 		});
-
-		const connectors = await createConfiguredMcpConnectors(agent, {} as DurableObjectState, {} as Env);
-
-		expect(waitForConnections).toHaveBeenCalledWith();
-		expect(connectors).toHaveLength(1);
-		expect(connectors[0]?.name()).toBe('cloudflare_docs');
-	});
-
-	it('calls a tool through the restored Agents SDK connection', async () => {
-		const callTool = vi.fn().mockResolvedValue({
-			content: [
-				{ type: 'text', text: 'first result' },
-				{ type: 'text', text: 'second result' },
-			],
-		});
-		const waitForConnections = vi.fn();
-		const agent = createAgent({
-			mcp: {
-				waitForConnections,
-				listServers: vi.fn(),
-				mcpConnections: { 'cloudflare-docs': { client: { callTool } } },
-			},
-		});
-
-		const result = await callConfiguredMcpTool(agent, 'cloudflare-docs', 'search_cloudflare_documentation', {
-			query: 'Durable Objects',
-		});
-
-		expect(waitForConnections).toHaveBeenCalledWith();
-		expect(callTool).toHaveBeenCalledWith({
-			name: 'search_cloudflare_documentation',
-			arguments: { query: 'Durable Objects' },
-		});
-		expect(result).toBe('first result\nsecond result');
 	});
 });

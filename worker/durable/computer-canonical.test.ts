@@ -2,7 +2,6 @@ import { Workspace as Computer } from '@cloudflare/computer';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import { computerStorage } from '../lib/computer-storage';
 import { ComputerWorkspace } from '../lib/computer-workspace';
 
 import type { ProjectFilesystem } from './project-filesystem';
@@ -84,7 +83,7 @@ describe('Canonical Computer workspaces', () => {
 			await expect(instance.computerGrep('preserved', '/')).rejects.toThrow('no verified Computer store');
 			await expect(instance.wsWriteFile('/source.txt', 'replacement')).rejects.toThrow('no verified Computer store');
 			await expect(instance.computerExec('printf replacement > source.txt', {}, 'guard')).rejects.toThrow('no verified Computer store');
-			const retained = new ComputerWorkspace(new Computer({ storage: computerStorage(state.storage) }));
+			const retained = new ComputerWorkspace(new Computer({ storage: state.storage }));
 			expect(await retained.readFile('/source.txt')).toBe('preserved canonical bytes');
 			expect(state.storage.kv.get('project-active-store')).toBeUndefined();
 		});

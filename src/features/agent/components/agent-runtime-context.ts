@@ -1,6 +1,5 @@
 import { createContext, useContext } from 'react';
 
-import type { AgentRunnerStub } from '../lib/agent-stub';
 import type { InputSegment } from '../lib/input-segments';
 import type { AgentState } from '@shared/agent-state';
 import type { Dispatch, SetStateAction } from 'react';
@@ -22,13 +21,14 @@ export interface ImageAttachment {
 export interface AgentRuntimeHandle {
 	identified: boolean;
 	state: AgentState | undefined;
-	stub: AgentRunnerStub;
 	addEventListener: (type: string, listener: () => void) => void;
 	removeEventListener: (type: string, listener: () => void) => void;
 }
 
 export interface AgentRuntimeValue {
 	agent: AgentRuntimeHandle;
+	activeSessionId?: string;
+	selectSession: (id?: string) => void;
 	agentConnectionState: AgentConnectionState;
 	isConnected: boolean;
 	segments: InputSegment[];

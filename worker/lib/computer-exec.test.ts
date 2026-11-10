@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ComputerContainerSnapshots } from './computer-container-snapshots';
 import { ComputerOutputObserver } from './computer-output-observer';
-import { computerStorage } from './computer-storage';
 
 import type { WorkspaceFilesystemStub } from '@cloudflare/computer';
 
@@ -20,7 +19,7 @@ describe('Computer execution lifecycle without Docker', () => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
 			const shell = new ControlledShell(createExecutionContext(), { HOST: { getWorkspace: () => project.__getWorkspaceStub() } });
 			const computer = new Computer({
-				storage: computerStorage(state.storage),
+				storage: state.storage,
 				backends: [
 					new WorkerShellBackend({ id: 'container', source: { type: 'external-runtime', connect: () => shell }, egress: { mode: 'none' } }),
 				],
@@ -91,7 +90,7 @@ describe('Computer execution lifecycle without Docker', () => {
 			await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
 				const shell = new ControlledShell(createExecutionContext(), { HOST: { getWorkspace: () => project.__getWorkspaceStub() } });
 				const computer = new Computer({
-					storage: computerStorage(state.storage),
+					storage: state.storage,
 					backends: [
 						new WorkerShellBackend({
 							id: 'container',
@@ -167,7 +166,7 @@ describe('Computer execution lifecycle without Docker', () => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
 			const shell = new ControlledShell(createExecutionContext(), { HOST: { getWorkspace: () => project.__getWorkspaceStub() } });
 			const computer = new Computer({
-				storage: computerStorage(state.storage),
+				storage: state.storage,
 				backends: [
 					new WorkerShellBackend({ id: backend, source: { type: 'external-runtime', connect: () => shell }, egress: { mode: 'none' } }),
 				],
@@ -200,7 +199,7 @@ describe('Computer execution lifecycle without Docker', () => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
 			const shell = new ControlledShell(createExecutionContext(), { HOST: { getWorkspace: () => project.__getWorkspaceStub() } });
 			const computer = new Computer({
-				storage: computerStorage(state.storage),
+				storage: state.storage,
 				backends: [
 					new WorkerShellBackend({ id: 'container', source: { type: 'external-runtime', connect: () => shell }, egress: { mode: 'none' } }),
 				],
@@ -233,7 +232,7 @@ describe('Computer execution lifecycle without Docker', () => {
 
 	it('releases queued editor writes after validation and container preparation fail before dispatch', async () => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
-			const computer = new Computer({ storage: computerStorage(state.storage) });
+			const computer = new Computer({ storage: state.storage });
 			Reflect.set(project, 'computerInstance', computer);
 			Reflect.set(project, 'getWorkspaceContainer', () => ({
 				setInactivityTimeout: async () => {
@@ -266,7 +265,7 @@ describe('Computer execution lifecycle without Docker', () => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
 			const shell = new ControlledShell(createExecutionContext(), { HOST: { getWorkspace: () => project.__getWorkspaceStub() } });
 			const computer = new Computer({
-				storage: computerStorage(state.storage),
+				storage: state.storage,
 				backends: [
 					new WorkerShellBackend({ id: 'shell', source: { type: 'external-runtime', connect: () => shell }, egress: { mode: 'none' } }),
 				],
@@ -295,17 +294,17 @@ describe('Computer execution lifecycle without Docker', () => {
 			const id = crypto.randomUUID();
 			const execution = project.computerExec('controlled command', { id, backend: 'shell' }, 'first');
 			await ready;
-			expect(await project.drainWorkspaceChanges('first')).toEqual([]);
+			expect(await project.claimAgentChanges('first', 'test-operation', crypto.randomUUID())).toEqual([]);
 			const session = project.wsWriteFile('/source.txt', 'second', 'second');
 			const editor = project.writeFileContent('/source.txt', 'editor');
 			await project.cancelComputerExecution(id, 'first');
 			const result = await execution;
 			await Promise.all([session, editor]);
 			expect(result).toMatchObject({ status: 'cancelled', syncStatus: 'complete', exitCode: 130 });
-			expect(await project.drainWorkspaceChanges('first')).toMatchObject([
+			expect(await project.claimAgentChanges('first', 'test-operation', crypto.randomUUID())).toMatchObject([
 				{ path: '/source.txt', beforeContent: 'baseline', afterContent: 'partial' },
 			]);
-			expect(await project.drainWorkspaceChanges('second')).toMatchObject([
+			expect(await project.claimAgentChanges('second', 'test-operation', crypto.randomUUID())).toMatchObject([
 				{ path: '/source.txt', beforeContent: 'partial', afterContent: 'second' },
 			]);
 			expect(await project.wsReadFile('/source.txt')).toBe('editor');
@@ -349,7 +348,7 @@ describe('Computer execution lifecycle without Docker', () => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
 			const shell = new ControlledShell(createExecutionContext(), { HOST: { getWorkspace: () => project.__getWorkspaceStub() } });
 			const computer = new Computer({
-				storage: computerStorage(state.storage),
+				storage: state.storage,
 				backends: [
 					new WorkerShellBackend({ id: 'shell', source: { type: 'external-runtime', connect: () => shell }, egress: { mode: 'none' } }),
 				],
@@ -367,7 +366,7 @@ describe('Computer execution lifecycle without Docker', () => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
 			const shell = new ControlledShell(createExecutionContext(), { HOST: { getWorkspace: () => project.__getWorkspaceStub() } });
 			const computer = new Computer({
-				storage: computerStorage(state.storage),
+				storage: state.storage,
 				backends: [
 					new WorkerShellBackend({ id: 'container', source: { type: 'external-runtime', connect: () => shell }, egress: { mode: 'none' } }),
 				],
@@ -389,7 +388,7 @@ describe('Computer execution lifecycle without Docker', () => {
 			await expect(project.computerExec('foreground command', { id, backend: 'container' }, 'session')).rejects.toThrow(
 				'cannot be released until synchronization succeeds',
 			);
-			expect(await project.drainWorkspaceChanges('session')).toEqual([]);
+			expect(await project.claimAgentChanges('session', 'test-operation', crypto.randomUUID())).toEqual([]);
 			state.storage.sql.exec(
 				'INSERT INTO computer_mutation_queue (operation, arguments) VALUES (?, ?)',
 				'writeFileContent',
@@ -404,7 +403,7 @@ describe('Computer execution lifecycle without Docker', () => {
 			await project.alarm();
 			expect(commands).toBe(1);
 			expect(await project.wsReadFile('/source.txt')).toBe('editor');
-			expect(await project.drainWorkspaceChanges('session')).toMatchObject([
+			expect(await project.claimAgentChanges('session', 'test-operation', crypto.randomUUID())).toMatchObject([
 				{ path: '/source.txt', beforeContent: 'baseline', afterContent: 'command' },
 			]);
 			expect(project.getComputerExecutions('session')).toMatchObject([
@@ -419,7 +418,7 @@ describe('Computer execution lifecycle without Docker', () => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
 			const shell = new ControlledShell(createExecutionContext(), { HOST: { getWorkspace: () => project.__getWorkspaceStub() } });
 			const computer = new Computer({
-				storage: computerStorage(state.storage),
+				storage: state.storage,
 				backends: [
 					new WorkerShellBackend({ id: 'container', source: { type: 'external-runtime', connect: () => shell }, egress: { mode: 'none' } }),
 				],

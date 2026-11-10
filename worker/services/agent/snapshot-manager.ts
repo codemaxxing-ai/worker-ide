@@ -27,7 +27,13 @@ export async function initSnapshot(
 
 	// Derive label from the last user message
 	const lastUserMessage = [...messages].toReversed().find((m) => m.role === 'user');
-	const promptText = typeof lastUserMessage?.content === 'string' ? lastUserMessage.content : '';
+	const promptText =
+		typeof lastUserMessage?.content === 'string'
+			? lastUserMessage.content
+			: (lastUserMessage?.content ?? [])
+					.filter((part) => part.type === 'text')
+					.map((part) => part.text)
+					.join('\n');
 	const label = promptText.slice(0, 50) + (promptText.length > 50 ? '...' : '');
 
 	const metadata: SnapshotMetadata = {
@@ -38,8 +44,6 @@ export async function initSnapshot(
 		changes: [],
 	};
 	await fs.writeFile(`${snapshotDirectory}/metadata.json`, JSON.stringify(metadata, undefined, 2));
-
-	await cleanupOldSnapshots(projectRoot, 10);
 
 	sendEvent('snapshot_created', {
 		id: snapshotId,
@@ -59,20 +63,19 @@ export async function initSnapshot(
  */
 export async function addFileToSnapshot(context: SnapshotContext, change: FileChange): Promise<void> {
 	if (context.savedPaths.has(change.path)) return;
-
-	if (change.action !== 'create' && change.beforeContent !== undefined) {
-		const filePath = `${context.directory}${change.path}`;
-		const directory = filePath.slice(0, filePath.lastIndexOf('/'));
-		if (directory && directory !== context.directory) {
-			await fs.mkdir(directory, { recursive: true });
-		}
-		await fs.writeFile(filePath, change.beforeContent);
-	}
-
 	try {
 		const metadataPath = `${context.directory}/metadata.json`;
-		const raw = await fs.readFile(metadataPath, 'utf8');
-		const metadata: SnapshotMetadata = JSON.parse(raw);
+		const metadata: SnapshotMetadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+		if (metadata.changes.some((entry) => entry.path === change.path)) {
+			context.savedPaths.add(change.path);
+			return;
+		}
+		if (change.action !== 'create' && change.beforeContent !== undefined) {
+			const path = `${context.directory}${change.path}`;
+			const directory = path.slice(0, path.lastIndexOf('/'));
+			if (directory && directory !== context.directory) await fs.mkdir(directory, { recursive: true });
+			await fs.writeFile(path, change.beforeContent);
+		}
 		metadata.changes.push({
 			path: change.path,
 			action: change.action,
@@ -87,40 +90,6 @@ export async function addFileToSnapshot(context: SnapshotContext, change: FileCh
 	}
 }
 
-/**
- * Remove old snapshots beyond the keep count.
- *
- * Session-aware cleanup (preserving snapshots referenced by surviving
- * pending changes) is handled separately by pruneOldSessions in the
- * AgentRunner DO.
- */
-async function cleanupOldSnapshots(projectRoot: string, keepCount: number): Promise<void> {
-	const snapshotsDirectory = `${projectRoot}/.agent/snapshots`;
-
-	try {
-		const entries = await fs.readdir(snapshotsDirectory);
-		const snapshots: Array<{ id: string; timestamp: number }> = [];
-
-		for (const entry of entries) {
-			try {
-				const metadataPath = `${snapshotsDirectory}/${entry}/metadata.json`;
-				const metadataRaw = await fs.readFile(metadataPath, 'utf8');
-				const metadata: SnapshotMetadata = JSON.parse(metadataRaw);
-				snapshots.push({ id: entry, timestamp: metadata.timestamp });
-			} catch {
-				// No-op
-			}
-		}
-
-		snapshots.sort((a, b) => b.timestamp - a.timestamp);
-
-		for (const snapshot of snapshots.slice(keepCount)) {
-			await deleteDirectoryRecursive(`${snapshotsDirectory}/${snapshot.id}`);
-		}
-	} catch {
-		// No-op
-	}
-}
 export async function deleteDirectoryRecursive(directoryPath: string): Promise<void> {
 	try {
 		const entries = await fs.readdir(directoryPath, { withFileTypes: true });

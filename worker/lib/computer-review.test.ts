@@ -30,7 +30,7 @@ describe('Computer review and mutation boundaries', () => {
 		const filesystem = createProjectFileSystem(project, '/project', 'session');
 		const snapshot = await runWithProjectStub(project, () => initSnapshot('/project', 'session', [], () => {}), '/project', 'session');
 		await filesystem.writeFile('/project/indirect', 'changed');
-		const changes = await project.drainWorkspaceChanges('session');
+		const changes = await project.claimAgentChanges('session', 'test-operation', crypto.randomUUID());
 		expect(changes).toMatchObject([{ path: '/src/source.txt', beforeContent: 'baseline', afterContent: 'changed' }]);
 		expect(changes).toHaveLength(1);
 		await runWithProjectStub(
@@ -56,7 +56,7 @@ describe('Computer review and mutation boundaries', () => {
 		await filesystem.writeFile('/project/shortcut/binary', new Uint8Array([0, 128, 42]));
 		await filesystem.appendFile('/project/shortcut/text', ' appended');
 		await filesystem.writeFile('/project/new-link', 'created');
-		const changes = await project.drainWorkspaceChanges('session');
+		const changes = await project.claimAgentChanges('session', 'test-operation', crypto.randomUUID());
 		expect(changes).toHaveLength(3);
 		expect(changes).toEqual(
 			expect.arrayContaining([
@@ -209,7 +209,7 @@ describe('Computer review and mutation boundaries', () => {
 		const original = new Uint8Array(2_500_000).fill(255);
 		await project.wsWriteFileBytes('/large.bin', original);
 		await project.wsWriteFileBytes('/large.bin', new Uint8Array([0, 128, 42]), 'binary-session');
-		const changes = await project.drainWorkspaceChanges('binary-session');
+		const changes = await project.claimAgentChanges('binary-session', 'test-operation', crypto.randomUUID());
 		expect(changes).toMatchObject([{ path: '/large.bin', isBinary: true, afterBytes: 'AIAq' }]);
 		expect(changes[0]?.beforeBytes).toHaveLength(Math.ceil(original.length / 3) * 4);
 		expect(changes[0]?.beforeBytes?.slice(0, 8)).toBe('////////');
@@ -220,8 +220,31 @@ describe('Computer review and mutation boundaries', () => {
 		const original = 'editor text\n'.repeat(200_000);
 		await project.wsWriteFile('/large.txt', original);
 		await project.wsWriteFile('/large.txt', 'command change', 'text-session');
-		const changes = await project.drainWorkspaceChanges('text-session');
+		const changes = await project.claimAgentChanges('text-session', 'test-operation', crypto.randomUUID());
 		expect(changes).toMatchObject([{ path: '/large.txt', isBinary: false, afterContent: 'command change' }]);
 		expect(changes[0]?.beforeContent).toBe(original);
+	});
+	it('deduplicates restoration without overwriting edits made after a lost reply', async () => {
+		const project = env.DurableObjectFilesystem.getByName(crypto.randomUUID());
+		await project.wsWriteFile('/source.txt', 'original');
+		const snapshot = await runWithProjectStub(project, () => initSnapshot('/project', 'session', [], () => {}), '/project', 'session');
+		await runWithProjectStub(
+			project,
+			() => addFileToSnapshot(snapshot, { path: '/source.txt', action: 'edit', beforeContent: 'original', isBinary: false }),
+			'/project',
+			'session',
+		);
+		await project.wsWriteFile('/source.txt', 'agent edit');
+		const operationId = crypto.randomUUID();
+		const first = await project.restoreSnapshots([{ snapshotId: snapshot.id }], operationId);
+		expect(first.failed).toEqual([]);
+		await project.wsWriteFile('/source.txt', 'later editor change');
+		expect(await project.restoreSnapshots([{ snapshotId: snapshot.id }], operationId)).toEqual(first);
+		expect(await project.wsReadFile('/source.txt')).toBe('later editor change');
+		await expect(
+			(async () => {
+				await project.restoreSnapshots([{ snapshotId: 'different' }], operationId);
+			})(),
+		).rejects.toThrow('already used');
 	});
 });

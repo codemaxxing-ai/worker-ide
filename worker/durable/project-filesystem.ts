@@ -5,7 +5,7 @@ import { ContainerBackend } from '@cloudflare/computer/backends/container';
 import { WorkerShellBackend } from '@cloudflare/computer/backends/worker-shell';
 import { createGitClient } from '@cloudflare/computer/git';
 import jqCommands from '@cloudflare/computer/shell/jq';
-import { createAITools } from '@cloudflare/computer/tools';
+import { createAITools } from '@cloudflare/computer/tools/ai-sdk';
 import { DurableObject, exports } from 'cloudflare:workers';
 import { z } from 'zod';
 
@@ -16,6 +16,7 @@ import { toolInputSchemas } from '@shared/validation/tools';
 import { WorkerBuildBudget, isWorkerResourceLimit } from '@shared/worker-resource-budget';
 
 import { GitService } from './git-service';
+import { AgentWorkspace } from '../lib/agent-workspace';
 import { selectComputerBackend } from '../lib/computer-backend';
 import { ComputerChanges } from '../lib/computer-changes';
 import { ComputerContainerHost, ComputerContainerSnapshots } from '../lib/computer-container-snapshots';
@@ -26,7 +27,6 @@ import { ComputerProtectedFiles } from '../lib/computer-protected-files';
 import { resolveComputerReview } from '../lib/computer-review';
 import { ComputerShellWorkspace } from '../lib/computer-shell-workspace';
 import { restoreComputerSnapshots } from '../lib/computer-snapshots';
-import { computerStorage } from '../lib/computer-storage';
 import { ComputerWorkspace, computerPath, projectPath } from '../lib/computer-workspace';
 import { getDomainConfiguration } from '../lib/domain-configuration';
 import { coordinatorNamespace } from '../lib/durable-object-namespaces';
@@ -55,12 +55,12 @@ import type { ComputerOutputObserver } from '../lib/computer-output-observer';
 import type { ManagedConfigurationTool } from '../lib/managed-configuration';
 import type { PreviewBootstrap, PreviewBootstrapInputs } from '../lib/preview-bootstrap';
 import type { RequestOriginContext } from '../services/agent/request-origin-context';
-import type { FileInfo, FileStat } from '@cloudflare/shell';
 import type { ComputerExecOptions, ComputerExecResult, ComputerReviewOptions } from '@shared/computer';
 import type { ContainerCapacity } from '@shared/container-capacity';
 import type { ProjectFilesystemRpc } from '@shared/project-filesystem-rpc';
 import type { RuntimeDecision, RuntimePhase, RuntimeStatus, RuntimeSurface, RuntimeReason } from '@shared/runtime-status';
 import type { AssetSettings, BindingsConfig, GitBranchInfo, GitCommitEntry, GitFileDiff, GitMergeResult } from '@shared/types';
+import type { WorkspaceFileInfo as FileInfo, WorkspaceFileInfo as FileStat } from '@shared/workspace-file';
 
 interface SeedFile {
 	path: string;
@@ -87,6 +87,8 @@ interface SeedFile {
  * at first touch, i.e. a create.
  */
 const COMPUTER_MUTATIONS = new Set([
+	'resetAgentArtifacts',
+	'settleAgentTurn',
 	'wsWriteFile',
 	'wsWriteFileBytes',
 	'wsAppendFile',
@@ -345,7 +347,7 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 			ignore: ['**/node_modules', '**/.cache', '**/.bun', '**/.next', '**/dist', '**/coverage', '**/tmp'],
 		});
 		this.computerInstance = new Computer({
-			storage: computerStorage(this.ctx.storage),
+			storage: this.ctx.storage,
 			git: createGitClient({ adapter: async () => new WorkspaceFsAdapter(this.workspace) }),
 			backends: [
 				new WorkerShellBackend({
@@ -365,6 +367,23 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 	private get workspace(): ComputerWorkspace {
 		this.assertComputerStore();
 		return (this.computerAdapter ??= new ComputerWorkspace(this.computer));
+	}
+
+	getAgentWorkspace(sessionId: string): AgentWorkspace {
+		if (!sessionId) throw new Error('A session is required');
+		return new AgentWorkspace(this.computer, this, sessionId);
+	}
+
+	/** Fresh agent namespaces discard only generated agent data after existing mutations settle. */
+	async resetAgentArtifacts(): Promise<void> {
+		await this.mutate('resetAgentArtifacts', [], async () => {
+			for (const [, record] of this.ctx.storage.kv.list<{ status: string }>({ prefix: 'computer-execution:' })) {
+				if (['starting', 'running', 'synchronization-pending'].includes(record.status))
+					throw new Error('Workspace execution must finish synchronizing before agent setup.');
+			}
+			for (const directory of ['sessions', 'snapshots', 'plans', 'todo', 'debug-logs'])
+				await this.computer.fs.rm(`/workspace/.agent/${directory}`, { recursive: true, force: true });
+		});
 	}
 
 	private get queue(): ComputerMutationQueue {
@@ -935,9 +954,29 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 		}
 	}
 
-	async drainWorkspaceChanges(writerId?: string) {
-		if (writerId === undefined) return [];
-		return this.changes.drain(writerId);
+	async claimAgentChanges(writerId: string, submissionId: string, receiptId: string) {
+		const active = this.ctx.storage.kv.get<string>(`computer-session-turn:${writerId}`);
+		if (active !== undefined && active !== submissionId) throw new Error('Cannot claim changes from a different turn');
+		return this.changes.claim(writerId, submissionId, receiptId);
+	}
+	getAgentChangeReceiptIds(writerId: string, submissionId: string): string[] {
+		return this.changes.pending(writerId, submissionId);
+	}
+	readAgentChangeReceipt(writerId: string, receiptId: string) {
+		return this.changes.readReceipt(writerId, receiptId);
+	}
+	acknowledgeAgentChanges(writerId: string, receiptId: string): void {
+		this.changes.acknowledge(writerId, receiptId);
+	}
+	async settleAgentTurn(writerId: string): Promise<void> {
+		await this.queue.run('settleAgentTurn', [writerId], async () => {
+			if (
+				this.getComputerExecutions(writerId).some((execution) =>
+					['starting', 'running', 'synchronization-pending'].includes(execution.status),
+				)
+			)
+				throw new ComputerSynchronizationPending('Workspace execution is still synchronizing.');
+		});
 	}
 
 	private git(): GitService {
@@ -1211,8 +1250,20 @@ export class ProjectFilesystem extends DurableObject<Env> implements ProjectFile
 		});
 	}
 
-	async restoreSnapshots(selections: Array<{ snapshotId: string; path?: string }>) {
-		return this.mutate('restoreSnapshots', [selections], () => restoreComputerSnapshots(this.workspace, selections));
+	async restoreSnapshots(selections: Array<{ snapshotId: string; path?: string }>, operationId = crypto.randomUUID()) {
+		if (!/^[a-zA-Z0-9-]{1,128}$/.test(operationId)) throw new Error('Invalid restoration identity');
+		return this.mutate('restoreSnapshots', [selections, operationId], async () => {
+			const key = `restoration:${operationId}`;
+			const fingerprint = JSON.stringify(selections);
+			const receipt = this.ctx.storage.kv.get<{ fingerprint: string; result: Awaited<ReturnType<typeof restoreComputerSnapshots>> }>(key);
+			if (receipt) {
+				if (receipt.fingerprint !== fingerprint) throw new Error('Restoration identity already used');
+				return receipt.result;
+			}
+			const result = await restoreComputerSnapshots(this.workspace, selections);
+			this.ctx.storage.kv.put(key, { fingerprint, result });
+			return result;
+		});
 	}
 
 	async resolveWorkspaceReview(options: ComputerReviewOptions): Promise<boolean> {

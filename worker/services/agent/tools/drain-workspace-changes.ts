@@ -3,8 +3,6 @@ import { Buffer } from 'node:buffer';
 import { createHmrUpdateForFile } from '@shared/types';
 import { coordinatorNamespace } from '@worker/lib/durable-object-namespaces';
 import { isHiddenPath } from '@worker/lib/path-utilities';
-import { fs } from '@worker/lib/project-fs';
-import { PROJECT_ROOT } from '@worker/lib/workspace-client';
 
 import type { FileChange, SendEventFunction, ToolExecutorContext } from '../types';
 
@@ -14,19 +12,7 @@ async function triggerCoordinatorHmr(projectId: string, paths: string[]): Promis
 	await Promise.all(paths.map((path) => coordinator.triggerUpdate(createHmrUpdateForFile(path))));
 }
 
-/**
- * After each sandbox run, reflect workspace writes made via `state.*`/`bash`
- * back to the UI (file-change events, preview HMR, snapshots).
- *
- * `triggerHmr` is injectable so this can be unit-tested without the coordinator
- * Durable Object; it defaults to the real coordinator HMR push.
- *
- * `alreadyRecordedPaths` names paths a tool already pushed into `queryChanges`
- * itself. In Code Mode `tools.*` run in a separate RPC facet, so their pushes
- * never reach this array and the set is empty. In the no-loader fallback the
- * tools run in this context and DO push, so the set suppresses the duplicate
- * `queryChanges` entry while still emitting the UI event and HMR.
- */
+/** Claim immutable revisions for previews and review; finalization acknowledges each durable receipt. */
 export async function drainWorkspaceChanges(
 	context: ToolExecutorContext,
 	sendEvent: SendEventFunction,
@@ -36,7 +22,12 @@ export async function drainWorkspaceChanges(
 ): Promise<void> {
 	// Per-session drain: only the changes this session made, each enriched with
 	// before/after content (true no-ops already dropped by the DO).
-	using changes = await context.fsStub.drainWorkspaceChanges(context.sessionId);
+	if (!context.sessionId) throw new Error('Workspace changes require an owning session');
+	using changes = await context.fsStub.claimAgentChanges(
+		context.sessionId,
+		context.reviewSubmissionId ?? context.submissionId ?? context.sessionId,
+		crypto.randomUUID(),
+	);
 	const seen = new Set<string>();
 	const hmrPaths: string[] = [];
 
@@ -47,21 +38,7 @@ export async function drainWorkspaceChanges(
 		seen.add(path);
 
 		const action = change.type === 'create' ? 'create' : change.type === 'delete' ? 'delete' : 'edit';
-		// The DO provides after-content; fall back to a live read only when it
-		// could not (e.g. an unattributed legacy drain returning no content).
-		let afterContent = change.afterContent;
-		if (
-			afterContent === undefined &&
-			action !== 'delete' &&
-			!change.isBinary &&
-			(change.entryType === undefined || change.entryType === 'file')
-		) {
-			try {
-				afterContent = await fs.readFile(`${PROJECT_ROOT}${path}`, 'utf8');
-			} catch {
-				afterContent = undefined;
-			}
-		}
+		const afterContent = change.afterContent;
 
 		// The sender deduplicates identical revisions, never subsequent writes to a path.
 		sendEvent('file_changed', {
@@ -77,7 +54,7 @@ export async function drainWorkspaceChanges(
 		});
 
 		// Skip the record only when the tool already pushed this path itself
-		// (no-loader fallback); the UI event and HMR above still fire.
+		// The UI event and HMR still fire.
 		if (!alreadyRecordedPaths.has(path)) {
 			queryChanges.push({
 				path,

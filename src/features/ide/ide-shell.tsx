@@ -13,10 +13,10 @@ import { useIsMobile, useProjectSocket, useResolvedTheme } from '@/hooks/index';
 import { useQueuedSaveFlusher } from '@/hooks/use-queued-save-flusher';
 import { downloadProject } from '@/lib/api-client';
 import { usePreviewUrl } from '@/lib/preview-origin';
-import { selectIsProcessing, useStore } from '@/lib/store';
+import { useStore } from '@/lib/store';
 
 import { DesktopLayout } from './desktop-layout';
-import { IDEHeader } from './ide-header';
+import { ProjectIDEHeader } from './ide-header';
 import { MobileLayout } from './mobile-layout';
 import { ProjectDeepLinkHandler } from './project-deep-link-handler';
 import { useEditorSessionPersistence } from './use-editor-session-persistence';
@@ -76,7 +76,6 @@ export function IDEShell({
 
 	// Agent panel toggle
 	const toggleAgentPanel = useStore((state) => state.toggleAgentPanel);
-	const isAgentProcessing = useStore(selectIsProcessing);
 
 	// Custom hooks
 	const projectNameState = useProjectName({ projectId });
@@ -165,12 +164,11 @@ export function IDEShell({
 				<ProjectDeepLinkHandler projectId={projectId} deepLink={initialProjectDeepLink} onHandled={onInitialProjectDeepLinkHandled} />
 				<title>{projectNameState.projectName ? `${projectNameState.projectName} | Codemaxxing` : 'Codemaxxing'}</title>
 				<div className="flex h-full flex-col overflow-hidden bg-bg-primary">
-					<IDEHeader
+					<ProjectIDEHeader
 						projectNameState={projectNameState}
 						isMobile={isMobile}
 						agentPanelVisible={layouts.agentPanelVisible}
 						toggleAgentPanel={toggleAgentPanel}
-						isAgentProcessing={isAgentProcessing}
 						mobileMenuOpen={mobileMenuOpen}
 						setMobileMenuOpen={setMobileMenuOpen}
 						onDownload={handleDownload}

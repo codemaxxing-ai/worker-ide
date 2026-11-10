@@ -1,7 +1,7 @@
 import { WorkspaceFsAdapter } from './workspace-fs-adapter';
 
 import type { WorkspaceLike } from './workspace-fs-adapter';
-import type { FileInfo, FileStat } from '@cloudflare/shell';
+import type { WorkspaceFileInfo as FileInfo, WorkspaceFileInfo as FileStat } from '@shared/workspace-file';
 
 type Entry = { type: 'file'; bytes: Uint8Array } | { type: 'directory' } | { type: 'symlink'; target: string };
 

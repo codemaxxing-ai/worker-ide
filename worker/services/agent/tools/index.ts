@@ -1,11 +1,11 @@
 import { Validator } from '@cfworker/json-schema';
-import { createWorkspaceStateBackend } from '@cloudflare/shell';
+import { createCodemodeRuntime, DynamicWorkerExecutor, truncateResult } from '@cloudflare/codemode';
+import { ToolSetConnector } from '@cloudflare/codemode/ai';
 import { asSchema, jsonSchema } from 'ai';
-import { env } from 'cloudflare:workers';
+import { z } from 'zod';
 
 import { ToolExecutionError } from '@shared/tool-errors';
 import { runWithProjectStub } from '@worker/lib/project-fs';
-import { PROJECT_ROOT, WorkspaceClient } from '@worker/lib/workspace-client';
 
 import { cancellableWorkerLoader } from '../cancellable-worker-loader';
 import { CompletionReviewRecorder } from '../completion-review';
@@ -13,9 +13,9 @@ import { readTodos } from '../tool-executor';
 import { toolOutputError } from '../tool-failure-guard';
 import * as assetSettingsGetTool from './asset-settings-get';
 import * as assetSettingsUpdateTool from './asset-settings-update';
-import * as bashTool from './bash';
 import * as bindingsGetTool from './bindings-get';
 import * as bindingsUpdateTool from './bindings-update';
+import { createPreviewBrowserTools } from './browser-tools';
 import * as completionReviewTool from './completion-review';
 import { createComputerTools } from './computer-tools';
 import * as dependenciesListTool from './dependencies-list';
@@ -25,7 +25,6 @@ import { drainWorkspaceChanges } from './drain-workspace-changes';
 import * as imageGenerateTool from './image-generate';
 import * as lintCheckTool from './lint-check';
 import * as lintFixTool from './lint-fix';
-import { buildAllowedPreviewOrigins } from './network-policy';
 import * as planUpdateTool from './plan-update';
 import * as previewFetchTool from './preview-fetch';
 import * as subAgentTool from './sub-agent';
@@ -35,25 +34,14 @@ import * as todosUpdateTool from './todos-update';
 import * as userQuestionTool from './user-question';
 import { closeToolInputSchema, coerceToObject, validateAndCoerceToolInput } from './validate-tool-input';
 import * as webFetchTool from './web-fetch';
-import { DEV_PREVIEW_SECRET } from '../../../lib/preview-secret';
 import { withSpan } from '../../../lib/tracing';
 import { sanitizeToolInput, summarizeToolResult } from '../agent-logger';
 import { createConfiguredMcpConnectors } from '../mcp';
 
 import type { AgentLogger } from '../agent-logger';
 import type { CompletionReviewContext } from '../completion-review';
-import type {
-	FileChange,
-	PendingToolCallIds,
-	SendEventFunction,
-	ToolCallIdReference,
-	ToolDefinition,
-	ToolExecuteFunction,
-	ToolExecutorContext,
-	ToolFailureQueue,
-} from '../types';
-import type { StateBackend } from '@cloudflare/shell';
-import type { ToolSet, FlexibleSchema } from 'ai';
+import type { FileChange, SendEventFunction, ToolDefinition, ToolExecuteFunction, ToolExecutorContext } from '../types';
+import type { ToolSet } from 'ai';
 
 export const TOOL_EXECUTORS: ReadonlyMap<string, ToolExecuteFunction> = new Map([
 	['completion_review', completionReviewTool.execute],
@@ -75,7 +63,6 @@ export const TOOL_EXECUTORS: ReadonlyMap<string, ToolExecuteFunction> = new Map(
 	['test_run', testRunTool.execute],
 	['image_generate', imageGenerateTool.execute],
 	['sub_agent', subAgentTool.execute],
-	['bash', bashTool.execute],
 ]);
 
 export const AGENT_TOOLS: readonly ToolDefinition[] = [
@@ -98,7 +85,6 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
 	testRunTool.definition,
 	imageGenerateTool.definition,
 	subAgentTool.definition,
-	bashTool.definition,
 ];
 
 const DEFINITIONS_BY_NAME: ReadonlyMap<string, ToolDefinition> = new Map(AGENT_TOOLS.map((definition) => [definition.name, definition]));
@@ -142,27 +128,7 @@ const ASK_MODE_TOOL_NAMES = new Set([
 
 export const ASK_MODE_TOOLS: readonly ToolDefinition[] = AGENT_TOOLS.filter((t) => ASK_MODE_TOOL_NAMES.has(t.name));
 
-const EDITING_TOOL_NAMES = new Set(['lint_fix', 'image_generate', 'bash']);
-
-/**
- * Read-only tools that can be batched freely within a single iteration.
- * These have no side effects and are safe to execute in parallel.
- */
-export const READ_ONLY_TOOL_NAMES = new Set([
-	'read',
-	'ls',
-	'list',
-	'find',
-	'grep',
-	'docs_search',
-	'todos_get',
-	'dependencies_list',
-	'asset_settings_get',
-	'bindings_get',
-	'lint_check',
-	'preview_fetch',
-	'test_run',
-]);
+const EDITING_TOOL_NAMES = new Set(['lint_fix', 'image_generate']);
 
 /**
  * Tools excluded from sub-agent runs.
@@ -194,58 +160,82 @@ export const MUTATION_TOOL_NAMES = new Set([
 	'asset_settings_update',
 	'bindings_update',
 	'image_generate',
-	'bash',
 ]);
 
-/**
- * `state.*` methods that mutate the workspace. In plan/ask mode the state
- * backend is wrapped to reject these so Code Mode stays read-only.
- */
-const STATE_WRITE_METHODS = new Set([
-	'writeFile',
-	'writeFileBytes',
-	'appendFile',
-	'writeJson',
-	'updateJson',
-	'mkdir',
-	'rm',
-	'cp',
-	'mv',
-	'symlink',
-	'replaceInFile',
-	'replaceInFiles',
-	'applyEdits',
-	'applyEditPlan',
-	'createArchive',
-	'extractArchive',
-	'compressFile',
-	'decompressFile',
-	'removeTree',
-	'copyTree',
-	'moveTree',
-]);
+type AnyTool = ToolSet[string];
 
-type AnyTool = { inputSchema?: FlexibleSchema<unknown>; [key: string]: unknown };
-
-/**
- * Assemble the model-facing tool surface: a single `codemode` tool exposing
- * domain tools as `tools.*`, the workspace filesystem as `state.*`, and the
- * browser as `tools.browser_*`, plus direct Computer, dependency and interactive
- * tools. Dependency tools also stay in Code Mode so either surface can manage
- * the protected manifest. Without isolate bindings (tests, sub-agents) every
- * tool is exposed directly instead.
- */
+/** Build Code Mode from the same guarded leaf catalog used by direct calls. */
 export async function createServerTools(
+	sendEvent: SendEventFunction,
+	inputContext: ToolExecutorContext,
+	queryChanges: FileChange[],
+	mode: 'code' | 'plan' | 'ask',
+	logger?: AgentLogger,
+	excludedToolNames?: ReadonlySet<string>,
+): Promise<ToolSet> {
+	const {
+		directTools: llmTools,
+		nestedTools: codeModeTools,
+		context,
+		sendEvent: trackedSendEvent,
+	} = await createAgentToolCatalog(sendEvent, inputContext, queryChanges, mode, logger, excludedToolNames);
+	if (!context.ctx || !context.loader) throw new Error('Agent Code Mode requires its Durable Object and Worker Loader.');
+	const connectors = await createConfiguredMcpConnectors(context);
+	const runtime = createCodemodeRuntime({
+		ctx: context.ctx,
+		name: 'agent-tools',
+		connectors: [new ToolSetConnector(context.ctx, { tools: codeModeTools }), ...connectors],
+		executor: new DynamicWorkerExecutor({
+			loader: cancellableWorkerLoader(context.loader, () => context.activeCodeMode?.abortSignal ?? context.abortSignal),
+			timeout: 360_000,
+			// eslint-disable-next-line unicorn/no-null -- The SDK requires null to disable outbound access.
+			globalOutbound: null,
+		}),
+		transformResult: truncateResult,
+	});
+	const tool = runtime.tool();
+	const wrapped = wrapCodemodeTool(tool, context, trackedSendEvent, queryChanges);
+	const execute = wrapped.execute;
+	if (typeof execute !== 'function') throw new Error('CodeMode executor is unavailable');
+	let tail = Promise.resolve();
+	llmTools.codemode = {
+		...wrapped,
+		execute: async (input: unknown, options: { toolCallId?: string; abortSignal?: AbortSignal }) => {
+			const previous = tail;
+			const release = Promise.withResolvers<void>();
+			tail = release.promise;
+			await previous;
+			const toolCallId = options?.toolCallId ?? crypto.randomUUID();
+			context.activeCodeMode = { toolCallId, abortSignal: options?.abortSignal };
+			const observedBefore = context.failureGuard?.observationVersion;
+			try {
+				context.failureGuard?.assertHealthy();
+				const output: unknown = await Reflect.apply(execute, wrapped, [input, options]);
+				if (context.failureGuard?.observationVersion === observedBefore)
+					context.failureGuard?.record({ id: toolCallId, toolName: 'codemode', input, error: toolOutputError(output) });
+				return output;
+			} catch (error) {
+				if (context.failureGuard?.observationVersion === observedBefore)
+					context.failureGuard?.record({ id: toolCallId, toolName: 'codemode', input, error: String(error) });
+				throw error;
+			} finally {
+				context.failureGuard?.ignore(toolCallId);
+				context.activeCodeMode = undefined;
+				release.resolve();
+			}
+		},
+	};
+	return llmTools;
+}
+
+export async function createAgentToolCatalog(
 	sendEvent: SendEventFunction,
 	context: ToolExecutorContext,
 	queryChanges: FileChange[],
 	mode: 'code' | 'plan' | 'ask',
 	logger?: AgentLogger,
-	toolFailures?: ToolFailureQueue,
-	_toolCallIdReference?: ToolCallIdReference,
-	_pendingToolCallIds?: PendingToolCallIds,
 	excludedToolNames?: ReadonlySet<string>,
-): Promise<ToolSet> {
+): Promise<{ directTools: ToolSet; nestedTools: ToolSet; context: ToolExecutorContext; sendEvent: SendEventFunction }> {
 	const recorder = new CompletionReviewRecorder();
 	const readCompletionReviewContext = context.readCompletionReviewContext;
 	context = {
@@ -301,10 +291,9 @@ export async function createServerTools(
 
 	const isExcluded = (name: string): boolean =>
 		Boolean(excludedToolNames?.has(name)) || (name === 'completion_review' && Boolean(context.isSubAgent));
-	const wrapDeps = (events: SendEventFunction): WrapDeps => ({ sendEvent: events, context, queryChanges, mode, logger, toolFailures });
+	const wrapDeps = (events: SendEventFunction): WrapDeps => ({ sendEvent: events, context, queryChanges, mode, logger });
 
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool generic variance; streamText/createExecuteRuntime accept ToolSet (Record<string, Tool<any, any>>)
-	const llmTools: Record<string, any> = {};
+	const llmTools: ToolSet = {};
 
 	// 1. Direct interactive tools.
 	for (const name of directToolNames(mode)) {
@@ -316,9 +305,8 @@ export async function createServerTools(
 		}
 	}
 
-	// 2. Code Mode `tools.*` — domain tools, MCP tools, extension tools, browser tools.
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool generic variance; createExecuteRuntime accepts ToolSet (Record<string, Tool<any, any>>)
-	const codeModeTools: Record<string, any> = {};
+	// 2. Code Mode `tools.*` — domain tools, MCP tools and browser tools.
+	const codeModeTools: ToolSet = {};
 	for (const [name, definition] of Object.entries(createComputerTools(context, mode))) {
 		if (isExcluded(name)) continue;
 		const wrapped = wrapCodemodeTool(definition, context, trackedSendEvent, queryChanges, name);
@@ -338,19 +326,9 @@ export async function createServerTools(
 		}
 	}
 
-	if (context.session) {
-		Object.assign(codeModeTools, await context.session.tools());
-	}
-
-	if (context.extensionManager) {
-		const { createExtensionTools } = await import('@cloudflare/think/tools/extensions');
-		Object.assign(codeModeTools, createExtensionTools({ manager: context.extensionManager }));
-		Object.assign(codeModeTools, context.extensionManager.getTools());
-	}
-
-	await addBrowserTools(codeModeTools, context, mode);
+	Object.assign(codeModeTools, await createPreviewBrowserTools(context, mode));
 	for (const [name, definition] of Object.entries(codeModeTools)) {
-		if (name.startsWith('browser_')) codeModeTools[name] = wrapObservedTool(definition, name, context);
+		if (name === 'browser' || name.startsWith('browser_')) codeModeTools[name] = wrapObservedTool(definition, name, context);
 	}
 
 	// Observe leaf calls on both surfaces. CodeMode validates before invoking execute.
@@ -361,68 +339,7 @@ export async function createServerTools(
 	}
 	for (const name of directToolNames(mode)) if (llmTools[name]) llmTools[name] = observeHarnessTool(llmTools[name], name, context);
 
-	// 3. Assemble the single Code Mode tool — or fall back to direct exposure.
-	if (context.ctx && context.loader) {
-		const { createExecuteRuntime } = await import('@cloudflare/think/tools/execute');
-		const connectors = context.agentReference ? await createConfiguredMcpConnectors(context.agentReference, context.ctx, env) : [];
-		const { tool } = createExecuteRuntime({
-			ctx: context.ctx,
-			// Allow five-minute container commands to finish and synchronize their workspace changes.
-			timeout: 360_000,
-			tools: codeModeTools,
-			state: createStateBackend(context, mode),
-			loader: cancellableWorkerLoader(context.loader, () => {
-				const signals = [context.activeCodeMode?.abortSignal, context.failureGuard?.controller.signal].filter(
-					(signal) => signal !== undefined,
-				);
-				return signals.length > 0 ? AbortSignal.any(signals) : undefined;
-			}),
-			connectors,
-			// eslint-disable-next-line unicorn/no-null -- codemode uses null to fully disable sandbox outbound network access
-			globalOutbound: null,
-		});
-		const wrapped = wrapCodemodeTool(tool, context, trackedSendEvent, queryChanges);
-		const execute = wrapped.execute;
-		if (typeof execute !== 'function') throw new Error('CodeMode executor is unavailable');
-		let tail = Promise.resolve();
-		llmTools.codemode = {
-			...wrapped,
-			execute: async (input: unknown, options: { toolCallId?: string; abortSignal?: AbortSignal }) => {
-				const previous = tail;
-				const release = Promise.withResolvers<void>();
-				tail = release.promise;
-				await previous;
-				const toolCallId = options?.toolCallId ?? crypto.randomUUID();
-				context.activeCodeMode = { toolCallId, abortSignal: options?.abortSignal };
-				const observedBefore = context.failureGuard?.observationVersion;
-				try {
-					context.failureGuard?.assertHealthy();
-					const output: unknown = await Reflect.apply(execute, wrapped, [input, options]);
-					if (context.failureGuard?.observationVersion === observedBefore)
-						context.failureGuard?.record({ id: toolCallId, toolName: 'codemode', input, error: toolOutputError(output) });
-					return output;
-				} catch (error) {
-					if (context.failureGuard?.observationVersion === observedBefore)
-						context.failureGuard?.record({ id: toolCallId, toolName: 'codemode', input, error: String(error) });
-					throw error;
-				} finally {
-					context.failureGuard?.ignore(toolCallId);
-					context.activeCodeMode = undefined;
-					release.resolve();
-				}
-			},
-		};
-	} else {
-		// No Code Mode sandbox: expose `tools.*` directly. They run in THIS context
-		// and push their own changes into `queryChanges`, so wrap each with a drain
-		// that surfaces drain-only tools (e.g. dependencies_update) without
-		// double-recording paths the tool already pushed.
-		for (const [name, codeModeTool] of Object.entries(codeModeTools)) {
-			llmTools[name] = wrapDirectTool(codeModeTool, context, trackedSendEvent, queryChanges);
-		}
-	}
-
-	return llmTools;
+	return { directTools: llmTools, nestedTools: codeModeTools, context, sendEvent: trackedSendEvent };
 }
 
 interface WrapDeps {
@@ -431,7 +348,6 @@ interface WrapDeps {
 	queryChanges: FileChange[];
 	mode: 'code' | 'plan' | 'ask';
 	logger?: AgentLogger;
-	toolFailures?: ToolFailureQueue;
 }
 
 /** Names of the direct (non-Code-Mode) tools available in a given mode. */
@@ -447,46 +363,18 @@ function codeModeToolNames(mode: 'code' | 'plan' | 'ask'): string[] {
 	return [...base].filter((name) => !DIRECT_TOOL_NAMES.has(name));
 }
 
-/** Build the `state.*` backend, read-only in plan/ask mode. */
-function createStateBackend(context: ToolExecutorContext, mode: 'code' | 'plan' | 'ask'): StateBackend {
-	const backend = createWorkspaceStateBackend(new WorkspaceClient(context.fsStub, PROJECT_ROOT, context.sessionId));
-	return new Proxy(backend, {
-		get(target, property, receiver) {
-			const value: unknown = Reflect.get(target, property, receiver);
-			if (typeof value !== 'function') return value;
-			return async (...arguments_: unknown[]) => {
-				context.failureGuard?.assertHealthy();
-				const outcome = { id: crypto.randomUUID(), toolName: `state.${String(property)}`, input: arguments_ };
-				try {
-					if (mode !== 'code' && typeof property === 'string' && STATE_WRITE_METHODS.has(property))
-						throw new ToolExecutionError(
-							'NOT_ALLOWED',
-							`state.${property} is read-only in ${mode} mode. Switch to Code mode to make changes.`,
-						);
-					const result: unknown = await Reflect.apply(value, target, arguments_);
-					context.failureGuard?.record(outcome);
-					return result;
-				} catch (error) {
-					context.failureGuard?.record({ ...outcome, error: String(error) });
-					throw error;
-				}
-			};
-		},
-	});
-}
-
 /**
- * After each sandbox run, reflect workspace writes made via `state.*`/`bash`
+ * After each tool, reflect authoritative workspace revisions
  * back to the UI (file-change events, preview HMR, snapshots). Writes already
  * surfaced by a `tools.*` call are skipped.
  */
-function wrapCodemodeTool(
-	tool: AnyTool,
+function wrapCodemodeTool<T extends AnyTool>(
+	tool: T,
 	context: ToolExecutorContext,
 	sendEvent: SendEventFunction,
 	queryChanges: FileChange[],
 	computerToolName?: string,
-): AnyTool {
+): T {
 	const originalExecute = tool.execute;
 	if (typeof originalExecute !== 'function') return tool;
 	return {
@@ -549,10 +437,10 @@ function wrapDirectTool(tool: AnyTool, context: ToolExecutorContext, sendEvent: 
 /**
  * Convert a {@link ToolDefinition} + executor into an AI SDK tool: validate and
  * string-coerce input, enforce mode gating, log, emit `tool_result`, and feed
- * the doom-loop failure queue.
+ * the turn's repeated-failure guard.
  */
 function wrapTool(definition: ToolDefinition, executor: ToolExecuteFunction, deps: WrapDeps): AnyTool {
-	const { sendEvent, context, queryChanges, mode, logger, toolFailures } = deps;
+	const { sendEvent, context, queryChanges, mode, logger } = deps;
 	const toolName = definition.name;
 
 	// A `validate` function is required so the AI SDK runs input validation
@@ -567,6 +455,11 @@ function wrapTool(definition: ToolDefinition, executor: ToolExecuteFunction, dep
 	return {
 		description: definition.description,
 		inputSchema: schema,
+		outputSchema: z.object({ title: z.string(), metadata: z.record(z.string(), z.unknown()), output: z.string() }),
+		toModelOutput: ({ output }: { output: unknown }): { type: 'text'; value: string } => ({
+			type: 'text',
+			value: z.object({ output: z.string() }).parse(output).output,
+		}),
 		execute: async (
 			input: Record<string, string>,
 			executeOptions?: { toolCallId?: string; abortSignal?: AbortSignal; harnessOutcomeId?: string },
@@ -580,7 +473,7 @@ function wrapTool(definition: ToolDefinition, executor: ToolExecuteFunction, dep
 			// Defense-in-depth: reject editing tools in non-code modes.
 			if (mode !== 'code' && EDITING_TOOL_NAMES.has(toolName)) {
 				logger?.warn('tool_call', 'blocked', { toolName, reason: 'editing_tool_in_non_code_mode', mode });
-				return 'File editing tools are not available in this mode. Switch to Code mode to make changes.';
+				throw new ToolExecutionError('NOT_ALLOWED', 'File editing tools are not available in this mode.');
 			}
 
 			logger?.info('tool_call', 'started', { toolName, input: sanitizeToolInput(input) });
@@ -627,7 +520,7 @@ function wrapTool(definition: ToolDefinition, executor: ToolExecuteFunction, dep
 					title: result.title,
 					metadata: result.metadata,
 				});
-				return result.output;
+				return result;
 			} catch (error) {
 				context.recordReviewObservation?.(toolName, input, String(error), true);
 				const isToolError = error instanceof ToolExecutionError;
@@ -642,154 +535,10 @@ function wrapTool(definition: ToolDefinition, executor: ToolExecuteFunction, dep
 					},
 					{ durationMs: timer?.() },
 				);
-				toolFailures?.push({
-					toolName,
-					errorCode: isToolError ? error.code : undefined,
-					errorMessage: error instanceof Error ? error.message : String(error),
-				});
 				throw error;
 			}
 		},
 	};
-}
-
-/**
- * Browser Run tools, exposed inside Code Mode as `tools.browser_*`. Quick
- * Actions are read-only page reads (every mode); the durable `browser_execute`
- * can mutate page state, so it is code-mode only. Both are restricted to the
- * project's preview origin(s).
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool generic variance; mixed AI SDK tool shapes
-async function addBrowserTools(target: Record<string, any>, context: ToolExecutorContext, mode: 'code' | 'plan' | 'ask'): Promise<void> {
-	if (!context.ctx || !context.loader || !context.browser || !context.requestOriginContext) return;
-
-	const { createBrowserTools } = await import('@cloudflare/think/tools/browser');
-	const browserTools = createBrowserTools({
-		ctx: context.ctx,
-		browser: context.browser,
-		loader: context.loader,
-		session: { mode: 'dynamic' },
-	});
-
-	const secret = import.meta.env.DEV ? env.PREVIEW_SECRET || DEV_PREVIEW_SECRET : env.PREVIEW_SECRET;
-	const allowedPreviewOrigins = await buildAllowedPreviewOrigins(context.projectId, context.requestOriginContext, secret);
-	const primaryPreviewOrigin = allowedPreviewOrigins[0];
-
-	for (const quickActionName of QUICK_ACTION_TOOL_NAMES) {
-		const quickActionTool = browserTools[quickActionName];
-		if (quickActionTool) {
-			target[quickActionName] = wrapQuickActionTool(quickActionTool, allowedPreviewOrigins);
-		}
-	}
-
-	if (mode === 'code') {
-		const browserExecute = browserTools.browser_execute;
-		target.browser_execute = {
-			...browserExecute,
-			execute: async (input: { code: string }) => {
-				if (!primaryPreviewOrigin) {
-					throw new ToolExecutionError('NOT_ALLOWED', 'browser_execute is unavailable until the project preview origin is known.');
-				}
-				if (typeof browserExecute.execute !== 'function') {
-					throw new ToolExecutionError('NOT_ALLOWED', 'browser_execute is unavailable in the current browser tool configuration.');
-				}
-				return Reflect.apply(browserExecute.execute, browserExecute, [
-					{ code: wrapBrowserExecuteCode(input.code, primaryPreviewOrigin, allowedPreviewOrigins) },
-					undefined,
-				]);
-			},
-		};
-	}
-}
-
-/**
- * Browser Run Quick Action tools exposed by `createBrowserTools`.
- * These are stateless, read-only page reads.
- */
-const QUICK_ACTION_TOOL_NAMES = ['browser_markdown', 'browser_extract', 'browser_links', 'browser_scrape'] as const;
-
-/**
- * Wrap a Quick Action tool so it can only navigate to the project's preview
- * origin(s). Quick Actions accept either a `url` or raw `html`; raw HTML never
- * navigates, so it passes through untouched.
- */
-function wrapQuickActionTool(quickActionTool: { execute?: unknown }, allowedPreviewOrigins: string[]): AnyTool {
-	const originalExecute = quickActionTool.execute;
-	if (typeof originalExecute !== 'function') {
-		return quickActionTool;
-	}
-
-	const allowedOrigins = new Set(allowedPreviewOrigins);
-	return {
-		...quickActionTool,
-		execute: async (input: Record<string, unknown>, options?: unknown) => {
-			if (typeof input.url === 'string') {
-				let parsed: URL;
-				try {
-					parsed = new URL(input.url);
-				} catch {
-					throw new ToolExecutionError('MISSING_INPUT', 'Browser tool URLs must be valid absolute URLs.');
-				}
-				if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-					throw new ToolExecutionError('NOT_ALLOWED', 'Browser tools only support http:// and https:// preview URLs.');
-				}
-				if (!allowedOrigins.has(parsed.origin)) {
-					throw new ToolExecutionError(
-						'NOT_ALLOWED',
-						`Browser tools may only read this project's preview origin. Allowed origins: ${allowedPreviewOrigins.join(', ')}`,
-					);
-				}
-			}
-			return Reflect.apply(originalExecute, quickActionTool, [input, options]);
-		},
-	};
-}
-
-function wrapBrowserExecuteCode(code: string, primaryPreviewOrigin: string, allowedPreviewOrigins: string[]): string {
-	const allowedOriginsJson = JSON.stringify(allowedPreviewOrigins);
-	const primaryOriginJson = JSON.stringify(primaryPreviewOrigin);
-	return `async () => {
-  const __allowedOrigins = new Set(${allowedOriginsJson});
-  const __primaryOrigin = ${primaryOriginJson};
-  const __normalizeUrl = (value) => {
-    if (typeof value !== "string") {
-      throw new Error("browser_execute navigation URLs must be strings.");
-    }
-    if (value === "about:blank") {
-      return value;
-    }
-    if (value.startsWith("/") || value.startsWith("?") || value.startsWith("#")) {
-      return new URL(value, __primaryOrigin).toString();
-    }
-    return value;
-  };
-  const __assertAllowedTarget = (value) => {
-    const normalized = __normalizeUrl(value);
-    if (normalized === "about:blank") {
-      return normalized;
-    }
-    const parsed = new URL(normalized);
-			if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-				throw new Error("browser_execute only supports http:// and https:// preview URLs.");
-			}
-			if (!__allowedOrigins.has(parsed.origin)) {
-				throw new Error("browser_execute may only navigate to this project's preview origin. Allowed origins: ${allowedPreviewOrigins.join(', ')}");
-			}
-    return parsed.toString();
-  };
-  const __originalSend = cdp.send.bind(cdp);
-  cdp.send = async (method, params, options) => {
-    if ((method === "Target.createTarget" || method === "Page.navigate") && params && typeof params === "object" && "url" in params) {
-      params = { ...params, url: __assertAllowedTarget(params.url) };
-    }
-    return __originalSend(method, params, options);
-  };
-  const __userFunction = (${code});
-  if (typeof __userFunction !== "function") {
-    throw new Error("browser_execute expects an async arrow function.");
-  }
-  return await __userFunction();
-}`;
 }
 
 function wrapObservedTool(definition: AnyTool, name: string, context: ToolExecutorContext): AnyTool {
@@ -849,9 +598,15 @@ function observeHarnessTool(definition: AnyTool, name: string, context: ToolExec
 		execute: async (input: unknown, options?: { toolCallId?: string; abortSignal?: AbortSignal }) => {
 			context.failureGuard?.assertHealthy();
 			const id = options?.toolCallId ?? crypto.randomUUID();
-			const signals = [options?.abortSignal, context.activeCodeMode?.abortSignal, context.failureGuard?.controller.signal].filter(
-				(signal) => signal !== undefined,
-			);
+			const signals = [
+				context.abortSignal,
+				options?.abortSignal,
+				context.activeCodeMode?.abortSignal,
+				context.failureGuard?.controller.signal,
+			].filter((signal) => signal !== undefined);
+			const abortSignal = signals.length > 0 ? AbortSignal.any(signals) : undefined;
+			abortSignal?.throwIfAborted();
+			if (MUTATION_TOOL_NAMES.has(name) || name === 'browser') await context.beforeMutation?.();
 			try {
 				const output: unknown = await Reflect.apply(execute, definition, [
 					input,
@@ -859,7 +614,7 @@ function observeHarnessTool(definition: AnyTool, name: string, context: ToolExec
 						...options,
 						harnessOutcomeId: id,
 						toolCallId: options?.toolCallId ?? context.activeCodeMode?.toolCallId ?? id,
-						abortSignal: signals.length > 0 ? AbortSignal.any(signals) : undefined,
+						abortSignal,
 					},
 				]);
 				context.failureGuard?.record({ id, toolName: name, input, error: toolOutputError(output) });

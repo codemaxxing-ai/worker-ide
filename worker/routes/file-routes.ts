@@ -8,7 +8,7 @@ import { createHmrUpdateForFile } from '@shared/types';
 import { filePathSchema, writeFileSchema, mkdirSchema, moveFileSchema } from '@shared/validation';
 import { fs } from '@worker/lib/project-fs';
 
-import { agentRunnerNamespace, coordinatorNamespace } from '../lib/durable-object-namespaces';
+import { projectAgentNamespace, coordinatorNamespace } from '../lib/durable-object-namespaces';
 import { httpError } from '../lib/http-error';
 import { isHiddenPath, isPathSafe, isProtectedFile } from '../lib/path-utilities';
 import { invalidateTsConfigCache } from '../services/transform-service';
@@ -66,21 +66,8 @@ export const fileRoutes = new Hono<AppEnvironment>()
 		await c.get('fsStub').writeFileContent(path, content);
 
 		try {
-			const agentStub = agentRunnerNamespace.getByName(`agent:${projectId}`);
-			const syncResponse = await agentStub.fetch(
-				new Request('http://agent/review/sync-path', {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						'x-partykit-room': `agent:${projectId}`,
-					},
-					body: JSON.stringify({ path }),
-				}),
-			);
-			if (!syncResponse.ok) {
-				const body = await syncResponse.text();
-				throw new Error(body || 'Failed to sync review queue');
-			}
+			const agentStub = projectAgentNamespace.getByName(`agent:${projectId}`);
+			await agentStub.syncReviewPathFromWorkspace(path);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Failed to sync review queue';
 			throw httpError(HttpErrorCode.INTERNAL_ERROR, message);
@@ -125,21 +112,8 @@ export const fileRoutes = new Hono<AppEnvironment>()
 		try {
 			await fs.rm(`${projectRoot}${path}`, { recursive: true, force: true });
 			try {
-				const agentStub = agentRunnerNamespace.getByName(`agent:${c.get('projectId')}`);
-				const syncResponse = await agentStub.fetch(
-					new Request('http://agent/review/sync-path', {
-						method: 'POST',
-						headers: {
-							'Content-Type': 'application/json',
-							'x-partykit-room': `agent:${c.get('projectId')}`,
-						},
-						body: JSON.stringify({ path }),
-					}),
-				);
-				if (!syncResponse.ok) {
-					const body = await syncResponse.text();
-					throw new Error(body || 'Failed to sync review queue');
-				}
+				const agentStub = projectAgentNamespace.getByName(`agent:${c.get('projectId')}`);
+				await agentStub.syncReviewPathFromWorkspace(path);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : 'Failed to sync review queue';
 				throw httpError(HttpErrorCode.INTERNAL_ERROR, message);
@@ -191,21 +165,8 @@ export const fileRoutes = new Hono<AppEnvironment>()
 
 			await fs.rename(`${projectRoot}${fromPath}`, `${projectRoot}${toPath}`);
 			try {
-				const agentStub = agentRunnerNamespace.getByName(`agent:${projectId}`);
-				const syncResponse = await agentStub.fetch(
-					new Request('http://agent/review/move-path', {
-						method: 'POST',
-						headers: {
-							'Content-Type': 'application/json',
-							'x-partykit-room': `agent:${projectId}`,
-						},
-						body: JSON.stringify({ fromPath, toPath }),
-					}),
-				);
-				if (!syncResponse.ok) {
-					const body = await syncResponse.text();
-					throw new Error(body || 'Failed to sync review queue');
-				}
+				const agentStub = projectAgentNamespace.getByName(`agent:${projectId}`);
+				await agentStub.moveTrackedReviewPath(fromPath, toPath);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : 'Failed to sync review queue';
 				throw httpError(HttpErrorCode.INTERNAL_ERROR, message);

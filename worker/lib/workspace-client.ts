@@ -2,7 +2,7 @@ import { WorkspaceFsAdapter } from './workspace-fs-adapter';
 
 import type { WorkspaceLike } from './workspace-fs-adapter';
 import type { ProjectFilesystem } from '../durable/project-filesystem';
-import type { FileInfo, FileStat } from '@cloudflare/shell';
+import type { WorkspaceFileInfo as FileInfo, WorkspaceFileInfo as FileStat } from '@shared/workspace-file';
 
 /** The mount prefix the worker uses for project paths (e.g. `/project/src/a.ts`). */
 export const PROJECT_ROOT = '/project';

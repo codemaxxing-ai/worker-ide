@@ -82,7 +82,7 @@ describe('advisory completion review', () => {
 		const recorder = new CompletionReviewRecorder();
 		const output: Record<string, unknown> = { metadata: { exitCode: 1 } };
 		output.circular = output;
-		expect(() => recorder.record('bash', { command: 'check' }, output)).not.toThrow();
+		expect(() => recorder.record('exec', { command: 'check' }, output)).not.toThrow();
 		const result = await reviewCompletion(context(recorder), 'Done', async () => ready);
 		expect(result.recommendation).toBe('unknown');
 		expect(result.findings[0]?.evidence).toEqual(['tool:1']);

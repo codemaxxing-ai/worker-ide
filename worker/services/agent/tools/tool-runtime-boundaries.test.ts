@@ -1,11 +1,10 @@
-import { createWorkspaceStateBackend } from '@cloudflare/shell';
+import { getWorkspace } from '@cloudflare/computer';
 import { env } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_AI_MODEL } from '@shared/constants';
-import { WorkspaceClient } from '@worker/lib/workspace-client';
 
-import { createServerTools } from './index';
+import { createAgentToolCatalog } from './index';
 import { createMockSendEvent } from './test-helpers';
 
 import type { FileChange, ToolExecutorContext } from '../types';
@@ -29,7 +28,8 @@ async function setup() {
 	};
 	const sendEvent = createMockSendEvent();
 	const changes: FileChange[] = [];
-	const tools = await createServerTools(sendEvent, context, changes, 'code');
+	const catalog = await createAgentToolCatalog(sendEvent, context, changes, 'code');
+	const tools = { ...catalog.nestedTools, ...catalog.directTools };
 	const execute = async (name: string, input: Record<string, unknown>) => {
 		const definition = tools[name];
 		if (!definition?.execute) throw new Error(`Missing tool: ${name}`);
@@ -68,7 +68,7 @@ describe('tool runtime mutation boundaries', () => {
 		const { fsStub, execute } = await setup();
 		await fsStub.wsSymlink('/package.json', '/alias');
 		await fsStub.wsSymlink('/', '/root-link');
-		const state = createWorkspaceStateBackend(new WorkspaceClient(fsStub, '/project', 'session'));
+		const state = getWorkspace({ __getWorkspaceStub: () => fsStub.getAgentWorkspace('session') }).fs;
 		for (const path of ['/package.json', '/workspace/package.json', '/project/package.json', '/alias', '/root-link/package.json']) {
 			await expect(execute('write', { path, content: '{}' })).rejects.toThrow('managed by the IDE');
 			await expect(state.writeFile(path, '{}')).rejects.toThrow('managed by the IDE');

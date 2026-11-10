@@ -35,10 +35,10 @@ export const filesystemNamespace = lazyNamespace(() => exports.DurableObjectFile
 export const coordinatorNamespace = lazyNamespace(() => exports.ProjectCoordinatorV2);
 
 /**
- * Agent Runner Durable Object namespace with automatic retry.
- * Used for running AI agent loops independently of client connections.
+ * Project agent namespace with automatic retry.
+ * Owns the session directory, shared context, MCP connections and review records.
  */
-export const agentRunnerNamespace = lazyNamespace(() => exports.AgentRunner);
+export const projectAgentNamespace = lazyNamespace(() => exports.ProjectAgent);
 
 /**
  * Project Metadata Durable Object namespace with automatic retry.

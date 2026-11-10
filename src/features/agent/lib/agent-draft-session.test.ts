@@ -4,7 +4,7 @@ import { clearAgentDraftSession, loadAgentDraftSession, saveAgentDraftSession } 
 
 describe('agent-draft-session', () => {
 	beforeEach(() => {
-		localStorage.clear();
+		sessionStorage.clear();
 	});
 
 	it('stores drafts per project', () => {
@@ -42,7 +42,7 @@ describe('agent-draft-session', () => {
 	});
 
 	it('drops invalid draft payloads', () => {
-		localStorage.setItem('worker-ide-project:project-1', JSON.stringify({ agentDraft: { segments: [{ type: 'text', value: 123 }] } }));
+		sessionStorage.setItem('think-draft:project-1', JSON.stringify({ segments: [{ type: 'text', value: 123 }] }));
 
 		expect(loadAgentDraftSession('project-1')).toBeUndefined();
 	});

@@ -49,14 +49,17 @@ beforeAll(async () => {
 			compatibilityDate: configuration.compatibility_date,
 			compatibilityFlags: configuration.compatibility_flags,
 			durableObjects: {
-				AgentRunner: { className: 'AgentRunner', useSQLite: true },
+				ProjectAgent: { className: 'ProjectAgent', useSQLite: true },
 				DurableObjectFilesystem: { className: 'DurableObjectFilesystem', useSQLite: true },
 				ProjectCoordinatorV2: { className: 'ProjectCoordinatorV2', useSQLite: true },
 				ProjectMetadata: { className: 'ProjectMetadata', useSQLite: true },
 			},
 			d1Databases: ['DB'],
 			workerLoaders: { LOADER: {} },
-			serviceBindings: { AI: { name: 'agent-lifecycle', entrypoint: 'FixtureAI' } },
+			serviceBindings: {
+				AI: { name: 'agent-lifecycle', entrypoint: 'FixtureAI' },
+				PUSH: { name: 'agent-lifecycle', entrypoint: 'FixturePush' },
+			},
 		}),
 	);
 	await runtime.ready;
@@ -86,6 +89,24 @@ async function createProject() {
 	return z.object({ projectId: z.string() }).parse(await request('/project')).projectId;
 }
 
+async function connectChat(projectId: string, sessionId = 'session') {
+	const response = await runtime.dispatchFetch(`http://agent-lifecycle/chat?project=${projectId}&session=${sessionId}`, {
+		headers: { Upgrade: 'websocket' },
+	});
+	if (!response.webSocket) throw new Error(`Chat connection rejected: ${response.status}`);
+	const socket = response.webSocket;
+	const frames: unknown[] = [];
+	socket.addEventListener('message', (event) => {
+		if (typeof event.data !== 'string') return;
+		const frame: unknown = JSON.parse(event.data);
+		frames.push(frame);
+		const resuming = z.object({ type: z.literal('cf_agent_stream_resuming'), id: z.string() }).safeParse(frame);
+		if (resuming.success) socket.send(JSON.stringify({ type: 'cf_agent_stream_resume_ack', id: resuming.data.id }));
+	});
+	socket.accept();
+	return { socket, frames };
+}
+
 async function waitForStatus(projectId: string, status: 'completed' | 'error' | 'aborted', timeout = 4000) {
 	const terminal = await vi.waitFor(
 		async () => {
@@ -105,60 +126,206 @@ async function waitForStatus(projectId: string, status: 'completed' | 'error' | 
 async function waitForToolInput(projectId: string) {
 	await vi.waitFor(
 		async () => {
-			expect(await request('/state', projectId)).toMatchObject({
-				status: 'running',
-				messages: expect.arrayContaining([
-					expect.objectContaining({
-						role: 'assistant',
-						parts: expect.arrayContaining([expect.objectContaining({ type: 'tool-call', toolName: 'write' })]),
-					}),
-				]),
-			});
+			expect(await request('/state', projectId)).toMatchObject({ status: 'running', hasToolInput: true });
 		},
-		{ timeout: 4000, interval: 25 },
+		{ timeout: 8000 },
 	);
 }
 
 describe('production agent lifecycle in the current Workers runtime', () => {
-	it('forwards subagent command output during execution and replaces it with the child result', async () => {
+	it('streams a server-admitted turn directly to two native clients and resumes observation after reconnect', async () => {
+		const projectId = await createProject();
+		await request('/seed-history', projectId);
+		const first = await connectChat(projectId);
+		const second = await connectChat(projectId);
+		try {
+			await request('/submit', projectId, { messageId: 'streamed', prompt: 'codemode-output' });
+			await vi.waitFor(
+				() => {
+					expect(JSON.stringify(first.frames)).toContain('first');
+					expect(JSON.stringify(second.frames)).toContain('first');
+				},
+				{ timeout: 5000 },
+			);
+			first.socket.close();
+			const reconnected = await connectChat(projectId);
+			try {
+				await waitForStatus(projectId, 'completed', 6000);
+				await vi.waitFor(() => expect(JSON.stringify(reconnected.frames)).toContain('Session completed'));
+				expect(JSON.stringify(second.frames)).toContain('Session completed');
+			} finally {
+				reconnected.socket.close();
+			}
+		} finally {
+			if (first.socket.readyState === 1) first.socket.close();
+			if (second.socket.readyState === 1) second.socket.close();
+		}
+	});
+	it('uses stored content and author metadata for native regeneration and preserves the original answer branch', async () => {
+		const projectId = await createProject();
+		await request('/seed-history', projectId);
+		await request('/fail-notifications');
+		const client = await connectChat(projectId);
+		try {
+			client.socket.send(
+				JSON.stringify({
+					type: 'cf_agent_use_chat_request',
+					id: 'native-regeneration',
+					init: {
+						method: 'POST',
+						body: JSON.stringify({
+							trigger: 'regenerate-message',
+							messages: [
+								{
+									id: 'old-user',
+									role: 'user',
+									metadata: { authorUserId: 'forged-author' },
+									parts: [{ type: 'text', text: 'forged content' }],
+								},
+							],
+						}),
+					},
+				}),
+			);
+			await vi.waitFor(async () => expect(JSON.stringify(await request('/session', projectId))).toContain('native-regeneration'), {
+				timeout: 5000,
+			});
+			await waitForStatus(projectId, 'completed');
+			const session = JSON.stringify(await request('/session', projectId));
+			expect(session).toContain('original-author');
+			expect(session).not.toContain('forged-author');
+			expect(session).not.toContain('forged content');
+			expect(await request('/branches', projectId)).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'old-assistant' })]));
+			expect(await request('/state', projectId)).toMatchObject({ finalizing: true });
+			await request('/enable-notifications');
+			await request('/restore-completion', projectId);
+			await request('/restore-completion', projectId);
+			expect(await request('/state', projectId)).toMatchObject({ finalizing: false, finalizations: {} });
+			const notifications = z.array(z.object({ userId: z.string(), tag: z.string().optional() })).parse(await request('/notifications'));
+			expect(notifications.filter((item) => item.tag === 'session:native-regeneration')).toEqual([
+				{ userId: 'original-author', tag: 'session:native-regeneration' },
+			]);
+		} finally {
+			await request('/enable-notifications');
+			client.socket.close();
+		}
+	});
+	it.each(['missing', 'deleted'])('rejects %s child sessions before routing a WebSocket', async (sessionId) => {
+		const projectId = await createProject();
+		if (sessionId === 'deleted') {
+			await request('/submit?session=deleted', projectId, { messageId: 'hello', prompt: 'hello' });
+			await request('/delete?session=deleted', projectId);
+		}
+		const response = await runtime.dispatchFetch(`http://agent-lifecycle/chat?project=${projectId}&session=${sessionId}`, {
+			headers: { Upgrade: 'websocket' },
+		});
+		// Agents turns a rejected upgrade into a policy close to stop automatic reconnects.
+		expect(response.status).toBe(101);
+		const socket = response.webSocket;
+		if (!socket) throw new Error('Missing rejection socket');
+		const closed = Promise.withResolvers<number>();
+		socket.addEventListener('close', (event) => closed.resolve(event.code));
+		socket.accept();
+		expect(await closed.promise).toBe(4404);
+	});
+	it('keeps admissions closed after failed deletion until finalization is delivered and deletion retried', async () => {
+		const projectId = await createProject();
+		await request('/block-completion', projectId);
+		await request('/submit', projectId, { messageId: 'message', prompt: 'hello' });
+		await waitForStatus(projectId, 'completed');
+		const client = await connectChat(projectId);
+		try {
+			await expect(request('/delete', projectId)).rejects.toThrow('Simulated exhausted completion RPC');
+			await expect(request('/submit', projectId, { messageId: 'late', prompt: 'hello' })).rejects.toThrow('being deleted');
+			const closed = Promise.withResolvers<number>();
+			client.socket.addEventListener('close', (event) => closed.resolve(event.code));
+			client.socket.send(
+				JSON.stringify({
+					type: 'cf_agent_use_chat_request',
+					id: 'late-native',
+					init: { method: 'POST', body: JSON.stringify({ trigger: 'regenerate-message', messages: [{ id: 'message' }] }) },
+				}),
+			);
+			expect(await closed.promise).toBe(1008);
+			const rejected = await connectChat(projectId);
+			const rejectedClose = Promise.withResolvers<number>();
+			rejected.socket.addEventListener('close', (event) => rejectedClose.resolve(event.code));
+			expect(await rejectedClose.promise).toBe(4404);
+			await request('/restore-completion', projectId);
+			await expect(request('/delete', projectId)).resolves.toEqual({ deleted: true });
+			await expect(request('/submit', projectId, { messageId: 'resurrected', prompt: 'hello' })).rejects.toThrow('being deleted');
+		} finally {
+			if (client.socket.readyState === 1) client.socket.close();
+		}
+	});
+	it('starts native regeneration with fresh failure, tool and debug-log state after a guard stop', async () => {
+		const projectId = await createProject();
+		await request('/submit', projectId, { messageId: 'message', prompt: 'repeat-failure' });
+		await waitForStatus(projectId, 'error');
+		const previous = z
+			.object({ chunks: z.number(), activeDebugLog: z.object({ id: z.string() }) })
+			.parse(await request('/state', projectId));
+		const client = await connectChat(projectId);
+		try {
+			client.socket.send(
+				JSON.stringify({
+					type: 'cf_agent_use_chat_request',
+					id: 'retry-after-guard',
+					init: { method: 'POST', body: JSON.stringify({ trigger: 'regenerate-message', messages: [{ id: 'message' }] }) },
+				}),
+			);
+			await vi.waitFor(
+				async () => {
+					expect(await request('/state', projectId)).toMatchObject({ failureState: { submissionId: 'retry-after-guard', count: 3 } });
+				},
+				{ timeout: 5000 },
+			);
+			await waitForStatus(projectId, 'error');
+			const retried = z
+				.object({ chunks: z.number(), activeDebugLog: z.object({ id: z.string() }) })
+				.parse(await request('/state', projectId));
+			expect(retried.chunks).toBeGreaterThan(previous.chunks);
+			expect(retried.activeDebugLog.id).not.toBe(previous.activeDebugLog.id);
+		} finally {
+			client.socket.close();
+		}
+	});
+	it.each(['{', JSON.stringify({ trigger: 'submit-message', messages: [] })])(
+		'rejects malformed or unadmitted native requests (%s)',
+		async (body) => {
+			const projectId = await createProject();
+			await request('/seed-history', projectId);
+			const { socket } = await connectChat(projectId);
+			const closed = Promise.withResolvers<number>();
+			socket.addEventListener('close', (event) => closed.resolve(event.code));
+			socket.send(JSON.stringify({ type: 'cf_agent_use_chat_request', id: 'invalid', init: { method: 'POST', body } }));
+			expect(await closed.promise).toBe(1008);
+		},
+	);
+	it('forwards delegated command output through native retained-run progress', async () => {
 		const projectId = await createProject();
 		await request('/submit', projectId, { messageId: 'message', prompt: 'delegate-output' });
 		await vi.waitFor(
 			async () => {
 				expect(await request('/state', projectId)).toMatchObject({
 					status: 'running',
-					subAgentActivities: {
-						delegate: {
-							tools: expect.arrayContaining([
-								expect.objectContaining({
-									toolCallId: 'codemode-call',
-									commandOutput: expect.objectContaining({
-										executions: expect.arrayContaining([expect.objectContaining({ stdout: 'first' })]),
-									}),
-								}),
-							]),
-						},
-					},
+					taskProgress: { data: { commandOutput: { executions: expect.arrayContaining([expect.objectContaining({ stdout: 'first' })]) } } },
 				});
 			},
-			{ timeout: 4000, interval: 25 },
+			{ timeout: 6000, interval: 25 },
 		);
 		await vi.waitFor(
 			async () => {
 				expect(await request('/state', projectId)).toMatchObject({
-					status: 'running',
-					subAgentActivities: {
-						delegate: {
-							tools: expect.arrayContaining([
-								expect.objectContaining({ toolCallId: 'codemode-call', result: expect.stringContaining('second') }),
-							]),
-						},
+					taskProgress: {
+						data: { commandOutput: { executions: expect.arrayContaining([expect.objectContaining({ stdout: 'second' })]) } },
 					},
 				});
 			},
-			{ timeout: 4000, interval: 25 },
+			{ timeout: 6000, interval: 25 },
 		);
-		await waitForStatus(projectId, 'completed');
+		await waitForStatus(projectId, 'completed', 6000);
+		expect(JSON.stringify(await request('/session', projectId))).toContain('second');
 	});
 	it('streams multiple CodeMode command records before the outer tool completes', async () => {
 		const projectId = await createProject();
@@ -195,8 +362,7 @@ describe('production agent lifecycle in the current Workers runtime', () => {
 			await request('/submit', projectId, { messageId: 'message', prompt });
 			await waitForStatus(projectId, 'error');
 			expect(await request('/state', projectId)).toMatchObject({
-				error: { message: expect.stringContaining('three repeated failures') },
-				doomLoopMessage: expect.stringContaining('three repeated failures'),
+				error: expect.stringContaining('three repeated failures'),
 			});
 			expect(await request('/file', projectId)).toEqual({ content: 'baseline' });
 			await request('/submit', projectId, { messageId: 'recovered', prompt: 'hello' });
@@ -240,8 +406,7 @@ describe('production agent lifecycle in the current Workers runtime', () => {
 			},
 			{ timeout: 4000 },
 		);
-		expect(await request('/state', projectId)).toMatchObject({ status: 'running' });
-		expect(await request('/recovery-watch', projectId)).toEqual({ scheduled: true });
+		expect(await request('/state', projectId)).toMatchObject({ status: 'completed', finalizations: expect.any(Object) });
 		await request('/restore-completion', projectId);
 		await waitForStatus(projectId, 'completed');
 		expect(await request('/session', projectId)).toMatchObject({ status: 'completed' });
@@ -254,14 +419,13 @@ describe('production agent lifecycle in the current Workers runtime', () => {
 		// RPC assertions below while allowing slower CI CPUs to consume the burst.
 		await waitForStatus(projectId, 'completed', 20_000);
 		expect(await request('/file', projectId)).toEqual({ content: 'x'.repeat(16_000) });
-		const traffic = z.object({ streamBatches: z.number(), protocolBroadcasts: z.number() }).parse(await request('/traffic', projectId));
-		expect(traffic.streamBatches).toBeLessThan(100);
-		expect(traffic.protocolBroadcasts).toBe(0);
+		const traffic = z.object({ summaryUpdates: z.number() }).parse(await request('/traffic', projectId));
+		expect(traffic.summaryUpdates).toBeLessThan(100);
 	}, 30_000);
 
 	it('writes a file through the provider, scheduled Think facet, and Computer tools', async () => {
 		const projectId = await createProject();
-		expect(await request('/submit', projectId, { messageId: 'message', prompt: 'write' })).toMatchObject({ started: true });
+		expect(await request('/submit', projectId, { messageId: 'message', prompt: 'write' })).toMatchObject({ accepted: true });
 		await waitForStatus(projectId, 'completed');
 		expect(await request('/file', projectId)).toEqual({ content: 'saved by agent' });
 		expect(await request('/session', projectId)).toMatchObject({
@@ -269,7 +433,7 @@ describe('production agent lifecycle in the current Workers runtime', () => {
 			history: expect.arrayContaining([
 				expect.objectContaining({
 					role: 'assistant',
-					parts: expect.arrayContaining([expect.objectContaining({ type: 'tool-result', toolName: 'write', isError: false })]),
+					parts: expect.arrayContaining([expect.objectContaining({ state: 'output-available' })]),
 				}),
 			]),
 		});
@@ -280,25 +444,26 @@ describe('production agent lifecycle in the current Workers runtime', () => {
 		await request('/submit', projectId, { messageId: 'message', prompt: 'stall' });
 		await waitForToolInput(projectId);
 		await expect(request('/evict', projectId)).rejects.toThrow('Simulated session eviction');
-		await waitForStatus(projectId, 'error');
+		await request('/stop', projectId);
+		await waitForStatus(projectId, 'aborted');
 		expect(await request('/file', projectId)).toEqual({ content: 'baseline' });
 		await request('/submit', projectId, { messageId: 'next', prompt: 'hello' });
 		await waitForStatus(projectId, 'completed');
-		expect(await request('/session', projectId)).not.toHaveProperty('errorMessage');
+		expect(await request('/session', projectId)).not.toHaveProperty('error');
 	});
 
 	it('stops an unfinished tool argument stream and completes a new turn without a stale error', async () => {
 		const projectId = await createProject();
 		await request('/submit', projectId, { messageId: 'message', prompt: 'stall' });
 		await waitForToolInput(projectId);
-		expect(await request('/submit', projectId, { messageId: 'queued', prompt: 'hello' })).toMatchObject({ queued: true });
+		expect(await request('/submit', projectId, { messageId: 'queued', prompt: 'hello' })).toMatchObject({ status: 'pending' });
 		await request('/stop', projectId);
 		expect(await request('/submission', projectId)).toMatchObject({ status: 'aborted' });
 		expect(await request('/submission?message=queued', projectId)).toMatchObject({ status: 'aborted' });
 		await waitForStatus(projectId, 'aborted');
 		await request('/submit', projectId, { messageId: 'next', prompt: 'write' });
 		await waitForStatus(projectId, 'completed');
-		expect(await request('/session', projectId)).not.toHaveProperty('errorMessage');
+		expect(await request('/session', projectId)).not.toHaveProperty('error');
 	});
 
 	it('clears a failed turn error after a successful retry and reload', async () => {
@@ -307,7 +472,7 @@ describe('production agent lifecycle in the current Workers runtime', () => {
 		await waitForStatus(projectId, 'error');
 		await request('/submit', projectId, { messageId: 'next', prompt: 'hello' });
 		await waitForStatus(projectId, 'completed');
-		expect(await request('/session', projectId)).not.toHaveProperty('errorMessage');
+		expect(await request('/session', projectId)).not.toHaveProperty('error');
 	});
 
 	it('starts a new turn after stopping a provider request that has not returned a stream', async () => {
@@ -334,29 +499,24 @@ describe('production agent lifecycle in the current Workers runtime', () => {
 			history: expect.arrayContaining([
 				expect.objectContaining({
 					id: 'old-user',
-					authorUserId: 'original-author',
-					createdAt: 123_000,
-					metadata: expect.objectContaining({ snapshotId: 'original-review' }),
+					metadata: expect.objectContaining({ authorUserId: 'original-author', createdAt: 123_000, snapshotId: 'original-review' }),
 				}),
-				expect.objectContaining({ id: 'old-assistant', parts: [{ type: 'text', content: 'Previous answer'.repeat(1000) }] }),
+				expect.objectContaining({ id: 'old-assistant', parts: [{ type: 'text', text: 'Previous answer'.repeat(1000) }] }),
 				expect.objectContaining({ id: 'next' }),
-				expect.objectContaining({ role: 'assistant', parts: [{ type: 'text', content: 'Earlier request retained' }] }),
+				expect.objectContaining({
+					role: 'assistant',
+					parts: expect.arrayContaining([expect.objectContaining({ type: 'text', text: 'Earlier request retained' })]),
+				}),
 			]),
 		});
 	});
 
-	it('continues a reverted conversation with the forked context', async () => {
+	it('deduplicates a retried admission without copying the transcript into the directory', async () => {
 		const projectId = await createProject();
-		await request('/seed-history', projectId);
-		await request('/submit', projectId, { messageId: 'next', prompt: 'hello' });
+		await request('/submit', projectId, { messageId: 'same', prompt: 'hello' });
 		await waitForStatus(projectId, 'completed');
-		const fork = z.object({ sessionId: z.string() }).parse(await request('/fork', projectId));
-		await request(`/submit?session=${fork.sessionId}`, projectId, { messageId: 'fork-follow-up', prompt: 'recall' });
-		await waitForStatus(projectId, 'completed');
-		expect(await request(`/session?session=${fork.sessionId}`, projectId)).toMatchObject({
-			history: expect.arrayContaining([
-				expect.objectContaining({ role: 'assistant', parts: [{ type: 'text', content: 'Earlier request retained' }] }),
-			]),
-		});
+		expect(await request('/submit', projectId, { messageId: 'same', prompt: 'hello' })).toMatchObject({ accepted: false });
+		const session = z.object({ history: z.array(z.object({ id: z.string() })) }).parse(await request('/session', projectId));
+		expect(session.history.filter((message) => message.id === 'same')).toHaveLength(1);
 	});
 });

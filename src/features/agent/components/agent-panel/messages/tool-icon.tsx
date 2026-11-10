@@ -27,12 +27,8 @@ export function ToolIcon({ name, className }: { name: ToolName; className?: stri
 		case 'docs_search': {
 			return <Globe className={cn('size-3', className)} />;
 		}
-		case 'browser_execute':
-		case 'cdp_eval':
-		case 'browser_markdown':
-		case 'browser_extract':
-		case 'browser_links':
-		case 'browser_scrape': {
+		case 'browser':
+		case 'browser_read': {
 			return <Globe className={cn('size-3', className)} />;
 		}
 		case 'todos_get': {
@@ -60,9 +56,6 @@ export function ToolIcon({ name, className }: { name: ToolName; className?: stri
 		}
 		case 'sub_agent': {
 			return <Bot className={cn('size-3', className)} />;
-		}
-		case 'bash': {
-			return <Terminal className={cn('size-3', className)} />;
 		}
 		case 'exec': {
 			return <Terminal className={cn('size-3', className)} />;

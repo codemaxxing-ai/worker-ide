@@ -32,7 +32,7 @@ vi.mock('cloudflare:workers', () => ({
 	},
 }));
 
-vi.mock('agents-models/models/ai-sdk', () => ({
+vi.mock('agents/models/ai-sdk', () => ({
 	createAI: mockCreateAI,
 }));
 

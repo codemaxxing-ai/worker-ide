@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_AI_MODEL } from '@shared/constants';
 
-import { createServerTools } from './index';
+import { createAgentToolCatalog } from './index';
 import { createMockSendEvent } from './test-helpers';
 
 import type { FileChange, ToolExecutorContext } from '../types';
@@ -28,7 +28,8 @@ describe('Computer tools against the project workspace', () => {
 		};
 		const sendEvent = createMockSendEvent();
 		const changes: FileChange[] = [];
-		const tools = await createServerTools(sendEvent, context, changes, 'code');
+		const catalog = await createAgentToolCatalog(sendEvent, context, changes, 'code');
+		const tools = { ...catalog.nestedTools, ...catalog.directTools };
 		const execute = async (name: string, input: Record<string, unknown>) => {
 			const definition = tools[name];
 			if (!definition?.execute) throw new Error(`Missing tool: ${name}`);
@@ -37,7 +38,6 @@ describe('Computer tools against the project workspace', () => {
 
 		expect(await execute('read', { path: '/package.json' })).toMatchObject({ content: '{"name":"demo"}' });
 		expect(await execute('ls', { path: '/src' })).toMatchObject({ entries: [expect.objectContaining({ name: 'app.tsx' })] });
-		expect(await execute('list', { path: '/src' })).toMatchObject({ entries: [expect.objectContaining({ name: 'app.tsx' })] });
 		expect(await execute('find', { path: '/', pattern: '**/*.tsx' })).toMatchObject({ count: 1 });
 		expect(await execute('grep', { path: '/src', query: 'original' })).toMatchObject({ count: 1 });
 		expect(await execute('write', { path: '/src/app.tsx', content: 'changed' })).toMatchObject({ bytesWritten: 7 });

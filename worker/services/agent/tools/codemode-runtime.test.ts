@@ -1,14 +1,11 @@
 import { DynamicWorkerExecutor } from '@cloudflare/codemode';
 import { ToolSetConnector } from '@cloudflare/codemode/ai';
-import { createWorkspaceStateBackend } from '@cloudflare/shell';
-import { StateConnector } from '@cloudflare/shell/workers';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_AI_MODEL } from '@shared/constants';
-import { WorkspaceClient } from '@worker/lib/workspace-client';
 
-import { createServerTools } from './index';
+import { createAgentToolCatalog } from './index';
 import { createMockSendEvent } from './test-helpers';
 
 vi.mock('@worker/lib/durable-object-namespaces', () => ({
@@ -16,14 +13,14 @@ vi.mock('@worker/lib/durable-object-namespaces', () => ({
 }));
 
 describe('Code Mode Worker filesystem access', () => {
-	it('uses the same workspace for native tools and state helpers across RPC', async () => {
+	it('uses the same workspace for direct and programmatic tools across RPC', async () => {
 		const project = env.DurableObjectFilesystem.getByName(crypto.randomUUID());
 		await project.writeFileContent('/src/app.ts', 'original');
 		await project.writeFileContent('/package.json', '{"name":"demo","dependencies":{}}');
 		const objectId = project.id.toString();
 		const result = await runInDurableObject(project, async (_instance, state) => {
 			const fsStub = env.DurableObjectFilesystem.get(env.DurableObjectFilesystem.idFromString(objectId));
-			const tools = await createServerTools(
+			const catalog = await createAgentToolCatalog(
 				createMockSendEvent(),
 				{
 					projectRoot: '/project',
@@ -37,20 +34,21 @@ describe('Code Mode Worker filesystem access', () => {
 				[],
 				'code',
 			);
-			const connectors = [
-				new ToolSetConnector(state, { tools }),
-				new StateConnector(state, createWorkspaceStateBackend(new WorkspaceClient(fsStub, '/project', 'session'))),
-			];
+			const tools = { ...catalog.nestedTools, ...catalog.directTools };
+			const connectors = [new ToolSetConnector(state, { tools })];
 			const providers = await Promise.all(
-				connectors.map(async (connector) => ({
-					name: connector.name(),
-					fns: Object.fromEntries(
-						Object.keys(await connector.tools()).map((name) => [
-							name,
-							(input: unknown) => connector.executeTool(name, input, { executionId: 'test', seq: 0 }),
-						]),
-					),
-				})),
+				connectors.map(async (connector) => {
+					const description = await connector.describe();
+					return {
+						name: connector.name(),
+						fns: Object.fromEntries(
+							Object.keys(description.descriptors).map((name) => [
+								name,
+								(input: unknown) => connector.executeTool(name, input, { executionId: 'test' }),
+							]),
+						),
+					};
+				}),
 			);
 			// The test workerd lacks durable facets; exercise the real isolated Worker
 			// and SDK connectors directly, without mocking the filesystem RPC boundary.
@@ -64,9 +62,8 @@ describe('Code Mode Worker filesystem access', () => {
 			return executor.execute(
 				`
 				const before = await tools.read({path:"/src/app.ts"});
-				await state.writeFile({path:"/src/new.ts",content:"from Code Mode"});
-				let protectedError;
-				try { await state.writeFile({path:"/package.json",content:"{}"}); } catch (error) { protectedError = String(error); }
+				await tools.write({path:"/src/new.ts",content:"from Code Mode"});
+				let protectedError; try { await tools.write({path:"/package.json",content:"{}"}); } catch (error) { protectedError=String(error); }
 				await tools.dependencies_update({action:"add",name:"is-number",version:"7.0.0"});
 				return {before, protectedError, after:await tools.read({path:"/src/new.ts"})};
 			`,

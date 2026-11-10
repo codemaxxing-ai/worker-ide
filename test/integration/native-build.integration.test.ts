@@ -7,7 +7,8 @@ import { throwApiError } from '../../src/lib/api-error';
 import type { ApiRoutes, RootApiRoutes } from '../../worker/routes';
 import type { DevelopmentTestRoutes } from '../../worker/routes/development-test-routes';
 
-describe('native Vite production builds', () => {
+// Native commands allow five minutes; cold container setup needs its own margin.
+describe('native Vite production builds', { timeout: 360_000 }, () => {
 	afterAll(cleanupProjects);
 	it('builds a vinext Worker module and client assets in the project container', async () => {
 		const cookie = await ensureTestSession();

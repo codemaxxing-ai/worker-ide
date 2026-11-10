@@ -15,6 +15,7 @@ const entrySchema = z.object({
 	target: z.string().optional(),
 });
 type Entry = z.infer<typeof entrySchema>;
+type ChangeRow = { path: string; baseline: string | null; baseline_entry: string | null; after_entry: string | null };
 
 /** Keep old text baselines readable, and freeze each writer's result before FIFO handoff. */
 export class ComputerChanges {
@@ -30,6 +31,12 @@ export class ComputerChanges {
 		for (const column of ['baseline_entry', 'after_entry']) {
 			if (!columns.some((entry) => entry.name === column)) storage.sql.exec(`ALTER TABLE agent_writer_change ADD COLUMN ${column} TEXT`);
 		}
+		storage.sql.exec(
+			'CREATE TABLE IF NOT EXISTS agent_change_receipt (id TEXT PRIMARY KEY, writer_id TEXT NOT NULL, submission_id TEXT NOT NULL)',
+		);
+		storage.sql.exec(
+			'CREATE TABLE IF NOT EXISTS agent_change_receipt_file (receipt_id TEXT NOT NULL, path TEXT NOT NULL, baseline TEXT, baseline_entry TEXT, after_entry TEXT, PRIMARY KEY(receipt_id,path))',
+		);
 	}
 
 	private excluded(path: string) {
@@ -141,26 +148,79 @@ export class ComputerChanges {
 		this.storage.kv.put(`computer-change-owner:${writerId}`, true);
 	}
 
-	async drain(writerId: string) {
-		if (this.storage.kv.get(`computer-change-owner:${writerId}`)) return [];
-		const rows = this.storage.sql
-			.exec<{ path: string; baseline: string | null; baseline_entry: string | null; after_entry: string | null }>(
-				'SELECT path, baseline, baseline_entry, after_entry FROM agent_writer_change WHERE writer_id = ?',
-				writerId,
+	/** Claim frozen revisions before returning them across RPC. Lost replies remain recoverable. */
+	async claim(writerId: string, submissionId: string, receiptId: string) {
+		const existing = this.storage.sql
+			.exec<{ writer_id: string; submission_id: string }>(
+				'SELECT writer_id, submission_id FROM agent_change_receipt WHERE id = ?',
+				receiptId,
 			)
+			.toArray()[0];
+		if (existing) {
+			if (existing.writer_id !== writerId || existing.submission_id !== submissionId)
+				throw new Error('Change receipt belongs to another turn');
+			return this.readReceipt(writerId, receiptId);
+		}
+		if (this.storage.kv.get(`computer-change-owner:${writerId}`)) return [];
+		this.storage.transactionSync(() => {
+			const rows = this.storage.sql
+				.exec<ChangeRow>(
+					'SELECT path, baseline, baseline_entry, after_entry FROM agent_writer_change WHERE writer_id = ? AND after_entry IS NOT NULL',
+					writerId,
+				)
+				.toArray();
+			const changed = rows.filter((row) => row.baseline_entry !== row.after_entry);
+			if (changed.length > 0) {
+				this.storage.sql.exec(
+					'INSERT INTO agent_change_receipt (id,writer_id,submission_id) VALUES (?,?,?)',
+					receiptId,
+					writerId,
+					submissionId,
+				);
+				for (const row of changed)
+					this.storage.sql.exec(
+						'INSERT INTO agent_change_receipt_file (receipt_id,path,baseline,baseline_entry,after_entry) VALUES (?,?,?,?,?)',
+						receiptId,
+						row.path,
+						row.baseline,
+						row.baseline_entry,
+						row.after_entry,
+					);
+			}
+			this.storage.sql.exec('DELETE FROM agent_writer_change WHERE writer_id = ? AND after_entry IS NOT NULL', writerId);
+		});
+		return this.readReceipt(writerId, receiptId);
+	}
+	pending(writerId: string, submissionId: string): string[] {
+		return this.storage.sql
+			.exec<{ id: string }>(
+				'SELECT id FROM agent_change_receipt WHERE writer_id = ? AND submission_id = ? ORDER BY rowid',
+				writerId,
+				submissionId,
+			)
+			.toArray()
+			.map((row) => row.id);
+	}
+	acknowledge(writerId: string, receiptId: string): void {
+		this.assertReceiptOwner(writerId, receiptId);
+		this.storage.transactionSync(() => {
+			this.storage.sql.exec('DELETE FROM agent_change_receipt_file WHERE receipt_id = ?', receiptId);
+			this.storage.sql.exec('DELETE FROM agent_change_receipt WHERE id = ?', receiptId);
+		});
+	}
+	private assertReceiptOwner(writerId: string, receiptId: string): void {
+		const owner = this.storage.sql
+			.exec<{ writer_id: string }>('SELECT writer_id FROM agent_change_receipt WHERE id = ?', receiptId)
+			.toArray()[0];
+		if (owner && owner.writer_id !== writerId) throw new Error('Change receipt belongs to another session');
+	}
+	async readReceipt(writerId: string, receiptId: string) {
+		this.assertReceiptOwner(writerId, receiptId);
+		const rows = this.storage.sql
+			.exec<ChangeRow>('SELECT path,baseline,baseline_entry,after_entry FROM agent_change_receipt_file WHERE receipt_id = ?', receiptId)
 			.toArray();
 		const result = [];
 		for (const row of rows) {
-			// Reading large baseline content yields. Preserve any newer revision
-			// captured while this drain was assembling its result.
-			const removeDrainedRevision = () =>
-				this.storage.sql.exec(
-					'DELETE FROM agent_writer_change WHERE writer_id = ? AND path = ? AND baseline_entry IS ? AND after_entry IS ?',
-					writerId,
-					row.path,
-					row.baseline_entry,
-					row.after_entry,
-				);
 			// A newly captured row belongs to an operation still holding ownership.
 			if (row.baseline_entry && !row.after_entry) continue;
 			const before: Entry = row.baseline_entry
@@ -170,10 +230,9 @@ export class ComputerChanges {
 					: { type: 'missing' };
 			const after = row.after_entry ? entrySchema.parse(JSON.parse(row.after_entry)) : await this.entry(row.path);
 			if (JSON.stringify(before) === JSON.stringify(after)) {
-				removeDrainedRevision();
 				continue;
 			}
-			const type = after.type === 'missing' ? 'delete' : before.type === 'missing' ? 'create' : 'update';
+			const type: 'create' | 'delete' | 'update' = after.type === 'missing' ? 'delete' : before.type === 'missing' ? 'create' : 'update';
 			const entryType = after.type === 'missing' ? before.type : after.type;
 			if (entryType !== 'file' && entryType !== 'directory' && entryType !== 'symlink') continue;
 			result.push({
@@ -188,7 +247,6 @@ export class ComputerChanges {
 				isBinary:
 					before.bytes !== undefined || after.bytes !== undefined || before.bytesPath !== undefined || after.bytesPath !== undefined,
 			});
-			removeDrainedRevision();
 		}
 		return result;
 	}

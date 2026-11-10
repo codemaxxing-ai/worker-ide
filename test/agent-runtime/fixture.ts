@@ -2,86 +2,93 @@ import { WorkerEntrypoint, env as fixtureEnvironment } from 'cloudflare:workers'
 import { z } from 'zod';
 
 import { toHex } from '../../shared/project-id';
-import { AgentRunner as ApplicationAgentRunner, SessionTurnAgent, SubAgentWorker } from '../../worker/durable';
+import { ProjectAgent as ApplicationProjectAgent, SessionTurnAgent as ApplicationSessionTurnAgent } from '../../worker/durable';
 
-import type { AgentSessionState, StreamEvent } from '../../shared/agent-state';
-import type { ChatMessage } from '../../shared/types';
-
+import type { ChunkContext } from '@cloudflare/think';
 export * from '../../worker/durable';
-
-// Keep the application lifecycle intact; only the external documentation service
-// and AI transport are replaced. The provider adapter still parses real SSE.
-ApplicationAgentRunner.prototype.addMcpServer = async (): Promise<{ id: string; state: 'ready' }> => ({
+ApplicationProjectAgent.prototype.addMcpServer = async (): Promise<{ id: string; state: 'ready' }> => ({
 	id: 'fixture-docs',
 	state: 'ready',
 });
-SessionTurnAgent.prototype.addMcpServer = async (): Promise<{ id: string; state: 'ready' }> => ({ id: 'fixture-docs', state: 'ready' });
-SubAgentWorker.prototype.addMcpServer = async (): Promise<{ id: string; state: 'ready' }> => ({ id: 'fixture-docs', state: 'ready' });
 const aiBinding = fixtureEnvironment.AI;
-Reflect.set(fixtureEnvironment, 'AI', {
-	run: (model: string, input: unknown) => Reflect.apply(aiBinding.run, aiBinding, [model, input]),
-});
+Reflect.set(fixtureEnvironment, 'AI', { run: (model: string, input: unknown) => Reflect.apply(aiBinding.run, aiBinding, [model, input]) });
 
-export class AgentRunner extends ApplicationAgentRunner {
-	private streamBatches = 0;
-	private protocolBroadcasts = 0;
-	private rejectCompletions = false;
-
-	override async completeThinkTurn(...parameters: Parameters<ApplicationAgentRunner['completeThinkTurn']>): Promise<void> {
-		if (this.rejectCompletions) throw new Error('Simulated exhausted completion RPC');
-		await super.completeThinkTurn(...parameters);
+export class SessionTurnAgent extends ApplicationSessionTurnAgent {
+	private chunks = 0;
+	private toolInput = false;
+	private taskProgress: unknown;
+	override async onProgress(...parameters: Parameters<ApplicationSessionTurnAgent['onProgress']>): Promise<void> {
+		this.taskProgress = parameters[1];
+		await super.onProgress(...parameters);
 	}
 
-	blockCompletionForTest(): void {
-		this.rejectCompletions = true;
+	override async onChunk(context: ChunkContext): Promise<void> {
+		this.chunks++;
+		if (context.chunk.type === 'tool-input-start' || context.chunk.type === 'tool-call') this.toolInput = true;
+		await super.onChunk(context);
 	}
-
-	async restoreCompletionForTest(): Promise<void> {
-		this.rejectCompletions = false;
-		await this.reconcileRunningSession();
+	readFixtureState(): string {
+		return JSON.stringify({
+			...this.state,
+			...this.ctx.storage.kv.get<Record<string, unknown>>('execution'),
+			taskProgress: this.taskProgress,
+			chunks: this.chunks,
+			hasToolInput: this.toolInput,
+		});
 	}
-
-	async hasRecoveryWatchForTest(): Promise<boolean> {
-		const schedules = await this.listSchedules();
-		return schedules.some((schedule) => schedule.callback === 'reconcileRunningSession');
-	}
-
-	override async receiveThinkEvents(sessionId: string, events: StreamEvent[]): Promise<void> {
-		this.streamBatches++;
-		if (this.streamBatches > 500) throw new Error('Test RPC budget exhausted');
-		await super.receiveThinkEvents(sessionId, events);
-	}
-
-	override async _cf_broadcastToSubAgent(...parameters: Parameters<ApplicationAgentRunner['_cf_broadcastToSubAgent']>): Promise<void> {
-		this.protocolBroadcasts++;
-		await super._cf_broadcastToSubAgent(...parameters);
-	}
-
-	readTestTraffic() {
-		return { streamBatches: this.streamBatches, protocolBroadcasts: this.protocolBroadcasts };
-	}
-
-	readTestState(): AgentSessionState | undefined {
-		return this.state.currentSession;
-	}
-
-	readTestSessionId(): string | undefined {
-		return this.state.currentSession?.sessionId;
-	}
-
-	async inspectTestSubmission(sessionId: string, submissionId: string) {
-		const child = await this.subAgent(SessionTurnAgent, sessionId);
-		return child.inspectSubmission(submissionId);
-	}
-
-	evictForTest(): void {
+	evictFixture(): void {
 		this.ctx.abort('Simulated session eviction');
 	}
-
-	async seedTestHistory(sessionId: string, history: ChatMessage[]): Promise<void> {
-		this.sql`INSERT INTO assistant_sessions (id, name) VALUES (${sessionId}, 'Existing session')`;
-		await this.completeThinkTurn(sessionId, 'previous', history, 'completed');
-		await this.loadSession(sessionId);
+}
+export class ProjectAgent extends ApplicationProjectAgent {
+	private summaryUpdates = 0;
+	override async completeSessionOperation(input: Parameters<ApplicationProjectAgent['completeSessionOperation']>[0]): Promise<void> {
+		if (this.ctx.storage.kv.get('fixture-block-completion')) throw new Error('Simulated exhausted completion RPC');
+		await super.completeSessionOperation(input);
+	}
+	override updateSessionSummary(...parameters: Parameters<ApplicationProjectAgent['updateSessionSummary']>): void {
+		this.summaryUpdates++;
+		super.updateSessionSummary(...parameters);
+	}
+	blockCompletionForTest(): void {
+		this.ctx.storage.kv.put('fixture-block-completion', true);
+	}
+	async restoreCompletionForTest(sessionId: string): Promise<void> {
+		this.ctx.storage.kv.delete('fixture-block-completion');
+		const child = await this.dynamicAgents.get(SessionTurnAgent, sessionId);
+		await child.flushFinalizations();
+	}
+	readTestTraffic() {
+		return { summaryUpdates: this.summaryUpdates };
+	}
+	async readTestState(sessionId: string) {
+		const child = await this.dynamicAgents.get(SessionTurnAgent, sessionId);
+		return child.readFixtureState();
+	}
+	async inspectTestSubmission(sessionId: string, submissionId: string) {
+		const child = await this.dynamicAgents.get(SessionTurnAgent, sessionId);
+		return child.inspectSubmission(submissionId);
+	}
+	async evictForTest(sessionId: string): Promise<void> {
+		const child = await this.dynamicAgents.get(SessionTurnAgent, sessionId);
+		await child.evictFixture();
+	}
+	async seedTestHistory(sessionId: string): Promise<void> {
+		await this.createSession({
+			id: sessionId,
+			projectId: this.name.slice(6),
+			requestOriginContext: { appOrigin: 'https://example.com', contentOrigin: 'https://content.example.net' },
+		});
+		const child = await this.dynamicAgents.get(SessionTurnAgent, sessionId);
+		await child.addMessages([
+			{
+				id: 'old-user',
+				role: 'user',
+				metadata: { createdAt: 123_000, authorUserId: 'original-author', snapshotId: 'original-review' },
+				parts: [{ type: 'text', text: 'Previous request' }],
+			},
+			{ id: 'old-assistant', role: 'assistant', parts: [{ type: 'text', text: 'Previous answer'.repeat(1000) }] },
+		]);
 	}
 }
 
@@ -90,6 +97,15 @@ const inputSchema = z.object({
 	messages: z.array(z.object({ role: z.string(), content: z.unknown() })),
 });
 const startedModelRequests = new Set<string>();
+const notifications: Array<{ userId: string; tag?: string }> = [];
+let failNotifications = false;
+
+export class FixturePush extends WorkerEntrypoint {
+	async notifyUser(userId: string, notification: { tag?: string }): Promise<void> {
+		if (failNotifications) throw new Error('Simulated push delivery failure');
+		notifications.push({ userId, tag: notification.tag });
+	}
+}
 
 export class FixtureAI extends WorkerEntrypoint {
 	async run(_model: string, rawInput: unknown) {
@@ -143,11 +159,11 @@ export class FixtureAI extends WorkerEntrypoint {
 					'codemode-output':
 						'const first = await tools.exec({command:"printf first",backend:"shell"}); await new Promise(resolve => setTimeout(resolve, 1000)); const second = await tools.exec({command:"printf second",backend:"shell"}); await new Promise(resolve => setTimeout(resolve, 1000)); return {first, second};',
 					'codemode-failure':
-						'for (let index = 0; index < 3; index++) { await tools.exec({command:"exit 7",backend:"shell"}); } await state.writeFile({path:"/source.txt",content:"must not execute"}); return "unexpected";',
+						'for (let index = 0; index < 3; index++) { await tools.exec({command:"exit 7",backend:"shell"}); } await tools.write({path:"/source.txt",content:"must not execute"}); return "unexpected";',
 					'codemode-progress':
-						'for (let index = 0; index < 3; index++) { await tools.exec({command:"exit 7",backend:"shell"}); await state.writeFile({path:"/source.txt",content:"progress-"+index}); } return "done";',
+						'for (let index = 0; index < 3; index++) { await tools.exec({command:"exit 7",backend:"shell"}); await tools.write({path:"/source.txt",content:"progress-"+index}); } return "done";',
 					'state-failure':
-						'for (let index = 0; index < 3; index++) { try { await state.writeFile({path:"/package.json",content:"{}"}); } catch {} } await state.writeFile({path:"/source.txt",content:"must not execute"}); return "unexpected";',
+						'for (let index = 0; index < 3; index++) { try { await tools.write({path:"/package.json",content:"{}"}); } catch {} } await tools.write({path:"/source.txt",content:"must not execute"}); return "unexpected";',
 				};
 				const code = codeModeScenarios[prompt];
 				if ((code && !finishedTool) || prompt === 'repeat-failure') {
@@ -257,62 +273,79 @@ export class FixtureAI extends WorkerEntrypoint {
 }
 
 interface FixtureEnvironment {
-	AgentRunner: DurableObjectNamespace<AgentRunner>;
+	ProjectAgent: DurableObjectNamespace<ProjectAgent>;
 	DurableObjectFilesystem: Env['DurableObjectFilesystem'];
 	DB: D1Database;
 }
-
 const submitSchema = z.object({ messageId: z.string(), prompt: z.string() });
-
 export default {
 	async fetch(request: Request, environment: FixtureEnvironment): Promise<Response> {
 		const url = new URL(request.url);
 		if (url.pathname === '/provider-started')
 			return Response.json({ started: startedModelRequests.has(url.searchParams.get('prompt') ?? '') });
+		if (url.pathname === '/notifications') return Response.json(notifications);
+		if (url.pathname === '/fail-notifications') {
+			failNotifications = true;
+			return Response.json({ failed: true });
+		}
+		if (url.pathname === '/enable-notifications') {
+			failNotifications = false;
+			return Response.json({ failed: false });
+		}
 		if (url.pathname === '/project') {
-			await environment.DB.exec(
-				'CREATE TABLE IF NOT EXISTS project (id TEXT PRIMARY KEY, organization_id TEXT, deleted_at TEXT, banned_at TEXT)',
-			);
 			const identifier = environment.DurableObjectFilesystem.newUniqueId();
 			await environment.DurableObjectFilesystem.get(identifier).writeFileContent('/source.txt', 'baseline');
 			return Response.json({ projectId: BigInt(`0x${identifier}`).toString(36) });
 		}
 		const projectId = z.string().min(1).parse(url.searchParams.get('project'));
 		const sessionId = url.searchParams.get('session') ?? 'session';
-		const parent = environment.AgentRunner.getByName(`agent:${projectId}`);
-		await parent.setName(`agent:${projectId}`);
+		const parent = environment.ProjectAgent.getByName(`agent:${projectId}`);
+		await parent.prepareProject();
+		if (url.pathname === '/chat') {
+			const headers = new Headers(request.headers);
+			headers.set('x-worker-ide-user-id', 'original-author');
+			headers.set('x-partykit-room', `agent:${projectId}`);
+			url.pathname = `/sub/session-turn-agent/${sessionId}`;
+			return parent.fetch(new Request(url, { headers }));
+		}
+		if (url.pathname === '/delete') {
+			await parent.deleteSession(sessionId);
+			return Response.json({ deleted: true });
+		}
+		if (url.pathname === '/branches')
+			return Response.json(await parent.sessionBranches(sessionId, url.searchParams.get('message') ?? 'old-user'));
 		if (url.pathname === '/file') {
 			const filesystem = environment.DurableObjectFilesystem.get(environment.DurableObjectFilesystem.idFromString(toHex(projectId)));
 			return Response.json({ content: await filesystem.wsReadFile('/source.txt') });
 		}
 		if (url.pathname === '/submit') {
 			const input = submitSchema.parse(await request.json());
+			await parent.createSession({
+				id: sessionId,
+				projectId,
+				requestOriginContext: { appOrigin: 'https://example.com', contentOrigin: 'https://content.example.net' },
+			});
 			return Response.json(
-				await parent.submitMessage({
-					sessionId,
-					messageId: input.messageId,
-					createdAt: Date.now(),
-					mode: 'code',
-					parts: [{ type: 'text', content: input.prompt }],
+				await parent.submitMessage(sessionId, {
+					id: input.messageId,
+					role: 'user',
+					metadata: { createdAt: Date.now(), submissionId: input.messageId },
+					parts: [{ type: 'text', text: input.prompt }],
 				}),
 			);
 		}
 		if (url.pathname === '/stop') {
-			await parent.abortRun(sessionId);
+			await parent.cancelSession(sessionId);
 			return Response.json({ stopped: true });
 		}
 		if (url.pathname === '/evict') {
-			await parent.evictForTest();
+			await parent.evictForTest(sessionId);
 			return new Response('evicted');
 		}
-		if (url.pathname === '/state') return Response.json(await parent.readTestState());
-		if (url.pathname === '/reload-session') {
-			await parent.clearCurrentSession();
-			await parent.loadSession(sessionId);
-			return Response.json(await parent.readTestState());
-		}
+		if (url.pathname === '/state' || url.pathname === '/reload-session')
+			return new Response(await parent.readTestState(sessionId), { headers: { 'Content-Type': 'application/json' } });
 		if (url.pathname === '/debug-log') {
-			const state = z.object({ debugLogId: z.string() }).safeParse(await parent.readTestState());
+			const state = z.object({ debugLogId: z.string() }).safeParse(JSON.parse(await parent.readTestState(sessionId)));
 			if (!state.success) return new Response('No debug log', { status: 404 });
 			const filesystem = environment.DurableObjectFilesystem.get(environment.DurableObjectFilesystem.idFromString(toHex(projectId)));
 			return new Response(await filesystem.wsReadFile(`/.agent/sessions/${sessionId}/debug-logs/${state.data.debugLogId}.json`), {
@@ -325,32 +358,17 @@ export default {
 			return Response.json({ blocked: true });
 		}
 		if (url.pathname === '/restore-completion') {
-			await parent.restoreCompletionForTest();
+			await parent.restoreCompletionForTest(sessionId);
 			return Response.json({ restored: true });
 		}
-		if (url.pathname === '/recovery-watch') return Response.json({ scheduled: await parent.hasRecoveryWatchForTest() });
 		if (url.pathname === '/submission')
 			return Response.json(await parent.inspectTestSubmission(sessionId, url.searchParams.get('message') ?? 'message'));
-		if (url.pathname === '/fork') {
-			await parent.revertSession(sessionId, 1);
-			return Response.json({ sessionId: await parent.readTestSessionId() });
-		}
 		if (url.pathname === '/seed-history') {
-			const history: ChatMessage[] = [
-				{
-					id: 'old-user',
-					role: 'user',
-					authorUserId: 'original-author',
-					createdAt: 123_000,
-					metadata: { snapshotId: 'original-review' },
-					parts: [{ type: 'text', content: 'Previous request' }],
-				},
-				{ id: 'old-assistant', role: 'assistant', parts: [{ type: 'text', content: 'Previous answer'.repeat(1000) }] },
-			];
-			await parent.seedTestHistory(sessionId, history);
+			await parent.seedTestHistory(sessionId);
 			return Response.json({ seeded: true });
 		}
-		using session = await parent.readSession(sessionId);
-		return Response.json(session ?? {});
+		const state: unknown = JSON.parse(await parent.readTestState(sessionId));
+		const history = z.object({ messages: z.array(z.unknown()) }).parse(JSON.parse(await parent.readSessionHistory(sessionId)));
+		return Response.json({ ...z.record(z.string(), z.unknown()).parse(state), history: history.messages });
 	},
 };

@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { usePreviewReferenceInteractions } from '@/features/agent/lib/reference-actions';
@@ -415,6 +415,7 @@ export function RichTextInput({
 	inlineSuffix?: React.ReactNode;
 	className?: string;
 }) {
+	const inputId = useId();
 	const containerReference = useRef<HTMLDivElement>(null);
 	const isComposingReference = useRef(false);
 	const suppressInputReference = useRef(false);
@@ -884,6 +885,7 @@ export function RichTextInput({
 			</AnimatePresence>
 			<div
 				ref={containerReference}
+				id={`agent-message-${inputId}`}
 				contentEditable={!disabled}
 				suppressContentEditableWarning
 				onInput={handleInput}
@@ -901,6 +903,7 @@ export function RichTextInput({
 				onMouseMove={handleMouseMove}
 				onMouseLeave={handleMouseLeave}
 				role="textbox"
+				aria-label="Message"
 				aria-multiline="true"
 				aria-placeholder={placeholder}
 				className={cn(

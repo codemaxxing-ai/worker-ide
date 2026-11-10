@@ -1,5 +1,3 @@
-import type { AIModelId } from '../constants';
-
 /**
  * Agent operating mode.
  * - code: Full tool access — reads, writes, edits, deletes files (default).
@@ -35,32 +33,6 @@ export interface ToolMetadataInfo {
 	title: string;
 	metadata: Record<string, unknown>;
 }
-export interface AiSession {
-	id: string;
-	title: string;
-	titleGenerated?: boolean;
-	createdAt: number;
-	history: ChatMessage[];
-	contextTokensUsed?: number;
-	/** Set by the client after a revert to prevent the server-side stream
-	 *  `finally` block from overwriting the truncated history. */
-	revertedAt?: number;
-	/** Structured tool result metadata keyed by toolCallId, persisted so loaded sessions
-	 *  render the same rich UI (edit stats, line counts, etc.) as live-streamed ones. */
-	toolMetadata?: Record<string, ToolMetadataInfo>;
-	toolErrors?: Record<string, ToolErrorInfo>;
-	/** Terminal status of the last agent run. Set by the agent-runner after
-	 *  the loop finishes so reloaded sessions can restore the AgentError UI. */
-	status?: AgentSessionStatus;
-	errorMessage?: string;
-	stopRequested?: boolean;
-}
-export interface AiSessionSummary {
-	id: string;
-	title: string;
-	createdAt: number;
-}
-export type AgentSessionStatus = 'running' | 'completed' | 'error' | 'aborted';
 export interface TodoItem {
 	id: string;
 	content: string;
@@ -135,18 +107,3 @@ export type MessagePart = TextPart | PreviewElementPart | ImagePart | ToolCallPa
  * App-owned message type that gives full control over the message format
  * without external dependency coupling.
  */
-export interface ChatMessage {
-	id: string;
-	role: 'user' | 'assistant';
-	parts: MessagePart[];
-	authorUserId?: string;
-	createdAt?: number;
-	metadata?: {
-		request?: {
-			mode?: AgentMode;
-			model?: AIModelId;
-			state: 'queued' | 'committed';
-		};
-		snapshotId?: string;
-	};
-}

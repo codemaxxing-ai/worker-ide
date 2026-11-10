@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import type { TodoItem } from './types';
-import type { ChatMessage } from '@shared/types';
+import type { UIMessage } from 'ai';
 
 const MAX_EVIDENCE_CHARACTERS = 32_000;
 const probabilitySchema = z.object({ type: z.literal('noul'), noul: z.number().min(0).max(1) }).transform((answer) => answer.noul);
@@ -20,7 +20,7 @@ interface ReviewObservation {
 }
 
 export interface CompletionReviewContext {
-	messages: ChatMessage[];
+	messages: UIMessage[];
 	changedPaths: string[];
 	todos: TodoItem[];
 	observations: ReviewObservation[];
@@ -57,7 +57,7 @@ export class CompletionReviewRecorder {
 	record(toolName: string, input: unknown, output: unknown, failed = false): void {
 		if (toolName === 'completion_review') return;
 		if (
-			!['exec', 'bash', 'test_run', 'lint_check', 'dependencies_list', 'dependencies_update', 'todos_update'].includes(toolName) &&
+			!['exec', 'test_run', 'lint_check', 'dependencies_list', 'dependencies_update', 'todos_update'].includes(toolName) &&
 			!toolName.startsWith('browser_')
 		)
 			return;
@@ -135,7 +135,7 @@ export async function reviewCompletion(
 	const conversation = context.messages.map((message) => ({
 		id: `message:${message.id}`,
 		role: message.role,
-		parts: message.parts.filter((part) => part.type === 'text' || part.type === 'preview-element'),
+		parts: message.parts.filter((part) => part.type === 'text'),
 	}));
 	const state = JSON.stringify({
 		conversation,

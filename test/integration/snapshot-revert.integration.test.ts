@@ -79,33 +79,11 @@ async function createSnapshot(
 	const result: { id: string } = await response.json();
 	return result.id;
 }
-async function savePendingChanges(
-	projectId: string,
-	changes: Record<
-		string,
-		{
-			path: string;
-			action: 'create' | 'edit' | 'delete' | 'move';
-			beforeContent?: string;
-			afterContent?: string;
-			snapshotId?: string;
-			status: 'pending' | 'approved' | 'rejected';
-			hunkStatuses: Array<'pending' | 'approved' | 'rejected'>;
-			sessionId: string;
-		}
-	>,
-): Promise<void> {
-	const response = await authedFetch(`${BASE_URL}/p/${projectId}/api/pending-changes`, {
-		method: 'PUT',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(changes),
-	});
+async function loadReviewEntries(projectId: string): Promise<Array<{ id: string; path: string }>> {
+	const response = await authedFetch(`${BASE_URL}/p/${projectId}/api/review`);
 	expect(response.ok).toBe(true);
-}
-async function loadPendingChanges(projectId: string): Promise<Record<string, unknown>> {
-	const response = await authedFetch(`${BASE_URL}/p/${projectId}/api/pending-changes`);
-	expect(response.ok).toBe(true);
-	return response.json();
+	const review: { entries: Array<{ id: string; path: string }> } = await response.json();
+	return review.entries;
 }
 
 type SnapshotSummary = { id: string; timestamp: number; label: string; changeCount: number };
@@ -393,7 +371,7 @@ describe('Snapshot & Revert Integration Tests', () => {
 			const response = await authedFetch(`${BASE_URL}/p/${cascadeProjectId}/api/snapshots/revert-cascade`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ snapshotIds: [snapshotId] }),
+				body: JSON.stringify({ operationId: crypto.randomUUID(), snapshotIds: [snapshotId] }),
 			});
 			expect(response.ok).toBe(true);
 
@@ -434,7 +412,7 @@ describe('Snapshot & Revert Integration Tests', () => {
 			const response = await authedFetch(`${BASE_URL}/p/${cascadeProjectId}/api/snapshots/revert-cascade`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ snapshotIds: [turn2SnapshotId, turn1SnapshotId] }),
+				body: JSON.stringify({ operationId: crypto.randomUUID(), snapshotIds: [turn2SnapshotId, turn1SnapshotId] }),
 			});
 			expect(response.ok).toBe(true);
 
@@ -489,7 +467,7 @@ describe('Snapshot & Revert Integration Tests', () => {
 			const response = await authedFetch(`${BASE_URL}/p/${dedupProjectId}/api/snapshots/revert-cascade`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ snapshotIds: [turn3SnapshotId, turn2SnapshotId, turn1SnapshotId] }),
+				body: JSON.stringify({ operationId: crypto.randomUUID(), snapshotIds: [turn3SnapshotId, turn2SnapshotId, turn1SnapshotId] }),
 			});
 			expect(response.ok).toBe(true);
 
@@ -521,7 +499,7 @@ describe('Snapshot & Revert Integration Tests', () => {
 			const response = await authedFetch(`${BASE_URL}/p/${dedupProjectId}/api/snapshots/revert-cascade`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ snapshotIds: [turn2SnapshotId, turn1SnapshotId] }),
+				body: JSON.stringify({ operationId: crypto.randomUUID(), snapshotIds: [turn2SnapshotId, turn1SnapshotId] }),
 			});
 			expect(response.ok).toBe(true);
 
@@ -554,7 +532,7 @@ describe('Snapshot & Revert Integration Tests', () => {
 			const response = await authedFetch(`${BASE_URL}/p/${missingProjectId}/api/snapshots/revert-cascade`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ snapshotIds: ['deadbeef', snapshotId] }),
+				body: JSON.stringify({ operationId: crypto.randomUUID(), snapshotIds: ['deadbeef', snapshotId] }),
 			});
 			expect(response.ok).toBe(true);
 
@@ -570,7 +548,7 @@ describe('Snapshot & Revert Integration Tests', () => {
 			const response = await authedFetch(`${BASE_URL}/p/${missingProjectId}/api/snapshots/revert-cascade`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ snapshotIds: ['aaaaaaaa', 'bbbbbbbb'] }),
+				body: JSON.stringify({ operationId: crypto.randomUUID(), snapshotIds: ['aaaaaaaa', 'bbbbbbbb'] }),
 			});
 			expect(response.ok).toBe(true);
 
@@ -596,7 +574,7 @@ describe('Snapshot & Revert Integration Tests', () => {
 			const response = await authedFetch(`${BASE_URL}/p/${validationProjectId}/api/snapshots/revert-cascade`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ snapshotIds: [] }),
+				body: JSON.stringify({ operationId: crypto.randomUUID(), snapshotIds: [] }),
 			});
 			expect(response.ok).toBe(false);
 		});
@@ -605,7 +583,7 @@ describe('Snapshot & Revert Integration Tests', () => {
 			const response = await authedFetch(`${BASE_URL}/p/${validationProjectId}/api/snapshots/revert-cascade`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ snapshotIds: ['not-hex!!!'] }),
+				body: JSON.stringify({ operationId: crypto.randomUUID(), snapshotIds: ['not-hex!!!'] }),
 			});
 			expect(response.ok).toBe(false);
 		});
@@ -631,68 +609,42 @@ describe('Snapshot & Revert Integration Tests', () => {
 			pendingProjectId = await projectPromises.pending;
 		});
 
-		it('pending changes survive independently of snapshot revert', async () => {
-			// Setup: write pending changes for two snapshots
-			await savePendingChanges(pendingProjectId, {
-				'/src/from-snap-a.ts': {
-					path: '/src/from-snap-a.ts',
-					action: 'edit',
-					beforeContent: 'original-a',
-					afterContent: 'modified-a',
-					snapshotId: 'ff000001',
-					status: 'pending',
-					hunkStatuses: [],
-					sessionId: 'sess-1',
-				},
-				'/src/from-snap-b.ts': {
-					path: '/src/from-snap-b.ts',
-					action: 'create',
-					afterContent: 'created-b',
-					snapshotId: 'ff000002',
-					status: 'pending',
-					hunkStatuses: [],
-					sessionId: 'sess-1',
-				},
+		it('snapshot restoration preserves separate review records', async () => {
+			await writeFile(pendingProjectId, '/src/from-snap-a.ts', 'original-a');
+			const execution = await authedFetch(`${BASE_URL}/p/${pendingProjectId}/api/__test/computer-exec`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					command: 'printf modified-a > src/from-snap-a.ts; printf created-b > src/from-snap-b.ts',
+					snapshot: true,
+					sessionId: 'review-session',
+				}),
 			});
+			expect(execution.ok).toBe(true);
+			const result: { snapshotId: string } = await execution.json();
+			expect(await loadReviewEntries(pendingProjectId)).toHaveLength(2);
 
-			// Verify both exist
-			const before = await loadPendingChanges(pendingProjectId);
-			expect(Object.keys(before)).toHaveLength(2);
-
-			// Revert the snapshot for from-snap-a.ts (file-level only)
-			await writeFile(pendingProjectId, '/src/from-snap-a.ts', 'modified-a');
-			const snapshotId = await createSnapshot(pendingProjectId, {
-				changes: [{ path: '/src/from-snap-a.ts', action: 'edit', beforeContent: 'original-a' }],
-			});
-			const response = await authedFetch(`${BASE_URL}/p/${pendingProjectId}/api/snapshot/${snapshotId}/revert`, {
+			const response = await authedFetch(`${BASE_URL}/p/${pendingProjectId}/api/snapshot/${result.snapshotId}/revert`, {
 				method: 'POST',
 			});
 			expect(response.ok).toBe(true);
-
-			// Pending changes on the server are NOT automatically cleared by the
-			// backend revert — that's the frontend's responsibility.
-			// Verify they're still there.
-			const after = await loadPendingChanges(pendingProjectId);
-			expect(Object.keys(after)).toHaveLength(2);
+			expect(await readFile(pendingProjectId, '/src/from-snap-a.ts')).toBe('original-a');
+			expect(await loadReviewEntries(pendingProjectId)).toHaveLength(2);
 		});
 
-		it('frontend can save updated pending changes after revert', async () => {
-			// Simulate: frontend cleared snap-a's change and saved
-			await savePendingChanges(pendingProjectId, {
-				'/src/from-snap-b.ts': {
-					path: '/src/from-snap-b.ts',
-					action: 'create',
-					afterContent: 'created-b',
-					snapshotId: 'ff000002',
-					status: 'pending',
-					hunkStatuses: [],
-					sessionId: 'sess-1',
-				},
+		it('resolves one review without replacing the other pending change', async () => {
+			const response = await authedFetch(`${BASE_URL}/p/${pendingProjectId}/api/review`);
+			expect(response.ok).toBe(true);
+			const review: { entries: Array<{ id: string; path: string }> } = await response.json();
+			const entry = review.entries.find((item) => item.path === '/src/from-snap-a.ts');
+			if (!entry) throw new Error('Missing review entry');
+			const resolved = await authedFetch(`${BASE_URL}/p/${pendingProjectId}/api/review/${entry.id}/resolve`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ decision: 'accept' }),
 			});
-
-			const after = await loadPendingChanges(pendingProjectId);
-			expect(Object.keys(after)).toHaveLength(1);
-			expect(after).toHaveProperty('/src/from-snap-b.ts');
+			expect(resolved.ok).toBe(true);
+			expect(await loadReviewEntries(pendingProjectId)).toEqual([expect.objectContaining({ path: '/src/from-snap-b.ts' })]);
 		});
 	});
 
@@ -809,7 +761,7 @@ describe('Snapshot & Revert Integration Tests', () => {
 			const response = await authedFetch(`${BASE_URL}/p/${multiSessionProjectId}/api/snapshots/revert-cascade`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ snapshotIds: [session2SnapshotId] }),
+				body: JSON.stringify({ operationId: crypto.randomUUID(), snapshotIds: [session2SnapshotId] }),
 			});
 			expect(response.ok).toBe(true);
 
@@ -843,7 +795,7 @@ describe('Snapshot & Revert Integration Tests', () => {
 			const response = await authedFetch(`${BASE_URL}/p/${multiSessionProjectId}/api/snapshots/revert-cascade`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ snapshotIds: [turn2SnapshotId, turn1SnapshotId] }),
+				body: JSON.stringify({ operationId: crypto.randomUUID(), snapshotIds: [turn2SnapshotId, turn1SnapshotId] }),
 			});
 			expect(response.ok).toBe(true);
 
@@ -887,7 +839,7 @@ describe('Snapshot & Revert Integration Tests', () => {
 			const response = await authedFetch(`${BASE_URL}/p/${disjointProjectId}/api/snapshots/revert-cascade`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ snapshotIds: [turn3SnapshotId, turn2SnapshotId, turn1SnapshotId] }),
+				body: JSON.stringify({ operationId: crypto.randomUUID(), snapshotIds: [turn3SnapshotId, turn2SnapshotId, turn1SnapshotId] }),
 			});
 			expect(response.ok).toBe(true);
 
@@ -965,7 +917,7 @@ describe('Snapshot & Revert Integration Tests', () => {
 			const response1 = await authedFetch(`${BASE_URL}/p/${idempotentProjectId}/api/snapshots/revert-cascade`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ snapshotIds: [snapshotId] }),
+				body: JSON.stringify({ operationId: crypto.randomUUID(), snapshotIds: [snapshotId] }),
 			});
 			expect(response1.ok).toBe(true);
 			expect(await readFile(idempotentProjectId, '/src/idempotent.ts')).toBe('original');
@@ -974,7 +926,7 @@ describe('Snapshot & Revert Integration Tests', () => {
 			const response2 = await authedFetch(`${BASE_URL}/p/${idempotentProjectId}/api/snapshots/revert-cascade`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ snapshotIds: [snapshotId] }),
+				body: JSON.stringify({ operationId: crypto.randomUUID(), snapshotIds: [snapshotId] }),
 			});
 			expect(response2.ok).toBe(true);
 			expect(await readFile(idempotentProjectId, '/src/idempotent.ts')).toBe('original');
@@ -990,7 +942,7 @@ describe('Snapshot & Revert Integration Tests', () => {
 			await authedFetch(`${BASE_URL}/p/${idempotentProjectId}/api/snapshots/revert-cascade`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ snapshotIds: [snapshotId] }),
+				body: JSON.stringify({ operationId: crypto.randomUUID(), snapshotIds: [snapshotId] }),
 			});
 			expect(await fileExists(idempotentProjectId, '/src/created-twice.ts')).toBe(false);
 
@@ -998,7 +950,7 @@ describe('Snapshot & Revert Integration Tests', () => {
 			const response = await authedFetch(`${BASE_URL}/p/${idempotentProjectId}/api/snapshots/revert-cascade`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ snapshotIds: [snapshotId] }),
+				body: JSON.stringify({ operationId: crypto.randomUUID(), snapshotIds: [snapshotId] }),
 			});
 			expect(response.ok).toBe(true);
 			const result: CascadeRevertResult = await response.json();
@@ -1035,7 +987,7 @@ describe('Snapshot & Revert Integration Tests', () => {
 			const response = await authedFetch(`${BASE_URL}/p/${largeProjectId}/api/snapshots/revert-cascade`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ snapshotIds: snapshotIds.toReversed() }),
+				body: JSON.stringify({ operationId: crypto.randomUUID(), snapshotIds: snapshotIds.toReversed() }),
 			});
 			expect(response.ok).toBe(true);
 

@@ -1,15 +1,16 @@
-import { createCompactFunction } from 'agents/experimental/memory/utils';
+import { createCompactFunction } from 'agents/sessions';
 import { generateText, validateUIMessages, wrapLanguageModel } from 'ai';
 
+import { agentMessageMetadataSchema } from '@shared/agent-chat';
 import { getModelLimits, SUMMARIZATION_AI_MODEL } from '@shared/constants';
 
-import { estimateSessionTokens } from './context-pruner';
 import { createAdapter } from './workers-ai';
 
 import type { LanguageModelV4 } from '@ai-sdk/provider';
+import type { Session } from '@cloudflare/think';
+import type { AgentMessage } from '@shared/agent-chat';
 import type { AIModelId } from '@shared/constants';
-import type { Session, SessionMessage } from 'agents/experimental/memory/session';
-import type { LanguageModel, UIMessage } from 'ai';
+import type { LanguageModel } from 'ai';
 
 interface HarnessCompactionContext {
 	projectId?: string;
@@ -33,16 +34,18 @@ export function createHarnessCompactor(context: () => HarnessCompactionContext):
 			});
 			return text;
 		},
-		protectHead: 3,
-		tailTokenBudget: 32_000,
-		minTailMessages: 4,
+		keepRecentTokens: 32_000,
 	});
 }
 
-export function configureHarnessSession(session: Session, context: () => HarnessCompactionContext): Session {
-	return session.onCompaction(createHarnessCompactor(context)).compactAfter(HARNESS_COMPACTION_THRESHOLD, {
-		tokenCounter: ({ messages, systemPrompt }) => estimateSessionTokens(messages, systemPrompt),
-	});
+interface CompactableSession {
+	onCompaction(compactor: Parameters<Session['onCompaction']>[0]): unknown;
+	compactAfter(threshold: number): unknown;
+}
+export function configureHarnessSession<T extends CompactableSession>(session: T, context: () => HarnessCompactionContext): T {
+	session.onCompaction(createHarnessCompactor(context));
+	session.compactAfter(HARNESS_COMPACTION_THRESHOLD);
+	return session;
 }
 
 export function harnessContextGuard(model: AIModelId) {
@@ -75,21 +78,34 @@ export function withHarnessContextBudget(model: LanguageModel, modelId: AIModelI
 	});
 }
 
-/** Compaction overlays and bounded hydration are inference views, never UI history. */
-export async function readHarnessTranscript(session: Pick<Session, 'getHistoryRowStats' | 'getMessage'>): Promise<UIMessage[]> {
-	const messages = await readSessionTranscript(session);
-	if (messages.length === 0) return [];
-	return validateUIMessages({ messages });
-}
-
-export async function readSessionTranscript(session: Pick<Session, 'getHistoryRowStats' | 'getMessage'>): Promise<SessionMessage[]> {
-	const rows = await session.getHistoryRowStats();
-	if (!rows) throw new Error('The session provider cannot read the original transcript path.');
+/** UI history reads original rows, bounded by both row count and payload bytes. */
+export async function readHarnessHistoryPage(
+	session: Pick<Session, 'getHistoryRowStats' | 'getMessage'>,
+	before?: string,
+	leafId?: string,
+): Promise<{ messages: AgentMessage[]; before?: string }> {
+	const rows = await session.getHistoryRowStats(leafId);
+	const boundary = before ? rows.findIndex((row) => row.id === before) : rows.length;
+	if (boundary < 0) throw new Error('History cursor not found');
+	let first = boundary;
+	let bytes = 0;
+	while (first > 0 && boundary - first < 50) {
+		const row = rows[first - 1];
+		if (!row || (first < boundary && bytes + row.bytes > 4 * 1024 * 1024)) break;
+		bytes += row.bytes;
+		first--;
+	}
 	const messages = [];
-	for (const row of rows) {
+	for (const row of rows.slice(first, boundary)) {
 		const message = await session.getMessage(row.id);
-		if (!message) throw new Error(`The original transcript message ${row.id} is unavailable.`);
+		if (!message) throw new Error(`Transcript message ${row.id} is unavailable`);
 		messages.push(message);
 	}
-	return messages;
+	return {
+		messages:
+			messages.length === 0
+				? []
+				: await validateUIMessages<AgentMessage>({ messages, metadataSchema: agentMessageMetadataSchema.optional() }),
+		before: first > 0 ? rows[first]?.id : undefined,
+	};
 }

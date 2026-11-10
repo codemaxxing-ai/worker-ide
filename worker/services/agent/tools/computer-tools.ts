@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-import { createAITools } from '@cloudflare/computer/tools';
+import { createAITools } from '@cloudflare/computer/tools/ai-sdk';
+import { z } from 'zod';
 
 import { ComputerOutputObserver } from '../../../lib/computer-output-observer';
 import { computerPath, projectPath } from '../../../lib/computer-workspace';
@@ -54,6 +55,7 @@ export function createComputerTools(context: ToolExecutorContext, mode: 'code' |
 		workspace: {
 			fs: filesystem,
 			runtime: {
+				backends: () => ['auto', 'shell', 'container'].map((id) => ({ id, protocol: 'command', callable: false })),
 				exec: async (command, options) => {
 					const identifier = crypto.randomUUID();
 					const result = executeComputerCommand(executionContext.getStore() ?? context, command, { ...options, id: identifier });
@@ -63,28 +65,29 @@ export function createComputerTools(context: ToolExecutorContext, mode: 'code' |
 		},
 		readonly: mode !== 'code',
 		assets: false,
-		shell: {
-			defaultBackend: 'auto',
-			maxBytes: 60_000,
-			streamMaxBytes: 60_000,
-			backends: {
-				auto: {
-					description:
-						'Prefer this backend. Supported file/text commands stay in the Worker isolate; native binaries and full test runners use Linux. Use Worker lint, test, preview and browser tools when sufficient. Reuse installed dependencies for native checks. Commands are never retried on another backend.',
-				},
-				shell: {
-					description:
-						'Isolate shell for file operations and text processing. No direct networking or native binaries. Deadline 30 seconds.',
-				},
-				container: {
-					description:
-						'Linux with Node 24, Bun, Git, Python and native build tools. Use only for a concrete native requirement, such as full TypeScript checking, DOM/Vitest tests or native binaries. Worker lint, lightweight tests and Worker previews/builds need no container installation. Check existing package availability; install only dependencies missing from the required native runtime. Source/type errors do not justify installing. Public HTTP(S) through the controlled gateway. Foreground commands only; deadline five minutes.',
-				},
+		execOutput: { maxBytes: 60_000, maxLines: 2000 },
+		exec: {
+			auto: {
+				description:
+					'Prefer this backend. Supported file/text commands stay in the Worker isolate; native binaries and full test runners use Linux. Use Worker lint, test, preview and browser tools when sufficient. Reuse installed dependencies for native checks. Commands are never retried on another backend.',
+			},
+			shell: {
+				description: 'Isolate shell for file operations and text processing. No direct networking or native binaries. Deadline 30 seconds.',
+			},
+			container: {
+				description:
+					'Linux with Node 24, Bun, Git, Python and native build tools. Use only for a concrete native requirement, such as full TypeScript checking, DOM/Vitest tests or native binaries. Worker lint, lightweight tests and Worker previews/builds need no container installation. Check existing package availability; install only dependencies missing from the required native runtime. Source/type errors do not justify installing. Public HTTP(S) through the controlled gateway. Foreground commands only; deadline five minutes.',
 			},
 		},
 	});
-	// Older conversations and some models use the long directory-listing name.
-	tools.list = { ...tools.ls };
+	if (tools.exec)
+		tools.exec.inputSchema = z.object({
+			command: z.string(),
+			cwd: z.string().optional(),
+			backend: z.enum(['auto', 'shell', 'container']).default('auto'),
+			env: z.record(z.string(), z.string()).optional(),
+			input: z.record(z.string(), z.json()).optional(),
+		});
 	for (const name of ['write', 'edit', 'delete']) {
 		const definition = tools[name];
 		if (!definition) continue;

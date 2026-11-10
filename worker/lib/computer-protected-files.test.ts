@@ -3,7 +3,6 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import { ComputerProtectedFiles } from './computer-protected-files';
-import { computerStorage } from './computer-storage';
 import { ComputerWorkspace } from './computer-workspace';
 
 describe('durable configuration preservation', () => {
@@ -11,7 +10,7 @@ describe('durable configuration preservation', () => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
 			const original = 'x'.repeat(180_000);
 			await project.writeFileContent('/package.json', original);
-			const computer = new Computer({ storage: computerStorage(state.storage) });
+			const computer = new Computer({ storage: state.storage });
 			const workspace = new ComputerWorkspace(computer);
 			await workspace.symlink('/package.json', '/vite.config.ts');
 			await new ComputerProtectedFiles(state.storage, workspace).capture('execution');
@@ -35,7 +34,7 @@ describe('durable configuration preservation', () => {
 	it('restores the bytes behind a protected symlink', async () => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (project, state) => {
 			await project.writeFileContent('/config/manifest.json', 'original');
-			const computer = new Computer({ storage: computerStorage(state.storage) });
+			const computer = new Computer({ storage: state.storage });
 			const workspace = new ComputerWorkspace(computer);
 			await workspace.symlink('/config/manifest.json', '/package.json');
 			const guard = new ComputerProtectedFiles(state.storage, workspace);

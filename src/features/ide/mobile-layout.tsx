@@ -13,7 +13,7 @@ import {
 import { DependencyPanel, FileTree, type useFileTree } from '@/features/file-tree/index';
 import { GitPanel } from '@/features/git/index';
 import { MobileFileDrawer } from '@/features/ide/mobile-file-drawer';
-import { MobileTabBar } from '@/features/ide/mobile-tab-bar';
+import { ProjectMobileTabBar } from '@/features/ide/mobile-tab-bar';
 import { TestsPanel } from '@/features/tests/index';
 import { useStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
@@ -231,7 +231,7 @@ export function MobileLayout({
 				)}
 			</div>
 
-			<MobileTabBar />
+			<ProjectMobileTabBar />
 
 			<MobileFileDrawer>
 				{isLoadingFiles ? (

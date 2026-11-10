@@ -1,24 +1,4 @@
 import { integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
-export const sessionMetadata = sqliteTable('session_metadata', {
-	id: text('id').primaryKey(),
-	titleGenerated: integer('title_generated').notNull().default(0),
-	contextTokensUsed: integer('context_tokens_used'),
-	toolMetadata: text('tool_metadata'),
-	toolErrors: text('tool_errors'),
-	debugLogId: text('debug_log_id'),
-	status: text('status'),
-	errorMessage: text('error_message'),
-	stopRequested: integer('stop_requested').notNull().default(0),
-});
-
-/**
- * Project-level pending file changes. Uses a single-row pattern (id=1)
- * with a JSON blob storing the full change map.
- */
-export const pendingChanges = sqliteTable('pending_changes', {
-	id: integer('id').primaryKey().default(1),
-	data: text('data').notNull().default('{}'),
-});
 
 export const sessionPendingChanges = sqliteTable('session_pending_changes', {
 	sessionId: text('session_id').primaryKey(),
@@ -96,26 +76,6 @@ export const reviewResolutions = sqliteTable('review_resolutions', {
 	resolvedAt: integer('resolved_at').notNull(),
 });
 
-export const sessionMessageMetadata = sqliteTable(
-	'session_message_metadata',
-	{
-		sessionId: text('session_id').notNull(),
-		messageId: text('message_id').notNull(),
-		requestMode: text('request_mode'),
-		requestModel: text('request_model'),
-		requestState: text('request_state'),
-		authorUserId: text('author_user_id'),
-		partsJson: text('parts_json'),
-		snapshotId: text('snapshot_id'),
-	},
-	(table) => ({
-		primaryKey: primaryKey({ columns: [table.sessionId, table.messageId] }),
-	}),
-);
-
-export type SessionMetadataRow = typeof sessionMetadata.$inferSelect;
-export type SessionMetadataInsert = typeof sessionMetadata.$inferInsert;
-export type PendingChangesRow = typeof pendingChanges.$inferSelect;
 export type SessionPendingChangesRow = typeof sessionPendingChanges.$inferSelect;
 export type SessionPendingChangesInsert = typeof sessionPendingChanges.$inferInsert;
 export type SessionPendingChangeIndexRow = typeof sessionPendingChangeIndex.$inferSelect;
@@ -130,5 +90,3 @@ export type ReviewEntrySourceRow = typeof reviewEntrySources.$inferSelect;
 export type ReviewEntrySourceInsert = typeof reviewEntrySources.$inferInsert;
 export type ReviewResolutionRow = typeof reviewResolutions.$inferSelect;
 export type ReviewResolutionInsert = typeof reviewResolutions.$inferInsert;
-export type SessionMessageMetadataRow = typeof sessionMessageMetadata.$inferSelect;
-export type SessionMessageMetadataInsert = typeof sessionMessageMetadata.$inferInsert;

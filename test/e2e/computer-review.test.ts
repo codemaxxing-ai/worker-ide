@@ -23,21 +23,7 @@ test('editor edit → Computer execution → review → reject restores the edit
 	expect(data.result.exitCode).toBe(0);
 	expect(data.result.stdout).toBe('editor baseline\n');
 	if (!data.snapshotId) throw new Error('Missing execution snapshot');
-	const pending = await api['pending-changes'].$put({
-		json: {
-			'/computer.txt': {
-				path: '/computer.txt',
-				action: 'edit',
-				beforeContent: 'editor baseline\n',
-				afterContent: 'command change\n',
-				snapshotId: data.snapshotId,
-				status: 'pending',
-				hunkStatuses: ['pending'],
-				sessionId: 'computerreview',
-			},
-		},
-	});
-	expect(pending.ok).toBe(true);
+
 	await page.reload();
 	await page.getByRole('button', { name: 'Toggle Agent panel' }).click();
 	await page.getByRole('treeitem', { name: 'computer.txt', exact: true }).click();

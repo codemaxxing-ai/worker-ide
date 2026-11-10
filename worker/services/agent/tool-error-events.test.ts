@@ -53,9 +53,6 @@ describe('tool failures in step results', () => {
 			},
 		});
 		await result.consumeStream();
-		expect(events).toEqual([
-			expect.objectContaining({ type: 'tool-error', toolName, toolCallId: 'call' }),
-			expect.objectContaining({ type: 'tool-call-end', toolName, toolCallId: 'call', isError: true }),
-		]);
+		expect(events).toEqual([expect.objectContaining({ type: 'tool-error', toolName, toolCallId: 'call' })]);
 	});
 });

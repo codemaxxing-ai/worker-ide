@@ -3,15 +3,7 @@ import { z } from 'zod';
 
 import { toolInputSchemas } from '@shared/validation';
 
-import {
-	AGENT_TOOLS,
-	ASK_MODE_TOOLS,
-	MUTATION_TOOL_NAMES,
-	PLAN_MODE_TOOLS,
-	READ_ONLY_TOOL_NAMES,
-	SUB_AGENT_EXCLUDED_TOOLS,
-	TOOL_EXECUTORS,
-} from './index';
+import { AGENT_TOOLS, ASK_MODE_TOOLS, PLAN_MODE_TOOLS, SUB_AGENT_EXCLUDED_TOOLS, TOOL_EXECUTORS } from './index';
 
 describe('PLAN_MODE_TOOLS', () => {
 	it('only includes read-only and research tools', () => {
@@ -23,7 +15,7 @@ describe('PLAN_MODE_TOOLS', () => {
 		expect(toolNames).toContain('todos_update');
 	});
 
-	it('excludes mutating tools (file ops are state.* in Code Mode)', () => {
+	it('excludes mutating application tools', () => {
 		const toolNames = PLAN_MODE_TOOLS.map((tool) => tool.name);
 		expect(toolNames).not.toContain('lint_fix');
 		expect(toolNames).not.toContain('dependencies_update');
@@ -88,14 +80,6 @@ describe('AGENT_TOOLS', () => {
 	});
 });
 
-describe('MUTATION_TOOL_NAMES', () => {
-	it('has no overlap with READ_ONLY_TOOL_NAMES', () => {
-		for (const name of MUTATION_TOOL_NAMES) {
-			expect(READ_ONLY_TOOL_NAMES.has(name)).toBe(false);
-		}
-	});
-});
-
 describe('SUB_AGENT_EXCLUDED_TOOLS', () => {
 	it('prevents recursive delegation and durable parent-session interactions', () => {
 		expect(SUB_AGENT_EXCLUDED_TOOLS).toEqual(
@@ -120,26 +104,7 @@ describe('tool registration sync', () => {
 		}
 	});
 
-	const externalToolNames = [
-		'read',
-		'ls',
-		'list',
-		'find',
-		'grep',
-		'write',
-		'edit',
-		'delete',
-		'exec',
-		'browser_execute',
-		'browser_markdown',
-		'browser_extract',
-		'browser_links',
-		'browser_scrape',
-		'cdp_eval',
-		'codemode',
-		'list_extensions',
-		'load_extension',
-	];
+	const externalToolNames = ['read', 'ls', 'find', 'grep', 'write', 'edit', 'delete', 'exec', 'codemode', 'browser', 'browser_read'];
 	const executorNames = [...TOOL_EXECUTORS.keys()].toSorted();
 	const definitionNames = AGENT_TOOLS.map((tool) => tool.name).toSorted();
 	const schemaNames = Object.keys(toolInputSchemas)
@@ -158,7 +123,7 @@ describe('tool registration sync', () => {
 		expect(executorNames).toEqual(schemaNames);
 	});
 
-	it('shared validation includes external and legacy-only tools', () => {
+	it('shared validation includes current external tools', () => {
 		for (const name of externalToolNames) {
 			expect(toolInputSchemas).toHaveProperty(name);
 		}

@@ -1,91 +1,26 @@
-import { McpConnector } from '@cloudflare/codemode';
+import { ToolSetConnector } from '@cloudflare/codemode/ai';
+import { z } from 'zod';
 
 import { MCP_SERVERS } from '@shared/constants';
 
-import { isRecordObject } from './utilities';
+import type { ToolExecutorContext } from './types';
+import type { CodemodeConnector } from '@cloudflare/codemode';
+import type { ToolSet } from 'ai';
 
-import type { CodemodeConnector, McpConnectionLike } from '@cloudflare/codemode';
-import type { Agent } from 'agents';
-
-class ConfiguredMcpConnector extends McpConnector<Env> {
-	constructor(
-		context: DurableObjectState,
-		environment: Env,
-		private connection: McpConnectionLike,
-		private connectorName: string,
-		private connectorInstructions: string,
-	) {
-		super(context, environment);
-	}
-
-	override name(): string {
-		return this.connectorName;
-	}
-
-	protected override instructions(): string {
-		return this.connectorInstructions;
-	}
-
-	protected override createConnection(): McpConnectionLike {
-		return this.connection;
-	}
-}
-
-export async function registerConfiguredMcpServers(agent: Agent<Env, unknown>): Promise<void> {
-	for (const server of MCP_SERVERS) {
-		await agent.addMcpServer(server.name, server.endpoint, { id: server.id });
-	}
-}
-
-export async function createConfiguredMcpConnectors(
-	agent: Agent<Env, unknown>,
-	context: DurableObjectState,
-	environment: Env,
-): Promise<CodemodeConnector[]> {
-	await agent.mcp.waitForConnections();
-
-	const connectors: CodemodeConnector[] = [];
-	for (const serverConfig of MCP_SERVERS) {
-		const server = agent.mcp.listServers().find((candidate) => candidate.id === serverConfig.id);
-		const connection = server ? agent.mcp.mcpConnections[server.id] : undefined;
-		if (!connection) {
-			continue;
+/** Chats share the project directory's catalog and connections through public RPCs. */
+export async function createConfiguredMcpConnectors(context: ToolExecutorContext): Promise<CodemodeConnector[]> {
+	if (!context.ctx || !context.listMcpTools) return [];
+	const descriptors = await context.listMcpTools();
+	return MCP_SERVERS.flatMap((server) => {
+		const tools: ToolSet = {};
+		for (const descriptor of descriptors.filter((tool) => tool.serverId === server.id)) {
+			tools[descriptor.name] = {
+				description: descriptor.description,
+				inputSchema: z.fromJSONSchema(descriptor.inputSchema),
+				execute: async (input) => context.callMcpTool(server.id, descriptor.name, z.record(z.string(), z.unknown()).parse(input)),
+			};
 		}
-
-		connectors.push(new ConfiguredMcpConnector(context, environment, connection, serverConfig.connectorName, serverConfig.instructions));
-	}
-
-	return connectors;
-}
-
-export async function callConfiguredMcpTool(
-	agent: Agent<Env, unknown> | undefined,
-	serverId: string,
-	toolName: string,
-	arguments_: Record<string, unknown>,
-): Promise<string> {
-	if (!agent) {
-		throw new Error('MCP tools require an Agent connection.');
-	}
-
-	await agent.mcp.waitForConnections();
-	const connection = agent.mcp.mcpConnections[serverId];
-	if (!connection) {
-		throw new Error(`MCP server is not connected: ${serverId}`);
-	}
-
-	const result = await connection.client.callTool({ name: toolName, arguments: arguments_ });
-	if (result.content && Array.isArray(result.content)) {
-		const textParts: string[] = [];
-		for (const item of result.content) {
-			if (isRecordObject(item) && item.type === 'text' && typeof item.text === 'string') {
-				textParts.push(item.text);
-			}
-		}
-		if (textParts.length > 0) {
-			return textParts.join('\n');
-		}
-	}
-
-	return JSON.stringify(result.content);
+		if (Object.keys(tools).length === 0 || !context.ctx) return [];
+		return [new ToolSetConnector(context.ctx, { name: server.connectorName, instructions: server.instructions, tools })];
+	});
 }

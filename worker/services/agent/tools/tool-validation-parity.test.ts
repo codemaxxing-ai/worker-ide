@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_AI_MODEL } from '@shared/constants';
 
-import { createServerTools } from './index';
+import { createAgentToolCatalog } from './index';
 import { createMockSendEvent } from './test-helpers';
 
 vi.mock('@worker/lib/durable-object-namespaces', () => ({
@@ -23,7 +23,7 @@ describe('direct and CodeMode validation parity', () => {
 		const objectId = project.id.toString();
 		await runInDurableObject(project, async (_project, state) => {
 			const fsStub = env.DurableObjectFilesystem.get(env.DurableObjectFilesystem.idFromString(objectId));
-			const tools = await createServerTools(
+			const catalog = await createAgentToolCatalog(
 				createMockSendEvent(),
 				{
 					projectRoot: '/project',
@@ -37,6 +37,7 @@ describe('direct and CodeMode validation parity', () => {
 				[],
 				'code',
 			);
+			const tools = { ...catalog.nestedTools, ...catalog.directTools };
 			const edit = tools.edit;
 			if (!edit) throw new Error('Missing edit tool');
 			const execute = vi.fn(async () => 'must not execute');

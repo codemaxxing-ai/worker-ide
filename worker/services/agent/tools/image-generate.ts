@@ -73,10 +73,8 @@ export async function execute(
 	// The binding returns a Uint8Array that can be written directly to disk.
 	let imageBytes: Uint8Array;
 	try {
-		// eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- TODO: Remove once `wrangler types` includes Lucid Origin in AiModels
-		const model = LUCID_ORIGIN_MODEL as Parameters<typeof env.AI.run>[0];
 		const result = await env.AI.run(
-			model,
+			LUCID_ORIGIN_MODEL,
 			{
 				prompt,
 				width: IMAGE_WIDTH,

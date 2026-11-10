@@ -1,6 +1,5 @@
 import { eq } from 'drizzle-orm';
 
-import { computeDiffHunkSessionIds } from '@shared/review-diff';
 import {
 	createHmrUpdateForFile,
 	type ChangeSetFile,
@@ -25,7 +24,6 @@ import {
 	stringify,
 	toReviewEntry,
 } from './review-queue-model';
-import { deletePendingChanges, writePendingChangesData } from '../../durable/db';
 import {
 	changeSetFiles,
 	changeSets,
@@ -122,34 +120,6 @@ export class ReviewQueueStore {
 			.all();
 		const row = rows[0];
 		return row ? parsePendingChangesRecord(row.data) : {};
-	}
-
-	countSessionPendingChangeRows(): number {
-		return this.db.select().from(sessionPendingChanges).all().length;
-	}
-
-	bootstrapLegacyPendingChanges(legacyChanges: Record<string, PendingFileChange>): void {
-		if (this.countSessionPendingChangeRows() > 0 || Object.keys(legacyChanges).length === 0) {
-			return;
-		}
-
-		const changesBySession = new Map<string, Record<string, PendingFileChange>>();
-		const now = Date.now();
-		for (const change of Object.values(legacyChanges)) {
-			const sessionId = change.sessionId || 'legacy';
-			const sessionChanges = changesBySession.get(sessionId) ?? {};
-			sessionChanges[change.path] = { ...change };
-			changesBySession.set(sessionId, sessionChanges);
-		}
-
-		for (const [sessionId, sessionChanges] of changesBySession) {
-			this.writeSessionPendingChangesRow(sessionId, sessionChanges);
-			for (const path of Object.keys(sessionChanges)) {
-				this.db.insert(sessionPendingChangeIndex).values({ sessionId, path, updatedAt: now, latestChangeSetId: undefined }).run();
-			}
-		}
-
-		this.rebuildReviewQueue();
 	}
 
 	syncSessionPendingChanges(sessionId: string, nextChanges: Record<string, PendingFileChange>): void {
@@ -458,8 +428,6 @@ export class ReviewQueueStore {
 		this.db.delete(reviewEntrySources).run();
 		this.db.delete(reviewEntries).run();
 
-		const legacyPendingChanges: Record<string, PendingFileChange> = {};
-
 		for (const [path, contributions] of contributionsByPath) {
 			const orderedContributions = contributions.toSorted((left, right) => left.updatedAt - right.updatedAt);
 			const merged = new Map<string, PendingFileChange>();
@@ -477,15 +445,6 @@ export class ReviewQueueStore {
 			const previousEntry = previousEntriesByPath.get(path);
 			const hunkStatuses =
 				previousEntry?.diffSignature === diffSignature ? previousEntry.hunkStatuses : buildInitialHunkStatuses(finalChange);
-			const hunkSessionIds = computeDiffHunkSessionIds(
-				finalChange.beforeContent ?? '',
-				finalChange.afterContent ?? '',
-				orderedContributions.map((contribution) => ({
-					afterContent: contribution.change.action === 'delete' ? '' : (contribution.change.afterContent ?? ''),
-					sessionId: contribution.sessionId,
-				})),
-				latestSessionId,
-			);
 			const reviewEntryId = previousEntry?.id ?? crypto.randomUUID();
 			const updatedAt = orderedContributions.at(-1)?.updatedAt ?? Date.now();
 
@@ -513,24 +472,7 @@ export class ReviewQueueStore {
 			for (const [orderIndex, changeSetId] of sourceChangeSetIds.entries()) {
 				this.db.insert(reviewEntrySources).values({ reviewEntryId, changeSetId, orderIndex }).run();
 			}
-
-			legacyPendingChanges[path] = {
-				...finalChange,
-				status: 'pending',
-				hunkStatuses,
-				hunkSessionIds,
-				sessionId: latestSessionId,
-				sessionIds,
-				reviewId: reviewEntryId,
-			};
 		}
-
-		if (Object.keys(legacyPendingChanges).length === 0) {
-			deletePendingChanges(this.db);
-			return;
-		}
-
-		writePendingChangesData(this.db, stringify(legacyPendingChanges));
 	}
 
 	private async applyReviewEntryWorkspaceState(

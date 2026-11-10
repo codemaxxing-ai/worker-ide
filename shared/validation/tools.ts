@@ -52,10 +52,6 @@ export const lintFixInputSchema = z.object({
 	file_path: filePathSchema,
 });
 
-export const cdpEvalInputSchema = z.object({
-	method: z.string().min(1, 'CDP method is required'),
-	params: z.string().optional(),
-});
 export const previewFetchInputSchema = z.object({
 	path: z.string().min(1, 'Path is required'),
 	method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).optional(),
@@ -80,57 +76,11 @@ export const codemodeInputSchema = z.object({
 	code: z.string().min(1, 'Code is required'),
 });
 
-export const browserExecuteInputSchema = z.object({
-	code: z.string().min(1, 'Code is required'),
-});
-
-// Browser Run Quick Action tools. Each operates on a page identified by a
-// `url` (or raw `html`), mirroring the input shapes of the Agents SDK
-// `createBrowserTools` Quick Action tools.
-export const browserMarkdownInputSchema = z.object({
-	url: z.string().optional(),
-	html: z.string().optional(),
-});
-
-export const browserLinksInputSchema = z.object({
-	url: z.string().optional(),
-	html: z.string().optional(),
-});
-
-export const browserExtractInputSchema = z.object({
-	url: z.string().optional(),
-	html: z.string().optional(),
-	prompt: z.string().optional(),
-	schema: z.unknown().optional(),
-});
-
-export const browserScrapeInputSchema = z.object({
-	url: z.string().optional(),
-	html: z.string().optional(),
-	selectors: z.array(z.string()).min(1, 'At least one selector is required'),
-});
-
-export const loadExtensionInputSchema = z.object({
-	name: z.string().min(1, 'Name is required'),
-	version: z.string().min(1, 'Version is required'),
-	source: z.string().min(1, 'Source is required'),
-	description: z.string().optional(),
-	workspace_access: z.enum(['none', 'read', 'read-write']).optional(),
-	network: z.array(z.string()).optional(),
-});
-
-export const listExtensionsInputSchema = z.object({});
-
-export const bashInputSchema = z.object({
-	command: z.string().min(1, 'Command is required'),
-});
-
 const listInputSchema = z.object({ path: z.string(), limit: z.number().optional(), offset: z.number().optional() });
 
 export const toolInputSchemas = {
 	read: z.object({ path: z.string(), offset: z.number().optional(), byteOffset: z.number().optional(), limit: z.number().optional() }),
 	ls: listInputSchema,
-	list: listInputSchema,
 	find: z.object({
 		path: z.string().default('/workspace'),
 		pattern: z.string(),
@@ -174,20 +124,13 @@ export const toolInputSchemas = {
 	bindings_update: bindingsUpdateInputSchema,
 	lint_check: lintCheckInputSchema,
 	lint_fix: lintFixInputSchema,
-	cdp_eval: cdpEvalInputSchema,
 	preview_fetch: previewFetchInputSchema,
 	test_run: testRunInputSchema,
 	image_generate: imageGenerateInputSchema,
 	sub_agent: subAgentInputSchema,
-	bash: bashInputSchema,
 	codemode: codemodeInputSchema,
-	browser_execute: browserExecuteInputSchema,
-	browser_markdown: browserMarkdownInputSchema,
-	browser_extract: browserExtractInputSchema,
-	browser_links: browserLinksInputSchema,
-	browser_scrape: browserScrapeInputSchema,
-	load_extension: loadExtensionInputSchema,
-	list_extensions: listExtensionsInputSchema,
+	browser: z.object({ code: z.string() }),
+	browser_read: z.object({ url: z.string().optional(), screenshot: z.boolean().optional() }),
 } as const;
 
 export type ToolName = keyof typeof toolInputSchemas;

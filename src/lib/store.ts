@@ -57,7 +57,6 @@ export const useStore = create<StoreState>()(
 	),
 );
 
-export const selectIsProcessing = (state: StoreState) => state.isProcessing;
 export const selectColorScheme = (state: StoreState) => state.colorScheme;
 export const selectEditorFont = (state: StoreState) => state.editorFont;
 export const selectGitStatus = (state: StoreState) => state.gitStatus;

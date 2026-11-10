@@ -1,10 +1,10 @@
-import { createAI } from 'agents-models/models/ai-sdk';
+import { createAI } from 'agents/models/ai-sdk';
 import { wrapLanguageModel } from 'ai';
 import { env } from 'cloudflare:workers';
 
 import { withStreamStartTimeout, withStreamTimeout } from './stream-timeout';
 
-import type { WorkersAIModelId } from 'agents-models/models/ai-sdk';
+import type { WorkersAIModelId } from 'agents/models/ai-sdk';
 import type { LanguageModel } from 'ai';
 
 const MAX_AFFINITY_COMPONENT_LENGTH = 80;

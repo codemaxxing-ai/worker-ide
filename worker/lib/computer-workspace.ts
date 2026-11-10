@@ -4,7 +4,7 @@ import { getContentType } from './content-type';
 
 import type { WorkspaceLike } from './workspace-fs-adapter';
 import type { Workspace } from '@cloudflare/computer';
-import type { FileInfo, FileStat } from '@cloudflare/shell';
+import type { WorkspaceFileInfo as FileInfo, WorkspaceFileInfo as FileStat } from '@shared/workspace-file';
 
 export const COMPUTER_ROOT = '/workspace';
 // eslint-disable-next-line unicorn/no-null -- Existing filesystem RPC uses null for a missing entry.

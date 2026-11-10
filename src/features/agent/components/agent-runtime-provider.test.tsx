@@ -1,141 +1,137 @@
-import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
+import { fireEvent, render, screen, act, cleanup } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { getActiveSessionId } from '@/lib/project-storage';
+import { useStore } from '@/lib/store';
+import { DEFAULT_AI_MODEL } from '@shared/constants';
 
 import { useAgentRuntime } from './agent-runtime-context';
 import { AgentRuntimeProvider } from './agent-runtime-provider';
-import { createUnavailableAgentRunnerStub } from '../lib/agent-stub';
 
-import type { ReactNode } from 'react';
+import type { AgentState } from '@shared/agent-state';
 
-type Listener = () => void;
-
-interface MockAgent {
-	identified: boolean;
-	state: undefined;
-	stub: ReturnType<typeof createUnavailableAgentRunnerStub>;
-	addEventListener: (type: string, listener: Listener) => void;
-	removeEventListener: (type: string, listener: Listener) => void;
-}
-
-const listenersByType = new Map<string, Set<Listener>>();
-const mockAgent: MockAgent = {
-	identified: false,
-	state: undefined,
-	stub: createUnavailableAgentRunnerStub(),
-	addEventListener: vi.fn((type: string, listener: Listener) => {
-		const listeners = listenersByType.get(type) ?? new Set<Listener>();
-		listeners.add(listener);
-		listenersByType.set(type, listeners);
-	}),
-	removeEventListener: vi.fn((type: string, listener: Listener) => {
-		listenersByType.get(type)?.delete(listener);
-	}),
-};
-
-vi.mock('agents/react', () => ({
-	useAgent: () => ({ ...mockAgent }),
-}));
-
-function wrapper({ children }: { children: ReactNode }) {
-	return <AgentRuntimeProvider projectId="project-1">{children}</AgentRuntimeProvider>;
-}
-
-function emit(type: string) {
-	for (const listener of listenersByType.get(type) ?? []) {
-		listener();
-	}
-}
-
-function RuntimeHarness() {
-	const { segments, setSegments, cursorPosition, setCursorPosition } = useAgentRuntime();
-
+const mocks = vi.hoisted(() => ({ useAgent: vi.fn(), setState: vi.fn() }));
+vi.mock('agents/react', () => ({ useAgent: mocks.useAgent }));
+function Inspector() {
+	const runtime = useAgentRuntime();
 	return (
-		<>
-			<button type="button" onClick={() => setSegments([{ type: 'text', value: 'Keep this draft' }])}>
-				Set draft
-			</button>
-			<button type="button" onClick={() => setCursorPosition(15)}>
-				Set cursor
-			</button>
-			<output data-testid="draft-value">{JSON.stringify(segments)}</output>
-			<output data-testid="cursor-value">{cursorPosition}</output>
-		</>
+		<div>
+			<span data-testid="selected">{runtime.activeSessionId ?? 'new'}</span>
+			<button onClick={() => runtime.selectSession('a')}>Select A</button>
+			<button onClick={() => runtime.selectSession('b')}>Select B</button>
+			<input
+				aria-label="Draft"
+				value={runtime.segments.map((segment) => (segment.type === 'text' ? segment.value : '')).join('')}
+				onChange={(event) => runtime.setSegments([{ type: 'text', value: event.target.value }])}
+			/>
+		</div>
 	);
 }
-
-describe('AgentRuntimeProvider', () => {
-	beforeEach(() => {
-		listenersByType.clear();
-		mockAgent.identified = false;
-		localStorage.clear();
-		vi.clearAllMocks();
-	});
-
-	it('retains the draft when the panel consumer remounts', () => {
-		const { rerender } = render(
-			<AgentRuntimeProvider projectId="project-1">
-				<RuntimeHarness />
-			</AgentRuntimeProvider>,
-		);
-
-		fireEvent.click(screen.getByRole('button', { name: 'Set draft' }));
-		fireEvent.click(screen.getByRole('button', { name: 'Set cursor' }));
-
-		rerender(<AgentRuntimeProvider projectId="project-1">{undefined}</AgentRuntimeProvider>);
-		rerender(
-			<AgentRuntimeProvider projectId="project-1">
-				<RuntimeHarness />
-			</AgentRuntimeProvider>,
-		);
-
-		expect(screen.getByTestId('draft-value')).toHaveTextContent('[{"type":"text","value":"Keep this draft"}]');
-		expect(screen.getByTestId('cursor-value')).toHaveTextContent('15');
-	});
-
-	it('restores the persisted draft after a provider remount', () => {
-		const firstRender = render(
-			<AgentRuntimeProvider projectId="project-1">
-				<RuntimeHarness />
-			</AgentRuntimeProvider>,
-		);
-
-		fireEvent.click(screen.getByRole('button', { name: 'Set draft' }));
-		fireEvent.click(screen.getByRole('button', { name: 'Set cursor' }));
-
-		firstRender.unmount();
-
+let state: AgentState;
+beforeEach(() => {
+	cleanup();
+	sessionStorage.clear();
+	localStorage.clear();
+	vi.clearAllMocks();
+	useStore.setState({ requestedAgentSessionId: undefined, pendingChanges: new Map() });
+	state = {
+		ready: true,
+		sessions: ['a', 'b'].map((id) => ({
+			id,
+			title: id,
+			createdAt: 1,
+			updatedAt: 1,
+			model: DEFAULT_AI_MODEL,
+			mode: 'code',
+			status: 'idle',
+			isRunning: false,
+			revision: 0,
+		})),
+		reviewEntries: {},
+		reviewSummary: { unresolvedCount: 0, reviewVersion: 0, sessionCounts: {} },
+	};
+	mocks.useAgent.mockImplementation(() => ({
+		state,
+		identified: true,
+		connectionError: undefined,
+		setState: mocks.setState,
+		addEventListener: vi.fn(),
+		removeEventListener: vi.fn(),
+	}));
+});
+describe('tab-local agent state', () => {
+	it('retains a saved selection while the project directory is loading', () => {
+		sessionStorage.setItem('think-session:project', 'a');
+		state = { ...state, ready: false, sessions: [] };
 		render(
-			<AgentRuntimeProvider projectId="project-1">
-				<RuntimeHarness />
+			<AgentRuntimeProvider projectId="project">
+				<Inspector />
 			</AgentRuntimeProvider>,
 		);
-
-		expect(screen.getByTestId('draft-value')).toHaveTextContent('[{"type":"text","value":"Keep this draft"}]');
-		expect(screen.getByTestId('cursor-value')).toHaveTextContent('15');
+		expect(screen.getByTestId('selected')).toHaveTextContent('a');
+		expect(getActiveSessionId('project')).toBe('a');
 	});
-
-	it('tracks connection state across socket lifecycle events', () => {
-		const { result } = renderHook(() => useAgentRuntime(), { wrapper });
-
-		expect(result.current.agentConnectionState).toBe('connecting');
-
-		act(() => {
-			emit('open');
-		});
-
-		expect(result.current.agentConnectionState).toBe('connected');
-
-		act(() => {
-			emit('close');
-		});
-
-		expect(result.current.agentConnectionState).toBe('disconnected');
-
-		act(() => {
-			emit('open');
-		});
-
-		expect(result.current.agentConnectionState).toBe('connected');
-		expect(result.current.isConnected).toBe(true);
+	it('switches sessions without sending a server selection and restores each draft', () => {
+		render(
+			<AgentRuntimeProvider projectId="project">
+				<Inspector />
+			</AgentRuntimeProvider>,
+		);
+		fireEvent.click(screen.getByText('Select A'));
+		fireEvent.change(screen.getByLabelText('Draft'), { target: { value: 'Draft A' } });
+		fireEvent.click(screen.getByText('Select B'));
+		expect(screen.getByLabelText('Draft')).toHaveValue('');
+		fireEvent.change(screen.getByLabelText('Draft'), { target: { value: 'Draft B' } });
+		fireEvent.click(screen.getByText('Select A'));
+		expect(screen.getByLabelText('Draft')).toHaveValue('Draft A');
+		expect(getActiveSessionId('project')).toBe('a');
+		expect(mocks.setState).not.toHaveBeenCalled();
+		expect(localStorage.length).toBe(0);
+	});
+	it('restores selection and draft after remounting the same tab', () => {
+		const view = render(
+			<AgentRuntimeProvider projectId="project">
+				<Inspector />
+			</AgentRuntimeProvider>,
+		);
+		fireEvent.click(screen.getByText('Select A'));
+		fireEvent.change(screen.getByLabelText('Draft'), { target: { value: 'Saved draft' } });
+		view.unmount();
+		render(
+			<AgentRuntimeProvider projectId="project">
+				<Inspector />
+			</AgentRuntimeProvider>,
+		);
+		expect(screen.getByTestId('selected')).toHaveTextContent('a');
+		expect(screen.getByLabelText('Draft')).toHaveValue('Saved draft');
+	});
+	it('opens session deep links locally without disturbing another session on the server', () => {
+		render(
+			<AgentRuntimeProvider projectId="project">
+				<Inspector />
+			</AgentRuntimeProvider>,
+		);
+		act(() => useStore.setState({ requestedAgentSessionId: 'b' }));
+		expect(screen.getByTestId('selected')).toHaveTextContent('b');
+		fireEvent.click(screen.getByText('Select A'));
+		act(() => useStore.setState({ requestedAgentSessionId: 'b' }));
+		expect(screen.getByTestId('selected')).toHaveTextContent('b');
+		expect(mocks.setState).not.toHaveBeenCalled();
+	});
+	it('stops observing a session deleted by another client', () => {
+		sessionStorage.setItem('think-session:project', 'a');
+		const view = render(
+			<AgentRuntimeProvider projectId="project">
+				<Inspector />
+			</AgentRuntimeProvider>,
+		);
+		state = { ...state, sessions: state.sessions.filter((session) => session.id !== 'a') };
+		view.rerender(
+			<AgentRuntimeProvider projectId="project">
+				<Inspector />
+			</AgentRuntimeProvider>,
+		);
+		expect(screen.getByTestId('selected')).toHaveTextContent('new');
+		expect(getActiveSessionId('project')).toBeUndefined();
 	});
 });

@@ -106,7 +106,7 @@ describe('writeFileSchema', () => {
 
 describe('sessionIdSchema', () => {
 	it('accepts valid session IDs', () => {
-		expect(sessionIdSchema.safeParse('abc123').success).toBe(true);
+		expect(sessionIdSchema.safeParse('11111111-1111-4111-8111-111111111111').success).toBe(true);
 	});
 
 	it('rejects uppercase characters', () => {
@@ -138,19 +138,19 @@ describe('snapshotIdSchema', () => {
 
 describe('revertCascadeSchema', () => {
 	it('accepts a single snapshot ID', () => {
-		expect(revertCascadeSchema.safeParse({ snapshotIds: ['abcdef01'] }).success).toBe(true);
+		expect(revertCascadeSchema.safeParse({ operationId: crypto.randomUUID(), snapshotIds: ['abcdef01'] }).success).toBe(true);
 	});
 
 	it('accepts multiple snapshot IDs', () => {
-		expect(revertCascadeSchema.safeParse({ snapshotIds: ['abcdef01', '12345678'] }).success).toBe(true);
+		expect(revertCascadeSchema.safeParse({ operationId: crypto.randomUUID(), snapshotIds: ['abcdef01', '12345678'] }).success).toBe(true);
 	});
 
 	it('rejects empty array', () => {
-		expect(revertCascadeSchema.safeParse({ snapshotIds: [] }).success).toBe(false);
+		expect(revertCascadeSchema.safeParse({ operationId: crypto.randomUUID(), snapshotIds: [] }).success).toBe(false);
 	});
 
 	it('rejects non-hex snapshot IDs', () => {
-		expect(revertCascadeSchema.safeParse({ snapshotIds: ['xyz!@#'] }).success).toBe(false);
+		expect(revertCascadeSchema.safeParse({ operationId: crypto.randomUUID(), snapshotIds: ['xyz!@#'] }).success).toBe(false);
 	});
 
 	it('rejects when snapshotIds is missing', () => {
@@ -159,7 +159,7 @@ describe('revertCascadeSchema', () => {
 
 	it('rejects more than 20 snapshot IDs', () => {
 		const tooMany = Array.from({ length: 21 }, (_, index) => index.toString(16).padStart(8, '0'));
-		expect(revertCascadeSchema.safeParse({ snapshotIds: tooMany }).success).toBe(false);
+		expect(revertCascadeSchema.safeParse({ operationId: crypto.randomUUID(), snapshotIds: tooMany }).success).toBe(false);
 	});
 });
 
@@ -178,13 +178,13 @@ describe('isPathSafe', () => {
 });
 
 describe('validateToolInput', () => {
-	it('validates bash input', () => {
-		const result = validateToolInput('bash', { command: 'ls -la' });
+	it('validates exec input', () => {
+		const result = validateToolInput('exec', { command: 'ls -la' });
 		expect(result.success).toBe(true);
 	});
 
-	it('rejects invalid bash input', () => {
-		const result = validateToolInput('bash', { command: '' });
+	it('rejects invalid exec input', () => {
+		const result = validateToolInput('exec', { command: '' });
 		expect(result.success).toBe(false);
 	});
 

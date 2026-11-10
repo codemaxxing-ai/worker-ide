@@ -68,6 +68,9 @@ export class ComputerMutationQueue {
 				reject,
 			});
 		});
+		// The runner may reject before the alarm write yields back to the RPC caller.
+		// Attach a handler immediately; the returned promise still carries the failure.
+		void result.catch(() => {});
 		await this.storage.setAlarm(Date.now() + 1000);
 		void this.resume();
 		return result;

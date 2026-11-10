@@ -141,7 +141,7 @@ describe('ProjectFilesystem change drain', () => {
 		}
 		await stub.wsWriteFile('/.git/config', '[core]', 'session-git-adjacent');
 
-		const changes = await stub.drainWorkspaceChanges('session-git-adjacent');
+		const changes = await stub.claimAgentChanges('session-git-adjacent', 'test-operation', crypto.randomUUID());
 		expect(changes.map((change) => change.path).toSorted()).toEqual(paths.toSorted());
 		for (const change of changes) {
 			expect(change).toMatchObject({ type: 'update', beforeContent: 'before', afterContent: 'after' });
@@ -154,13 +154,13 @@ describe('ProjectFilesystem change drain', () => {
 		await stub.wsWriteFile('/src/a.ts', 'export const a = 1;\n', 'session-drain');
 		await stub.wsWriteFile('/src/b.ts', 'export const b = 2;\n', 'session-drain');
 
-		const changes = await stub.drainWorkspaceChanges('session-drain');
+		const changes = await stub.claimAgentChanges('session-drain', 'test-operation', crypto.randomUUID());
 		const paths = changes.map((change) => change.path);
 		expect(paths).toContain('/src/a.ts');
 		expect(paths).toContain('/src/b.ts');
 
 		// Draining a second time returns nothing — the writer's rows were cleared.
-		expect(await stub.drainWorkspaceChanges('session-drain')).toEqual([]);
+		expect(await stub.claimAgentChanges('session-drain', 'test-operation', crypto.randomUUID())).toEqual([]);
 	});
 
 	it('returns nothing for an unattributed (no writerId) drain', async () => {
@@ -169,7 +169,7 @@ describe('ProjectFilesystem change drain', () => {
 		await stub.wsWriteFile('/src/loose.ts', 'export const loose = 1;\n');
 
 		// Changes are only ever surfaced per session; there is no global drain.
-		expect(await stub.drainWorkspaceChanges()).toEqual([]);
+		expect(await stub.claimAgentChanges('unregistered', 'test-operation', crypto.randomUUID())).toEqual([]);
 	});
 
 	it('excludes .git writes from the drain', async () => {
@@ -178,7 +178,7 @@ describe('ProjectFilesystem change drain', () => {
 		await stub.wsWriteFile('/.git/config', '[core]\n', 'session-git');
 		await stub.wsWriteFile('/src/c.ts', 'export const c = 3;\n', 'session-git');
 
-		const changes = await stub.drainWorkspaceChanges('session-git');
+		const changes = await stub.claimAgentChanges('session-git', 'test-operation', crypto.randomUUID());
 		const paths = changes.map((change) => change.path);
 		expect(paths).toContain('/src/c.ts');
 		expect(paths.some((path) => path.startsWith('/.git'))).toBe(false);
@@ -192,13 +192,13 @@ describe('ProjectFilesystem per-session change drain', () => {
 		await stub.wsWriteFile('/a.ts', 'export const a = 1;\n', 'session-A');
 		await stub.wsWriteFile('/b.ts', 'export const b = 2;\n', 'session-B');
 
-		const a = await stub.drainWorkspaceChanges('session-A');
-		const b = await stub.drainWorkspaceChanges('session-B');
+		const a = await stub.claimAgentChanges('session-A', 'test-operation', crypto.randomUUID());
+		const b = await stub.claimAgentChanges('session-B', 'test-operation', crypto.randomUUID());
 
 		expect(a.map((change) => change.path)).toEqual(['/a.ts']);
 		expect(b.map((change) => change.path)).toEqual(['/b.ts']);
 		// A second drain for either session is empty (state cleared).
-		expect(await stub.drainWorkspaceChanges('session-A')).toEqual([]);
+		expect(await stub.claimAgentChanges('session-A', 'test-operation', crypto.randomUUID())).toEqual([]);
 	});
 
 	it('captures beforeContent for an edit', async () => {
@@ -207,7 +207,7 @@ describe('ProjectFilesystem per-session change drain', () => {
 
 		await stub.wsWriteFile('/edit.ts', 'new\n', 'session-1');
 
-		const changes = await stub.drainWorkspaceChanges('session-1');
+		const changes = await stub.claimAgentChanges('session-1', 'test-operation', crypto.randomUUID());
 		expect(changes).toMatchObject([{ type: 'update', path: '/edit.ts', entryType: 'file', beforeContent: 'old\n', afterContent: 'new\n' }]);
 	});
 
@@ -218,7 +218,7 @@ describe('ProjectFilesystem per-session change drain', () => {
 		// Read-then-rewrite with identical content (the codemode phantom-edit case).
 		await stub.wsWriteFile('/same.ts', 'unchanged\n', 'session-1');
 
-		expect(await stub.drainWorkspaceChanges('session-1')).toEqual([]);
+		expect(await stub.claimAgentChanges('session-1', 'test-operation', crypto.randomUUID())).toEqual([]);
 	});
 
 	it('reports a create with no beforeContent', async () => {
@@ -226,7 +226,7 @@ describe('ProjectFilesystem per-session change drain', () => {
 
 		await stub.wsWriteFile('/new.ts', 'fresh\n', 'session-1');
 
-		const changes = await stub.drainWorkspaceChanges('session-1');
+		const changes = await stub.claimAgentChanges('session-1', 'test-operation', crypto.randomUUID());
 		expect(changes).toMatchObject([
 			{ type: 'create', path: '/new.ts', entryType: 'file', beforeContent: undefined, afterContent: 'fresh\n' },
 		]);
@@ -238,7 +238,7 @@ describe('ProjectFilesystem per-session change drain', () => {
 
 		await stub.wsRm('/gone.ts', false, false, 'session-1');
 
-		const changes = await stub.drainWorkspaceChanges('session-1');
+		const changes = await stub.claimAgentChanges('session-1', 'test-operation', crypto.randomUUID());
 		expect(changes).toMatchObject([
 			{ type: 'delete', path: '/gone.ts', entryType: 'file', beforeContent: 'bye\n', afterContent: undefined },
 		]);
@@ -253,8 +253,8 @@ describe('ProjectFilesystem per-session change drain', () => {
 		// Session B edits next; its baseline is whatever was live when it first touched.
 		await stub.wsWriteFile('/shared.ts', 'from-B\n', 'session-B');
 
-		const a = await stub.drainWorkspaceChanges('session-A');
-		const b = await stub.drainWorkspaceChanges('session-B');
+		const a = await stub.claimAgentChanges('session-A', 'test-operation', crypto.randomUUID());
+		const b = await stub.claimAgentChanges('session-B', 'test-operation', crypto.randomUUID());
 
 		expect(a).toMatchObject([{ type: 'update', path: '/shared.ts', entryType: 'file', beforeContent: 'base\n', afterContent: 'from-A\n' }]);
 		expect(b).toMatchObject([
@@ -278,7 +278,7 @@ describe('ProjectFilesystem per-session change drain', () => {
 		// The baseline survives in SQLite, so the diff is still attributed and
 		// correct even though the in-memory checkpoint state was discarded.
 		const freshStub = getFilesystemStub('test-fs-durable-checkpoint');
-		const changes = await freshStub.drainWorkspaceChanges('session-durable');
+		const changes = await freshStub.claimAgentChanges('session-durable', 'test-operation', crypto.randomUUID());
 		expect(changes).toMatchObject([{ type: 'update', path: '/keep.ts', entryType: 'file', beforeContent: 'old\n', afterContent: 'new\n' }]);
 	});
 });

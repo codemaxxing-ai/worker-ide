@@ -27,13 +27,13 @@ describe('isRecordObject', () => {
 });
 
 describe('validateToolInput', () => {
-	it('validates valid bash input', () => {
-		const result = validateToolInput('bash', { command: 'ls -la' });
+	it('validates valid exec input', () => {
+		const result = validateToolInput('exec', { command: 'ls -la' });
 		expect(result.success).toBe(true);
 	});
 
-	it('rejects invalid bash input (missing command)', () => {
-		const result = validateToolInput('bash', {});
+	it('rejects invalid exec input (missing command)', () => {
+		const result = validateToolInput('exec', {});
 		expect(result.success).toBe(false);
 	});
 });

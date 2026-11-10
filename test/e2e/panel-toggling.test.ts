@@ -82,6 +82,7 @@ test.describe('Panel Toggling', () => {
 
 		await agentButton.click();
 
-		await expect(page.getByText('Agent', { exact: true })).toBeVisible();
+		await expect(page.getByRole('region', { name: 'Coding assistant' })).toBeVisible({ timeout: 30_000 });
+		await expect(page.getByRole('button', { name: 'Session history' })).toBeVisible();
 	});
 });

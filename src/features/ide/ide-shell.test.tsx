@@ -95,7 +95,7 @@ vi.mock('./desktop-layout', () => ({
 }));
 
 vi.mock('./ide-header', () => ({
-	IDEHeader: () => <div data-testid="ide-header" />,
+	ProjectIDEHeader: () => <div data-testid="ide-header" />,
 }));
 
 vi.mock('./mobile-layout', () => ({

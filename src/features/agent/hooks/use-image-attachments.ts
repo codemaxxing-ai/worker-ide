@@ -99,13 +99,14 @@ export function useImageAttachments(projectId: string): UseImageAttachmentsResul
 	);
 
 	const clearAttachments = useCallback(() => {
+		const sentIds = new Set(imageAttachments.map((attachment) => attachment.id));
 		setImageAttachments((current) => {
-			for (const item of current) {
+			for (const item of current.filter((attachment) => sentIds.has(attachment.id))) {
 				URL.revokeObjectURL(item.previewUrl);
 			}
-			return [];
+			return current.filter((attachment) => !sentIds.has(attachment.id));
 		});
-	}, [setImageAttachments]);
+	}, [imageAttachments, setImageAttachments]);
 
 	const hasUploading = useMemo(() => imageAttachments.some((item) => item.status === 'uploading'), [imageAttachments]);
 

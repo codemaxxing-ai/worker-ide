@@ -1,4 +1,4 @@
-export { AgentRunner } from './agent-runner';
+export { ProjectAgent } from './project-agent';
 export { ProjectCoordinatorV2 } from './project-coordinator';
 export { ProjectMetadata } from './project-metadata';
 export { OrganizationContainerCapacity } from './organization-container-capacity';

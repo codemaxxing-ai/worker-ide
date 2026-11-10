@@ -3,11 +3,7 @@ import { z } from 'zod';
 import { filePathSchema } from './file-system';
 import { LIMITS } from './limits';
 
-export const sessionIdSchema = z
-	.string()
-	.min(1, 'Session ID is required')
-	.max(LIMITS.SESSION_ID_MAX_LENGTH, `Session ID must be at most ${LIMITS.SESSION_ID_MAX_LENGTH} characters`)
-	.regex(/^[a-z0-9]+$/, 'Session ID must contain only lowercase alphanumeric characters');
+export const sessionIdSchema = z.string().uuid();
 export const sessionTitleSchema = z
 	.string()
 	.trim()
@@ -94,6 +90,7 @@ export const revertFileSchema = z.object({
 export type RevertFileInput = z.infer<typeof revertFileSchema>;
 
 export const revertCascadeSchema = z.object({
+	operationId: z.string().uuid(),
 	snapshotIds: z.array(snapshotIdSchema).min(1).max(20),
 });
 

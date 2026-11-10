@@ -7,11 +7,13 @@ import { z } from 'zod';
 import { SNAPSHOT_EXCLUDED_DIRECTORIES, WORKERS_COMPATIBILITY_DATE } from '@shared/constants';
 
 import { getDomainConfiguration } from '../lib/domain-configuration';
+import { projectAgentNamespace } from '../lib/durable-object-namespaces';
 import { addFileToSnapshot, initSnapshot } from '../services/agent/snapshot-manager';
 import { getServerEntrypoint, serverModulesFromOutput } from '../services/vite-host/runtime/loader-runner';
 
-import type { FileChange, ModelMessage } from '../services/agent/types';
+import type { FileChange } from '../services/agent/types';
 import type { AppEnvironment } from '../types';
+import type { ModelMessage } from 'ai';
 
 const seedSnapshotSchema = z.object({
 	label: z.string().optional(),
@@ -48,6 +50,7 @@ export const developmentTestRoutes = new Hono<AppEnvironment>()
 		},
 	)
 	.post('/__test/seed-snapshot', zValidator('json', seedSnapshotSchema), async (c) => {
+		await projectAgentNamespace.getByName(`agent:${c.get('projectId')}`).prepareProject();
 		const projectRoot = c.get('projectRoot');
 		const { label, sessionId, changes } = c.req.valid('json');
 
@@ -85,6 +88,15 @@ export const developmentTestRoutes = new Hono<AppEnvironment>()
 		async (c) => {
 			const input = c.req.valid('json');
 			const project = c.get('fsStub');
+			const directory = projectAgentNamespace.getByName(`agent:${c.get('projectId')}`);
+			if (input.snapshot) {
+				await directory.prepareProject();
+				await directory.createSession({
+					id: input.sessionId,
+					projectId: c.get('projectId'),
+					requestOriginContext: getDomainConfiguration(c.env),
+				});
+			}
 
 			await project.registerComputerSession(input.sessionId, 'code', getDomainConfiguration(c.env));
 			using result = await project.computerExec(
@@ -92,7 +104,7 @@ export const developmentTestRoutes = new Hono<AppEnvironment>()
 				{ id: input.id ?? crypto.randomUUID(), backend: input.backend },
 				input.sessionId,
 			);
-			using changes = await project.drainWorkspaceChanges(input.sessionId);
+			using changes = await project.claimAgentChanges(input.sessionId, input.sessionId, crypto.randomUUID());
 			let snapshotId: string | undefined;
 			if (input.snapshot) {
 				const snapshot = await initSnapshot(c.get('projectRoot'), input.sessionId, [], () => {});
@@ -108,6 +120,25 @@ export const developmentTestRoutes = new Hono<AppEnvironment>()
 					});
 				}
 				snapshotId = snapshot.id;
+				await directory.completeSessionOperation({
+					sessionId: input.sessionId,
+					submissionId: input.id ?? snapshot.id,
+					status: 'completed',
+					summary: { status: 'completed', revision: 1, finalizing: false },
+					changes: Object.fromEntries(
+						changes.map((change) => [
+							change.path,
+							{
+								...change,
+								action: change.type === 'update' ? 'edit' : change.type,
+								sessionId: input.sessionId,
+								snapshotId: snapshot.id,
+								status: 'pending',
+								hunkStatuses: ['pending'],
+							},
+						]),
+					),
+				});
 			}
 			return c.json({ result: { ...result }, changes: changes.map((change) => ({ ...change })), snapshotId });
 		},

@@ -4,7 +4,6 @@ import { createExecutionContext, env, runInDurableObject } from 'cloudflare:test
 import { describe, expect, it } from 'vitest';
 
 import { drainComputerOutput } from './computer-execution';
-import { computerStorage } from './computer-storage';
 import { ComputerWorkspace } from './computer-workspace';
 import { WorkspaceFsAdapter } from './workspace-fs-adapter';
 
@@ -62,7 +61,7 @@ describe('Computer isolate shell parity', () => {
 		await runInDurableObject(env.DurableObjectFilesystem.getByName(crypto.randomUUID()), async (_instance, state) => {
 			const shell = new OfflineShell(createExecutionContext(), { HOST: { getWorkspace: async () => computer.stub() } });
 			const computer = new Computer({
-				storage: computerStorage(state.storage),
+				storage: state.storage,
 				backends: [
 					new WorkerShellBackend({ id: 'shell', source: { type: 'external-runtime', connect: () => shell }, egress: { mode: 'none' } }),
 				],

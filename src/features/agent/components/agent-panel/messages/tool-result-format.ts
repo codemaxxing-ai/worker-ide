@@ -37,7 +37,7 @@ export function isReasoningPart(part: MessagePart): part is ReasoningPart {
 export function deriveCompletedLabel(toolName: ToolName | undefined, rawContent: string | undefined, failed = false): string {
 	// codemode has no structured metadata summary; its label is always the same.
 	if (toolName === 'codemode') return failed ? 'Failed' : 'Ran code';
-	if ((toolName === 'exec' || toolName === 'bash') && rawContent) {
+	if (toolName === 'exec' && rawContent) {
 		try {
 			const output: unknown = JSON.parse(rawContent);
 			if (isRecord(output)) {
@@ -155,31 +155,12 @@ export function summarizeFromMetadata(toolName: ToolName | undefined, info: Tool
 			return 'Results fetched';
 		}
 
-		case 'cdp_eval': {
-			if (typeof metadata.method === 'string') {
-				return metadata.method;
-			}
-			return 'Legacy browser debug';
-		}
-
-		case 'browser_execute': {
+		case 'browser': {
 			return 'Browser run';
 		}
 
-		case 'browser_markdown': {
-			return 'Read as Markdown';
-		}
-
-		case 'browser_extract': {
-			return 'Extracted data';
-		}
-
-		case 'browser_links': {
-			return 'Listed links';
-		}
-
-		case 'browser_scrape': {
-			return 'Scraped elements';
+		case 'browser_read': {
+			return 'Read preview';
 		}
 
 		case 'test_run': {
@@ -208,17 +189,13 @@ export function summarizeFromMetadata(toolName: ToolName | undefined, info: Tool
 			return undefined;
 		}
 
-		case 'exec':
-		case 'bash': {
+		case 'exec': {
 			const backend = typeof metadata.backend === 'string' ? `${metadata.backend} · ` : '';
 			if (typeof metadata.error === 'string') return `${backend}Failed`;
-			if (typeof metadata.exitCode === 'number') {
-				if ([130, 137, 143].includes(metadata.exitCode)) return `${backend}Cancelled`;
-				return `${backend}Exit ${metadata.exitCode}`;
-			}
+			if (typeof metadata.exitCode === 'number')
+				return `${backend}${[130, 137, 143].includes(metadata.exitCode) ? 'Cancelled' : `Exit ${metadata.exitCode}`}`;
 			return undefined;
 		}
-
 		case 'codemode': {
 			return 'Executed';
 		}
@@ -417,25 +394,8 @@ function formatToolResultDetail(toolName: ToolName, rawResult: string): string {
 			return rawResult;
 		}
 
-		case 'cdp_eval': {
-			try {
-				const parsed: unknown = JSON.parse(rawResult);
-				if (isRecord(parsed)) {
-					const method = typeof parsed.method === 'string' ? `Method: ${parsed.method}\n\n` : '';
-					const result = parsed.result === undefined ? 'No result' : JSON.stringify(parsed.result, undefined, 2);
-					return `${method}${result}`;
-				}
-			} catch {
-				// Not JSON
-			}
-			return rawResult;
-		}
-
-		case 'browser_execute':
-		case 'browser_markdown':
-		case 'browser_extract':
-		case 'browser_links':
-		case 'browser_scrape': {
+		case 'browser':
+		case 'browser_read': {
 			return rawResult;
 		}
 

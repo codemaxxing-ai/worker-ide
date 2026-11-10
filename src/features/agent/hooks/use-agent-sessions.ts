@@ -1,338 +1,39 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
 
-import { toast } from '@/components/ui/toast-store';
-import { isAgentState } from '@/features/agent/lib/agent-state';
-import { getActiveSessionId, setActiveSessionId } from '@/lib/project-storage';
-import { useStore } from '@/lib/store';
+import { createApiClient } from '@/lib/api-client';
+import { throwApiError } from '@/lib/api-error';
 
-import type { AgentConnectionState, AgentRuntimeHandle } from '../components/agent-runtime-context';
-import type { AgentState } from '@shared/agent-state';
-import type { PendingFileChange, AiSession } from '@shared/types';
+import { useAgentRuntime } from '../components/agent-runtime-context';
 
-type SessionLoadPhase = 'idle' | 'awaiting-agent-state' | 'loading-saved-session';
-type SessionLoadResult = { status: 'loaded'; session: AiSession } | { status: 'missing' } | { status: 'error' } | { status: 'superseded' };
-
-export function useAgentSessions({
-	projectId,
-	agent,
-	agentConnectionState,
-}: {
-	projectId: string;
-	agent: AgentRuntimeHandle;
-	agentConnectionState: AgentConnectionState;
-}) {
-	// Session list comes from agent.state.sessions (auto-synced)
-	const rawState = agent.state;
-	const agentState: AgentState | undefined = isAgentState(rawState) ? rawState : undefined;
-	const savedSessions = agentState?.sessions ?? [];
-	const [sessionSearchQuery, setSessionSearchQuery] = useState('');
-	const [searchedSessionIds, setSearchedSessionIds] = useState<string[] | undefined>();
-	const displaySessions = sessionSearchQuery.trim()
-		? savedSessions.filter((session) => searchedSessionIds?.includes(session.id))
-		: savedSessions;
-
-	useEffect(() => {
-		if (!sessionSearchQuery.trim()) {
-			return;
-		}
-
-		let cancelled = false;
-		void agent.stub
-			.searchSessions(sessionSearchQuery.trim(), 20)
-			.then((results) => {
-				if (cancelled) return;
-				setSearchedSessionIds([...new Set(results.map((result) => result.sessionId))]);
-			})
-			.catch(() => {
-				if (cancelled) return;
-				setSearchedSessionIds([]);
-			});
-
-		return () => {
-			cancelled = true;
-		};
-	}, [agent, sessionSearchQuery]);
-
-	// =========================================================================
-	// Load a session via Agent RPC
-	// =========================================================================
-
-	const [isLoadingSession, setIsLoadingSession] = useState(false);
-	const [sessionSnapshot, setSessionSnapshot] = useState<AiSession | undefined>();
-	const [snapshotHistoryVersion, setSnapshotHistoryVersion] = useState(-1);
-	const sessionLoadSequenceReference = useRef(0);
-	useEffect(
-		() => () => {
-			sessionLoadSequenceReference.current += 1;
+export function useAgentSessions(projectId: string) {
+	const { agent, activeSessionId, selectSession } = useAgentRuntime();
+	const [query, setQuery] = useState('');
+	const api = useMemo(() => createApiClient(projectId), [projectId]);
+	const search = useQuery({
+		queryKey: ['agent-session-search', projectId, query],
+		enabled: query.trim().length > 0,
+		queryFn: async ({ signal }) => {
+			const response = await api.agent.sessions.search.$get({ query: { query: query.trim() } }, { init: { signal } });
+			if (!response.ok) await throwApiError(response, 'Session search failed');
+			return response.json();
 		},
-		[projectId],
-	);
-	const [sessionLoadPhase, setSessionLoadPhase] = useState<SessionLoadPhase>(() => {
-		const currentSession = agentState?.currentSession;
-		return !currentSession && getActiveSessionId(projectId) ? 'awaiting-agent-state' : 'idle';
 	});
-
-	const updateSessionLoadPhase = useCallback((nextPhase: SessionLoadPhase) => {
-		queueMicrotask(() => {
-			setSessionLoadPhase((currentPhase) => (currentPhase === nextPhase ? currentPhase : nextPhase));
-		});
-	}, []);
-
-	const loadSessionById = useCallback(
-		async (targetSessionId: string, reason: 'manual' | 'restore'): Promise<SessionLoadResult> => {
-			const sequence = ++sessionLoadSequenceReference.current;
-			const isCurrent = () => sequence === sessionLoadSequenceReference.current;
-			if (reason === 'manual') {
-				setIsLoadingSession(true);
-			} else {
-				updateSessionLoadPhase('loading-saved-session');
-			}
-
-			try {
-				const session = await agent.stub.loadSession(targetSessionId);
-				if (!isCurrent()) return { status: 'superseded' };
-				if (!session) {
-					if (getActiveSessionId(projectId) === targetSessionId) {
-						setActiveSessionId(projectId, undefined);
-					}
-					if (reason === 'manual') {
-						toast.error('This session is no longer available.');
-					}
-					return { status: 'missing' };
-				}
-
-				setActiveSessionId(projectId, session.id);
-				setSessionSnapshot(session);
-				// Confirm the history version with a read-only refresh. State may
-				// have advanced while the selection RPC was reading persisted history.
-				setSnapshotHistoryVersion(-1);
-				return { status: 'loaded', session };
-			} catch {
-				if (!isCurrent()) return { status: 'superseded' };
-				if (reason === 'manual') {
-					toast.error('Could not load the session. Please try again.');
-				}
-				return { status: 'error' };
-			} finally {
-				if (isCurrent() && reason === 'manual') {
-					setIsLoadingSession(false);
-				} else if (isCurrent()) {
-					updateSessionLoadPhase('idle');
-				}
-			}
-		},
-		[agent, projectId, updateSessionLoadPhase],
-	);
-
-	const handleLoadSession = useCallback(
-		(targetSessionId: string) => {
-			void loadSessionById(targetSessionId, 'manual');
-		},
-		[loadSessionById],
-	);
-
-	// =========================================================================
-	// Rename a session via Agent RPC
-	// =========================================================================
-
-	const handleRenameSession = useCallback(
-		async (targetSessionId: string, newTitle: string): Promise<boolean> => {
-			try {
-				await agent.stub.renameSession(targetSessionId, newTitle);
-				return true;
-			} catch {
-				toast.error('Could not rename the session. Please try again.');
-				return false;
-			}
-		},
-		[agent],
-	);
-
-	// =========================================================================
-	// Delete a session via Agent RPC
-	// =========================================================================
-
-	const handleDeleteSession = useCallback(
-		async (targetSessionId: string): Promise<boolean> => {
-			try {
-				await agent.stub.deleteSession(targetSessionId);
-				if (getActiveSessionId(projectId) === targetSessionId) {
-					setActiveSessionId(projectId, undefined);
-				}
-				return true;
-			} catch {
-				toast.error('Could not delete the session. Please try again.');
-				return false;
-			}
-		},
-		[agent, projectId],
-	);
-
-	// =========================================================================
-	// Auto-restore the active session on mount
-	// =========================================================================
-
-	const attemptedRestoreSessionIdReference = useRef<string | undefined>(undefined);
-
-	// Track the last-known session ID so we can distinguish "session genuinely
-	// cleared" from "transient undefined during loadSession switch".
-	const lastSessionIdReference = useRef(agentState?.currentSession?.sessionId);
-
-	// Sync the authoritative project review queue into the Zustand store.
-	// While a session is actively running, overlay its live pending changes so
-	// the editor can preview in-flight edits before the turn is persisted.
-	const agentSessionId = agentState?.currentSession?.sessionId;
-	const agentPendingChanges = agentState?.currentSession?.pendingChanges;
-	const authoritativeReviewEntries = agentState?.reviewEntries;
-	const isSessionRunning = agentState?.currentSession?.status === 'running';
-	const authoritativeReviewSignature = JSON.stringify(authoritativeReviewEntries ?? {});
-	const agentPendingChangesSignature = JSON.stringify(agentPendingChanges ?? {});
-	const authoritativeReviewEntriesReference = useRef(authoritativeReviewEntries);
-	const agentPendingChangesReference = useRef(agentPendingChanges);
-	useEffect(() => {
-		authoritativeReviewEntriesReference.current = authoritativeReviewEntries;
-		agentPendingChangesReference.current = agentPendingChanges;
-	}, [authoritativeReviewEntries, agentPendingChanges]);
-
-	useEffect(() => {
-		const current = useStore.getState().pendingChanges;
-		const merged = new Map<string, PendingFileChange>();
-
-		for (const entry of Object.values(authoritativeReviewEntriesReference.current ?? {})) {
-			merged.set(entry.path, {
-				path: entry.path,
-				action: entry.action,
-				beforeContent: entry.beforeContent,
-				afterContent: entry.afterContent,
-				snapshotId: entry.snapshotId,
-				status: 'pending',
-				hunkStatuses: entry.hunkStatuses,
-				hunkSessionIds: entry.hunkSessionIds,
-				sessionId: entry.latestSessionId,
-				sessionIds: entry.sessionIds,
-				reviewId: entry.id,
-			});
-		}
-
-		if (isSessionRunning && agentPendingChangesReference.current) {
-			for (const [path, change] of Object.entries(agentPendingChangesReference.current)) {
-				const existing = merged.get(path);
-				merged.set(path, {
-					...change,
-					sessionId: existing?.sessionId ?? change.sessionId,
-					sessionIds: existing?.sessionIds ?? change.sessionIds,
-					reviewId: existing?.reviewId,
-					hunkStatuses: existing?.hunkStatuses ?? change.hunkStatuses,
-					hunkSessionIds: existing?.hunkSessionIds ?? change.hunkSessionIds,
-				});
-			}
-		}
-
-		if (merged.size === 0 && agentSessionId === undefined && lastSessionIdReference.current !== undefined) {
-			lastSessionIdReference.current = undefined;
-			if (current.size > 0) {
-				useStore.getState().loadPendingChanges(new Map());
-			}
-			return;
-		}
-
-		lastSessionIdReference.current = agentSessionId;
-		useStore.getState().loadPendingChanges(merged);
-	}, [agentSessionId, agentPendingChangesSignature, authoritativeReviewSignature, isSessionRunning]);
-
-	useEffect(() => {
-		const currentSession = agentState?.currentSession;
-		const activeSessionId = getActiveSessionId(projectId);
-
-		if (currentSession) {
-			attemptedRestoreSessionIdReference.current = currentSession.sessionId;
-			if (activeSessionId !== currentSession.sessionId) {
-				setActiveSessionId(projectId, currentSession.sessionId);
-			}
-			updateSessionLoadPhase('idle');
-			return;
-		}
-
-		if (!activeSessionId) {
-			attemptedRestoreSessionIdReference.current = undefined;
-			updateSessionLoadPhase('idle');
-			return;
-		}
-
-		if (!agentState) {
-			updateSessionLoadPhase(agentConnectionState === 'disconnected' ? 'idle' : 'awaiting-agent-state');
-			return;
-		}
-
-		if (attemptedRestoreSessionIdReference.current === activeSessionId) {
-			updateSessionLoadPhase('idle');
-			return;
-		}
-
-		attemptedRestoreSessionIdReference.current = activeSessionId;
-		void loadSessionById(activeSessionId, 'restore').then((result) => {
-			if (result.status === 'missing' || result.status === 'error') {
-				attemptedRestoreSessionIdReference.current = undefined;
-			}
-		});
-	}, [agentConnectionState, agentState, loadSessionById, projectId, updateSessionLoadPhase]);
-
-	const agentHistoryVersion = agentState?.currentSession?.historyVersion;
-	useEffect(() => {
-		if (isLoadingSession || agentConnectionState === 'disconnected') return;
-		if (!agentSessionId) {
-			queueMicrotask(() => {
-				setSessionSnapshot(undefined);
-				setSnapshotHistoryVersion(-1);
-			});
-			return;
-		}
-
-		if (sessionSnapshot?.id === agentSessionId && snapshotHistoryVersion === agentHistoryVersion) {
-			return;
-		}
-
-		let cancelled = false;
-		const sequence = sessionLoadSequenceReference.current;
-		void agent.stub
-			.readSession(agentSessionId)
-			.then((session) => {
-				if (cancelled || sequence !== sessionLoadSequenceReference.current || !session) return;
-				setSessionSnapshot(session);
-				setSnapshotHistoryVersion(agentHistoryVersion ?? 0);
-			})
-			.catch((error: unknown) => {
-				// Keep the last snapshot during a transient disconnect. A reconnect
-				// or history version update retries the refresh.
-				if (!cancelled) console.warn('[AgentSessions] Failed to refresh session history:', error);
-			});
-
-		return () => {
-			cancelled = true;
-		};
-	}, [
-		agent.stub,
-		agentConnectionState,
-		agentSessionId,
-		agentHistoryVersion,
-		isLoadingSession,
-		sessionSnapshot?.id,
-		snapshotHistoryVersion,
-	]);
-
-	const isRestoringSession =
-		sessionLoadPhase === 'loading-saved-session' ||
-		(sessionLoadPhase === 'awaiting-agent-state' && agentConnectionState !== 'disconnected');
-
-	return {
-		allSessions: savedSessions,
-		savedSessions: displaySessions,
-		handleLoadSession,
-		handleRenameSession,
-		handleDeleteSession,
-		sessionSearchQuery,
-		setSessionSearchQuery,
-		isRestoringSession: isRestoringSession || isLoadingSession,
-		sessionSnapshot,
-	};
+	const allSessions = agent.state?.sessions ?? [];
+	const sessions = query.trim()
+		? allSessions.filter(
+				(session) =>
+					session.title.toLowerCase().includes(query.toLowerCase()) || search.data?.matches.some((match) => match.sessionId === session.id),
+			)
+		: allSessions;
+	async function renameSession(id: string, title: string) {
+		const response = await api.agent.sessions[':sessionId'].title.$put({ param: { sessionId: id }, json: { title } });
+		if (!response.ok) await throwApiError(response, 'Could not rename the session');
+	}
+	async function deleteSession(id: string) {
+		const response = await api.agent.sessions[':sessionId'].$delete({ param: { sessionId: id } });
+		if (!response.ok) await throwApiError(response, 'Could not delete the session');
+		if (activeSessionId === id) selectSession();
+	}
+	return { sessions, allSessions, query, setQuery, isSearching: search.isFetching, renameSession, deleteSession };
 }

@@ -48,7 +48,7 @@ The Cloudflare Vitest plugin starts a fresh runtime for each test file, isolatin
 
 ```bash
 mise exec -- bun run test:worker --run worker/lib/computer-exec.test.ts
-mise exec -- bun run test:react --run src/features/agent/components/agent-panel/messages.test.tsx
+mise exec -- bun run test:react --run src/features/agent/hooks/use-agent-history.test.tsx
 ```
 
 `test:agent` exercises session facets through the production bundle with the current Miniflare runtime and deployment compatibility flags, alongside the Worker tests that use runtime doubles. Its test-only entrypoint supplies a controlled Workers AI transport and disables the external documentation connection; the application agent classes, scheduler, provider adapter, and workspace tools run unchanged. Keep this suite in CI when changing the agent SDK, session state, cancellation, or conversation persistence.
@@ -85,7 +85,7 @@ CI pins Ubuntu 24.04 and Docker 29.9.1 to keep the browser libraries and rootles
 To verify the pinned image independently of the development server:
 
 ```bash
-docker build --platform linux/amd64 -f Dockerfile.computer -t worker-ide-computer:0.4.1 .
+docker build --platform linux/amd64 -f Dockerfile.computer -t worker-ide-computer:0.8.0 .
 ```
 
 On Linux, workerd's gateway and the rootless Docker daemon must share network access. CI keeps the bridge namespace attached to the daemon and runs the dev server and live tests in the daemon's network and mount namespaces while preserving the repository working directory. The mount namespace supplies RootlessKit's DNS resolver. CI explicitly preserves the runner's home, Docker connection, credentials, and test settings with `sudo --preserve-env=...`; `sudo-rs` ignores `sudo -E`. Preserve this arrangement when changing CI; otherwise containers may start but package installation or gateway traffic can fail.

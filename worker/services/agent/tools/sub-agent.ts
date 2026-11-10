@@ -33,6 +33,8 @@ export async function execute(
 	if (!context.agentReference) {
 		return toolError(ToolErrorCode.NOT_ALLOWED, 'Sub-agents require an Agent context.');
 	}
+	if (!context.submissionId || !context.toolCallId)
+		return toolError(ToolErrorCode.NOT_ALLOWED, 'Sub-agents require a durable turn identity.');
 
 	const prompt = input.prompt?.trim();
 	if (!prompt) {
@@ -59,7 +61,8 @@ export async function execute(
 			parentToolCallId: context.toolCallId,
 			parentSubmissionId: context.submissionId,
 		},
-		runId: context.toolCallId ? `agent-tool:${context.toolCallId}` : undefined,
+		runId: `agent-tool:${context.submissionId}:${context.toolCallId}`,
+		signal: context.abortSignal,
 		parentToolCallId: context.toolCallId,
 		display: { name: deriveShortTitle(prompt) },
 	});

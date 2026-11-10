@@ -4,10 +4,10 @@ import { z } from 'zod';
 
 import { BINARY_EXTENSIONS } from '@shared/constants';
 import { HttpErrorCode } from '@shared/http-errors';
-import { snapshotIdSchema, revertFileSchema, revertCascadeSchema, filePathSchema, pendingChangesFileSchema } from '@shared/validation';
+import { snapshotIdSchema, revertFileSchema, revertCascadeSchema, filePathSchema } from '@shared/validation';
 import { fs } from '@worker/lib/project-fs';
 
-import { agentRunnerNamespace, coordinatorNamespace, filesystemNamespace } from '../lib/durable-object-namespaces';
+import { coordinatorNamespace, filesystemNamespace } from '../lib/durable-object-namespaces';
 import { httpError } from '../lib/http-error';
 import { toDurableObjectId } from '../lib/project-id';
 
@@ -86,56 +86,10 @@ export const snapshotRoutes = new Hono<AppEnvironment>()
 	.post('/snapshots/revert-cascade', zValidator('json', revertCascadeSchema), async (c) => {
 		const projectRoot = c.get('projectRoot');
 		const projectId = c.get('projectId');
-		const { snapshotIds } = c.req.valid('json');
+		const { snapshotIds, operationId } = c.req.valid('json');
 
-		const result = await revertCascade(projectRoot, snapshotIds, projectId);
+		const result = await revertCascade(projectRoot, snapshotIds, projectId, operationId);
 		return c.json(result);
-	})
-
-	// GET /api/pending-changes - Load project-level pending changes from the agent
-	.get('/pending-changes', async (c) => {
-		try {
-			const agentStub = agentRunnerNamespace.getByName(`agent:${c.get('projectId')}`);
-			const response = await agentStub.fetch(
-				new Request('http://agent/pending-changes', {
-					headers: { 'x-partykit-room': `agent:${c.get('projectId')}` },
-				}),
-			);
-			if (!response.ok) {
-				throw new Error(await response.text());
-			}
-			const body: unknown = await response.json();
-			const data = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
-			return c.json(data);
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Failed to load pending changes';
-			throw httpError(HttpErrorCode.INTERNAL_ERROR, message);
-		}
-	})
-
-	// PUT /api/pending-changes - Save project-level pending changes to the agent
-	.put('/pending-changes', zValidator('json', pendingChangesFileSchema), async (c) => {
-		const changes = c.req.valid('json');
-		try {
-			const agentStub = agentRunnerNamespace.getByName(`agent:${c.get('projectId')}`);
-			const response = await agentStub.fetch(
-				new Request('http://agent/pending-changes', {
-					method: 'PUT',
-					headers: {
-						'Content-Type': 'application/json',
-						'x-partykit-room': `agent:${c.get('projectId')}`,
-					},
-					body: JSON.stringify(changes),
-				}),
-			);
-			if (!response.ok) {
-				throw new Error(await response.text());
-			}
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Failed to save pending changes';
-			throw httpError(HttpErrorCode.INTERNAL_ERROR, message);
-		}
-		return c.json({ success: true });
 	})
 
 	// GET /api/snapshot/:id/file?path=/src/main.ts - Get file content from snapshot
@@ -276,10 +230,16 @@ interface CascadeRevertResult {
  * Snapshots whose metadata cannot be found are reported in `missingSnapshots`
  * but do not cause the entire operation to fail.
  */
-async function revertCascade(_projectRoot: string, snapshotIds: string[], projectId: string): Promise<CascadeRevertResult> {
-	const result = await filesystemNamespace
-		.get(toDurableObjectId(filesystemNamespace, projectId))
-		.restoreSnapshots(snapshotIds.map((snapshotId) => ({ snapshotId })));
+async function revertCascade(
+	_projectRoot: string,
+	snapshotIds: string[],
+	projectId: string,
+	operationId: string,
+): Promise<CascadeRevertResult> {
+	const result = await filesystemNamespace.get(toDurableObjectId(filesystemNamespace, projectId)).restoreSnapshots(
+		snapshotIds.map((snapshotId) => ({ snapshotId })),
+		operationId,
+	);
 	await triggerRestoredFiles(
 		projectId,
 		result.reverted.map((change) => change.path),

@@ -27,7 +27,7 @@ function buildContext(fsStub: DurableObjectStub<ProjectFilesystem>, sessionId: s
 	};
 }
 
-describe('drainWorkspaceChanges', () => {
+describe('claimAgentChanges', () => {
 	it('includes Git-adjacent files in review changes and HMR notifications', async () => {
 		const stub = getFilesystemStub('test-drain-git-adjacent-review');
 		const context = buildContext(stub, 'session-git-adjacent');

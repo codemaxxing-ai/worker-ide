@@ -46,7 +46,7 @@ export default {
 		//
 		// Valid WebSocket paths:
 		//   - App domain:     /p/<projectId>/__ws   (ProjectCoordinator)
-		//   - App domain:     /p/<projectId>/__agent (AgentRunner)
+		//   - App domain:     /p/<projectId>/__agent (ProjectAgent and chat facets)
 		//   - Preview domain: /__ws                  (ProjectCoordinator)
 		//   - Preview domain: /__native-hmr          (container Vite)
 		if (request.headers.get('Upgrade') === 'websocket') {

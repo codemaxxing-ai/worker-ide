@@ -64,8 +64,8 @@ export function RevertConfirmDialog({
 	// If ALL queries failed, the snapshots were likely cleaned up (no file changes) —
 	// treat this as a valid "no changes" case rather than a hard error.
 	const failedCount = snapshotQueries.filter((query) => query.error).length;
-	const allFailed = failedCount > 0 && failedCount === snapshotQueries.length;
-	const fetchError = allFailed ? undefined : snapshotQueries.find((query) => query.error)?.error;
+
+	const fetchError = snapshotQueries.find((query) => query.error)?.error;
 
 	// Aggregate all file changes across the cascade, deduplicating by path
 	// (the first occurrence wins since snapshots are newest-first, but we
@@ -104,24 +104,20 @@ export function RevertConfirmDialog({
 			} else if (pending.status === 'rejected') {
 				result.push({ path: change.path, reason: 'already rejected — will be re-reverted' });
 			} else if (pending.snapshotId && !snapshotIdSet.has(pending.snapshotId)) {
-				result.push({ path: change.path, reason: 'pending change from another session — not affected' });
+				result.push({ path: change.path, reason: 'pending change from another session — will be overwritten' });
 			}
 		}
 		return result;
 	}, [aggregatedChanges, pendingChanges, snapshotIds]);
 
-	const hasData = snapshotIds.length === 0 || allMetadata.length > 0 || allFailed;
+	const hasData = failedCount === 0 && !isLoading;
 	const isCascade = snapshotIds.length > 1;
 	const { dialogOpen, show, onExitComplete } = useDeferredOpen(open);
 	useDialogStackPresence(dialogOpen);
 	const summary =
-		snapshotIds.length === 0 || aggregatedChanges.length === 0
-			? isCascade
-				? 'Removes this message and everything after it. Your files stay as they are.'
-				: 'Removes this message from the history. Your files stay as they are.'
-			: isCascade
-				? 'Rolls back every AI change from this message onward.'
-				: 'Rolls back the AI changes from this message.';
+		aggregatedChanges.length === 0
+			? 'No file changes to restore.'
+			: 'Restores the listed files. Later edits to these files will be overwritten.';
 
 	return (
 		<AlertDialog.Root open={dialogOpen} onOpenChange={onOpenChange}>

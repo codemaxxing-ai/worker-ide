@@ -3,13 +3,8 @@ import type { RequestOriginContext } from './request-origin-context';
 import type { ToolFailureGuard } from './tool-failure-guard';
 import type { ProjectFilesystem } from '../../durable/project-filesystem';
 import type { LanguageModelV4FunctionTool } from '@ai-sdk/provider';
-import type { ExtensionManager } from '@cloudflare/think/extensions';
-import type { StreamEvent } from '@shared/agent-state';
 import type { AIModelId } from '@shared/constants';
-import type { ChatMessage, PendingFileChange, ToolErrorInfo, ToolMetadataInfo } from '@shared/types';
 import type { Agent } from 'agents';
-import type { Session } from 'agents/experimental/memory/session';
-export type { ModelMessage } from 'ai';
 
 export interface FileChange {
 	path: string;
@@ -43,46 +38,8 @@ export type TodoItem = {
 };
 
 /**
- * A queue of stream events that tools push into during execution.
- * The stream wrapper drains this queue between LLM events.
- */
-export type StreamEventQueue = StreamEvent[];
-
-/**
- * A record of a tool execution failure, pushed by createServerTools
- * and consumed by the agent loop for doom-loop detection.
- */
-export interface ToolFailureRecord {
-	toolName: string;
-	errorCode: string | undefined;
-	errorMessage: string;
-}
-
-/**
- * A queue of tool failure records. createServerTools pushes into this
- * during execution; the agent loop drains it after each tool call ends.
- */
-export type ToolFailureQueue = ToolFailureRecord[];
-
-/**
- * Mutable ref holding the toolCallId of the currently-executing tool.
- * Set by the tool wrapper before execution, read by `createSendEvent`
- * to auto-inject toolCallId into events (tool_result, file_changed).
- */
-export interface ToolCallIdReference {
-	current: string | undefined;
-}
-
-/**
- * Ordered queue of toolCallIds from completed tool calls.
- * Each tool wrapper `shift()`s the next ID before executing.
- */
-export type PendingToolCallIds = string[];
-
-/**
  * Function to emit a stream event from a tool executor.
- * Pushes events into the shared StreamEventQueue which is drained
- * by the stream wrapper and sent to the client.
+ * The owning turn drains observations into persisted tool metadata and workspace changes.
  */
 export type SendEventFunction = (type: string, data: Record<string, unknown>) => void;
 
@@ -117,12 +74,14 @@ export interface ToolExecutorContext {
 	toolCallId?: string;
 	toolName?: string;
 	submissionId?: string;
+	reviewSubmissionId?: string;
 	activeCodeMode?: { toolCallId: string; abortSignal?: AbortSignal };
 	failureGuard?: ToolFailureGuard;
 	onToolOutput?: (event: import('@shared/agent-state').ToolOutputEvent) => Promise<void>;
-	session?: Session;
 	abortSignal?: AbortSignal;
 	callMcpTool: (serverId: string, toolName: string, arguments_: Record<string, unknown>) => Promise<string>;
+	listMcpTools?: () => Promise<Array<{ serverId: string; name: string; description?: string; inputSchema: Record<string, unknown> }>>;
+	beforeMutation?: () => void | Promise<void>;
 	isSubAgent?: boolean;
 	/**
 	 * Durable Object state of the agent that owns this run. The codemode
@@ -133,24 +92,12 @@ export interface ToolExecutorContext {
 	loader?: WorkerLoader;
 	browser?: BrowserBinding;
 	agentReference?: Agent<Env, unknown>;
-	extensionManager?: ExtensionManager;
 	fsStub: DurableObjectStub<ProjectFilesystem>;
 	model: AIModelId;
 	requestOriginContext?: RequestOriginContext;
 	readCompletionReviewContext?: () => Promise<CompletionReviewContext>;
 	recordReviewObservation?: (toolName: string, input: unknown, output: unknown, failed?: boolean) => void;
 	indexArtifact?: (entry: { key: string; content: string }) => Promise<void>;
-}
-
-export interface SessionPersistData {
-	createdAt: number;
-	title?: string;
-	history: ChatMessage[];
-	contextTokensUsed?: number;
-	toolMetadata?: Record<string, ToolMetadataInfo>;
-	toolErrors?: Record<string, ToolErrorInfo>;
-	error?: { message: string; code?: string };
-	pendingChanges?: Record<string, PendingFileChange>;
 }
 
 /**
@@ -210,5 +157,3 @@ export interface ToolModule {
 	definition: ToolDefinition;
 	execute: ToolExecuteFunction;
 }
-
-export type { AgentDebugLog, AgentDebugLogSummary, AgentLogEntry, LogCategory, LogLevel } from './agent-logger';

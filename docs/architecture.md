@@ -37,7 +37,7 @@ Use kebab-case route paths and bracket notation for hyphenated RPC segments, suc
 | State                                                      | Owner                                                                                                     | Extension rule                                                                                |
 | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | Fetched resources, including the file list                 | React Query                                                                                               | Update or invalidate resource queries after changes.                                          |
-| Synchronized agent sessions and authoritative review queue | Cloudflare Agents SDK / `AgentRunner`                                                                     | Change session and review state through the owning agent boundary.                            |
+| Synchronized agent sessions and authoritative review queue | Cloudflare Agents SDK / `ProjectAgent`                                                                    | Change session and review state through the owning agent boundary.                            |
 | Local UI and editor state                                  | Feature slices composed by [store.ts](../src/lib/store.ts)                                                | Keep transient UI state local; review data in Zustand is an editor projection of agent state. |
 | Project-specific browser persistence                       | [project-storage.ts](../src/lib/project-storage.ts) and [editor-session.ts](../src/lib/editor-session.ts) | Restore through the IDE lifecycle hooks in `src/features/ide/`.                               |
 | Project files, `.git`, and `.agent`                        | `DurableObjectFilesystem` / Computer workspace                                                            | Use request-bound filesystem RPC and the durable mutation queue.                              |
@@ -45,9 +45,7 @@ Use kebab-case route paths and bracket notation for hyphenated RPC segments, suc
 
 Keeping these owners distinct prevents browser projections from becoming competing authorities. Calculate derived React values during rendering and keep event-driven work in events; use effects for display lifecycle work or external synchronization with cleanup.
 
-The [agent panel](../src/features/agent/components/agent-panel/) coordinates submission and session state. Its session header owns rename/delete confirmation state, composer controls own recording/send presentation, and the attachment strip renders pending uploads. Keep transient UI state in those components and RPC orchestration in the panel and session hook.
-
-Use `loadSession` for explicit session selection and restoration. Background history refreshes use the read-only `readSession` RPC, keyed by session ID and history version, so they cannot change selection or replace live streaming state. Delayed selections yield to newer selections, clears, or message submissions.
+The [agent panel](../src/features/agent/components/agent-panel/) renders native `UIMessage` parts. Original transcript pages own chronological order and branch membership; Think's `useAgentChat` supplies the live assistant. A changed SDK tail starts fresh paging, canceling obsolete requests. Inference compaction summaries never enter the displayed history. Focused components own the session list, composer, transcript and branch dialog. Application commands use typed Hono RPC; the authenticated SDK transport owns chat streaming. Each tab keeps its selection and drafts in sessionStorage. The project directory broadcasts compact summaries and review state only.
 
 ## Workspace and agent execution
 
@@ -55,7 +53,11 @@ Each project has one authoritative Computer SQLite workspace under `/workspace`.
 
 These choices make concurrent edits and review restoration operate on one durable baseline. See [Computer workspace](computer-workspace.md) for access patterns, backend selection, mode restrictions, and recovery rules.
 
-`AgentRunner` owns project-scoped sessions and review state. Its `AgentTurnCoordinator` handles per-session transitions behind the existing RPC facade, while each `SessionTurnAgent` Think facet owns a durable turn submission queue. Keep Durable Object export names, RPC method names, storage keys, and migrations stable across refactors: they identify persisted state and live service contracts.
+`ProjectAgent` owns the catalog, shared context, MCP and review records. Each `SessionTurnAgent` Think facet owns its transcript, branches, queue and recovery. Durable submissions enter through `runTurn({mode: "submit", channel: "web"})`; server-authenticated author metadata and stable message IDs cross the boundary once. The shared tool catalog centralizes validation, mode restrictions, cancellation and attribution for direct and Code Mode calls. Orchestration holds no filesystem lease; each leaf mutation acquires the FIFO once.
+
+Terminal ledger outcomes create a submission-keyed outbox. Before a later turn starts, the previous turn's filesystem receipts settle and are checkpointed into immutable snapshot/review data. Parent delivery, logs and notifications are retried independently. Startup replays pending finalization. Native regeneration creates sibling branches; restoration remains a separate confirmed operation, deduplicated by the filesystem DO. SDK recovery may continue safe inference but cannot replay an uncertain mutation. See [the upgrade checklist](think-upgrade.md).
+
+Session deletion persists an admission tombstone in the catalog and closes the child before draining native requests, ledger submissions and finalization. Failed deletion leaves admissions closed for retry. Review records have one project projection; there is no legacy singleton pending-change table or endpoint.
 
 Use Cloudflare Workflows for durable, resumable jobs with meaningful steps, external I/O, retries, and asynchronous status. Make steps idempotent. Use regular Workers or Durable Objects for fast request/response operations, interactive actions, or work already owned by a DO. This keeps orchestration proportional to the job while preserving retries where they matter.
 
@@ -68,8 +70,7 @@ Use Cloudflare Workflows for durable, resumable jobs with meaningful steps, exte
 | [container/native-runtime.ts](../container/native-runtime.ts)           | Native Vite preview/HMR and production builds for vinext and custom Vite projects |
 | [review-queue-model.ts](../worker/services/agent/review-queue-model.ts) | Persisted review-record validation and reconciliation                             |
 | [review-queue.ts](../worker/services/agent/review-queue.ts)             | Review database and workspace coordination                                        |
-| [agent-runner-input.ts](../worker/durable/agent-runner-input.ts)        | Submitted message-part validation before the agent loop                           |
-| [agent-runner-presence.ts](../worker/durable/agent-runner-presence.ts)  | Participant identity shaping                                                      |
+| [submission-input.ts](../worker/services/agent/submission-input.ts)     | Submitted message-part validation before the agent loop                           |
 
 Preview and deployment begin on Workers, including vinext. Compilation resource limits or unsupported host capabilities trigger the project's lazy Linux container; application errors remain errors. The toolbar uses runtime icons and permits a one-way manual promotion. Temporary promotion lasts until automatic container shutdown. The `alwaysUseContainer` project metadata flag starts subsequent sessions on containers without changing workspace files. Native previews forward HTTP and WebSocket upgrades through the content authorization boundary. The authoritative Computer workspace is copied into a container-local staging tree; source updates retain FIFO ownership through synchronization and HMR. Native builds use durable execution IDs and refuse changed snapshots before dispatch; both build paths upload Worker modules and static assets.
 

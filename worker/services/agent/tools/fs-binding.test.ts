@@ -21,7 +21,7 @@ import { DEFAULT_AI_MODEL } from '@shared/constants';
 import { runWithProjectStub } from '@worker/lib/project-fs';
 import { readDependencies } from '@worker/lib/protected-files';
 
-import { createServerTools } from './index';
+import { createAgentToolCatalog } from './index';
 import { createMockSendEvent } from './test-helpers';
 
 import type { FileChange, SendEventFunction, ToolExecutorContext } from '../types';
@@ -46,7 +46,7 @@ function createFakeFsStub(files: Record<string, string>): ToolExecutorContext['f
 		// eslint-disable-next-line unicorn/no-null -- the ProjectFilesystem RPC contract returns `null` for a missing file
 		wsReadFile: async (path: string): Promise<string | null> => (path in files ? files[path] : null),
 		// The no-loader fallback drains after each tool; this fake has no writes.
-		drainWorkspaceChanges: async () => Object.assign([], { [Symbol.dispose]: vi.fn() }),
+		claimAgentChanges: async () => Object.assign([], { [Symbol.dispose]: vi.fn() }),
 	};
 	return stub as unknown as ToolExecutorContext['fsStub'];
 }
@@ -74,7 +74,8 @@ describe('wrapTool project-fs binding', () => {
 
 	it('a dispatched tool re-binds the fs and reads real dependencies', async () => {
 		const context = createContext({ '/package.json': PACKAGE_JSON });
-		const tools = await createServerTools(noopSendEvent, context, [], 'code');
+		const catalog = await createAgentToolCatalog(noopSendEvent, context, [], 'code');
+		const tools = { ...catalog.nestedTools, ...catalog.directTools };
 
 		const dependenciesList = tools.dependencies_list as ExecutableTool;
 		expect(dependenciesList).toBeDefined();
@@ -83,8 +84,8 @@ describe('wrapTool project-fs binding', () => {
 		// sandbox dispatch. The fix re-binds fs from context.fsStub.
 		const output = await dependenciesList.execute({});
 
-		expect(output).toContain('react-confetti');
-		expect(output).toContain('6.4.1');
+		expect(JSON.stringify(output)).toContain('react-confetti');
+		expect(JSON.stringify(output)).toContain('6.4.1');
 	});
 
 	it('control: runWithProjectStub makes readDependencies work directly', async () => {
@@ -100,7 +101,8 @@ describe('wrapTool project-fs binding', () => {
 		const context = { ...createContext({}), fsStub };
 		const queryChanges: FileChange[] = [];
 		const sendEvent = createMockSendEvent();
-		const tools = await createServerTools(sendEvent, context, queryChanges, 'code');
+		const catalog = await createAgentToolCatalog(sendEvent, context, queryChanges, 'code');
+		const tools = { ...catalog.nestedTools, ...catalog.directTools };
 		const update = tools.dependencies_update;
 		if (!update?.execute) throw new Error('Missing dependency tool');
 		await update.execute({ action: 'add', name: 'is-number', version: '7.0.0' }, { toolCallId: 'add-dependency', messages: [] });

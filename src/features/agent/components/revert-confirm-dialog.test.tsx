@@ -12,7 +12,7 @@ function renderWithQueryClient(children: ReactNode) {
 }
 
 describe('RevertConfirmDialog', () => {
-	it('supports reverting session history with no snapshots', () => {
+	it('describes an empty file restoration', () => {
 		const onConfirm = vi.fn();
 		renderWithQueryClient(
 			<RevertConfirmDialog
@@ -26,7 +26,7 @@ describe('RevertConfirmDialog', () => {
 			/>,
 		);
 
-		expect(screen.getByText(/your files stay as they are/i)).toBeInTheDocument();
+		expect(screen.getByText('No file changes to restore.')).toBeInTheDocument();
 		fireEvent.click(screen.getByRole('button', { name: 'Revert' }));
 		expect(onConfirm).toHaveBeenCalledWith([], 2);
 	});

@@ -2,8 +2,9 @@ import { Bot, Code, Eye, FlaskConical, GitBranch } from 'lucide-react';
 import { motion } from 'motion/react';
 
 import { BorderBeam } from '@/components/ui/border-beam';
+import { useAgentRuntime } from '@/features/agent/components/agent-runtime-context';
 import { springSnappy } from '@/lib/motion-config';
-import { selectIsProcessing, useStore } from '@/lib/store';
+import { useStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 
 import type { MobilePanel } from '@/lib/store';
@@ -30,10 +31,14 @@ const TABS: Array<{ panel: MobilePanel; label: string; icon: typeof Code }> = [
 	{ panel: 'agent', label: 'Agent', icon: Bot },
 ];
 
-export function MobileTabBar() {
+export function ProjectMobileTabBar() {
+	const { agent } = useAgentRuntime();
+	return <MobileTabBar isProcessing={agent.state?.sessions.some((session) => session.isRunning) ?? false} />;
+}
+
+export function MobileTabBar({ isProcessing = false }: { isProcessing?: boolean }) {
 	const activeMobilePanel = useStore((state) => state.activeMobilePanel);
 	const handleTabPress = useMobileTabAction();
-	const isProcessing = useStore(selectIsProcessing);
 
 	return (
 		<nav

@@ -14,7 +14,7 @@ describe('sub_agent', () => {
 	it('delegates through the retained agent-tool API', async () => {
 		const sendEvent = createMockSendEvent();
 		const runAgentTool = vi.fn(async () => ({
-			runId: 'agent-tool:call-abc',
+			runId: 'agent-tool:turn:call-abc',
 			agentType: 'SubAgentWorker',
 			status: 'completed' as const,
 			summary: 'Sub-agent result',
@@ -23,6 +23,7 @@ describe('sub_agent', () => {
 		const context = createMockContext({
 			indexArtifact,
 			sessionId: 'sess-1',
+			submissionId: 'turn',
 			toolCallId: 'call-abc',
 			userId: 'user-123',
 			organizationId: 'org-123',
@@ -39,7 +40,7 @@ describe('sub_agent', () => {
 		expect(runAgentTool).toHaveBeenCalledWith(
 			SubAgentWorker,
 			expect.objectContaining({
-				runId: 'agent-tool:call-abc',
+				runId: 'agent-tool:turn:call-abc',
 				parentToolCallId: 'call-abc',
 				input: expect.objectContaining({
 					prompt: 'Inspect the failing integration\n\nAdditional context:\nFocus on src/example.ts',
@@ -52,7 +53,7 @@ describe('sub_agent', () => {
 			}),
 		);
 		expect(result.output).toBe('Sub-agent result');
-		expect(result.metadata).toMatchObject({ runId: 'agent-tool:call-abc', artifactKey: expect.any(String) });
+		expect(result.metadata).toMatchObject({ runId: 'agent-tool:turn:call-abc', artifactKey: expect.any(String) });
 		expect(indexArtifact).toHaveBeenCalledOnce();
 		expect(sendEvent.calls.some(([type, payload]) => type === 'status' && payload.message === 'Delegating task to sub-agent...')).toBe(
 			true,
@@ -60,7 +61,7 @@ describe('sub_agent', () => {
 	}, 15_000);
 
 	it('surfaces a failed retained run as a tool error', async () => {
-		const context = createMockContext({ toolCallId: 'call-failed' });
+		const context = createMockContext({ submissionId: 'turn', toolCallId: 'call-failed' });
 		Object.defineProperty(context, 'agentReference', {
 			value: {
 				runAgentTool: vi.fn(async () => ({

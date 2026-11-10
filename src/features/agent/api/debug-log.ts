@@ -1,7 +1,7 @@
 import { createApiClient } from '../../../lib/api/create-client';
 import { throwApiError } from '../../../lib/api-error';
 
-export async function downloadDebugLog(projectId: string, logId: string, sessionId?: string): Promise<void> {
+export async function downloadDebugLog(projectId: string, logId: string, sessionId: string): Promise<void> {
 	const response = await createApiClient(projectId).agent['debug-log'].$get({ query: { id: logId, sessionId } });
 	if (!response.ok) {
 		await throwApiError(response, 'Failed to download debug log');

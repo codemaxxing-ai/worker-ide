@@ -8,7 +8,6 @@ import { cn } from '@/lib/utils';
 import { FileReference } from '../../file-reference';
 import { isRecord, isToolName } from '../helpers';
 import { CommandOutput } from './command-output';
-import { InlineSubAgentActivity } from './sub-agent-activity';
 import { ToolIcon } from './tool-icon';
 import {
 	getToolResultContent,
@@ -24,11 +23,10 @@ import {
 } from './tool-result-format';
 import { InlineCodeSection, InlineDiffView, InlineDiagnosticsList, InlineTodoList, InlineKeyValueState } from './tool-views';
 
-import type { SubAgentActivityRecord } from '@shared/agent-state';
 import type { ToolCallPart, ToolErrorInfo, ToolMetadataInfo, ToolResultPart } from '@shared/types';
 import type { ToolName } from '@shared/validation';
 
-const CONTENT_STREAMING_TOOLS = new Set<string>(['codemode', 'bash', 'exec']);
+const CONTENT_STREAMING_TOOLS = new Set<string>(['codemode', 'exec']);
 
 function readAttachment(content?: string) {
 	if (!content) return;
@@ -52,8 +50,7 @@ export function InlineToolCall({
 	toolErrors,
 	toolMetadata,
 	fileDiffContent,
-	subAgentActivities,
-	projectId,
+	instanceId,
 	isStreaming,
 	isExpanded,
 	onToggleExpand,
@@ -63,8 +60,7 @@ export function InlineToolCall({
 	toolErrors?: Map<string, ToolErrorInfo>;
 	toolMetadata?: Map<string, ToolMetadataInfo>;
 	fileDiffContent?: Map<string, { beforeContent: string; afterContent: string }>;
-	subAgentActivities?: Record<string, SubAgentActivityRecord>;
-	projectId?: string;
+	instanceId?: string;
 	isStreaming?: boolean;
 	isExpanded: boolean;
 	onToggleExpand: () => void;
@@ -86,22 +82,15 @@ export function InlineToolCall({
 	const structuredMetadata = toolMetadata?.get(toolCall.toolCallId);
 	const metadata = structuredMetadata?.metadata;
 
-	// Dynamic MCP and extension tools can return results without a static UI schema.
+	// Dynamic MCP tools can return results without a static UI schema.
 	const structuredError = toolErrors?.get(toolCall.toolCallId);
 	const isError =
 		structuredError !== undefined || isToolError(toolResult) || (typeof metadata?.error === 'string' && metadata.error.length > 0);
 
 	// Extract file paths from tool arguments.
-	// Accept `file_path` (schema-defined), `path` (legacy/search tools), and `filePath` (model sometimes hallucinates this key).
+	// Domain tools use file_path; Computer tools use path.
 	const input = toolCall.arguments;
-	const singlePath =
-		typeof input.file_path === 'string'
-			? input.file_path
-			: typeof input.path === 'string'
-				? input.path
-				: typeof input.filePath === 'string'
-					? input.filePath
-					: undefined;
+	const singlePath = typeof input.file_path === 'string' ? input.file_path : typeof input.path === 'string' ? input.path : undefined;
 	let fromPath: string | undefined;
 	let toPath: string | undefined;
 	let pattern: string | undefined;
@@ -123,7 +112,7 @@ export function InlineToolCall({
 		extraLabel = input.prompt;
 	}
 
-	// Streaming content preview for code/command tools (codemode, bash)
+	// Streaming content preview for code/command tools (codemode, exec)
 	const streamingContent =
 		isExecuting && CONTENT_STREAMING_TOOLS.has(toolCall.toolName)
 			? typeof input.code === 'string'
@@ -211,7 +200,7 @@ export function InlineToolCall({
 						: undefined
 				}
 				role={expandable ? 'button' : undefined}
-				id={`tool-call-${toolCall.toolCallId}`}
+				id={`tool-call-${instanceId ?? toolCall.toolCallId}`}
 				aria-expanded={expandable ? isExpanded : undefined}
 				tabIndex={expandable ? 0 : undefined}
 				className={cn(
@@ -345,7 +334,6 @@ export function InlineToolCall({
 			{isExpanded &&
 				hasDetailContent &&
 				codemodeCode === undefined &&
-				knownToolName !== 'sub_agent' &&
 				(hasDiffContent ? (
 					<InlineDiffView beforeContent={diffContent.beforeContent} afterContent={diffContent.afterContent} />
 				) : (
@@ -376,16 +364,7 @@ export function InlineToolCall({
 						{attachment.name}
 					</a>
 				))}
-			{knownToolName === 'sub_agent' && (
-				<InlineSubAgentActivity
-					toolCallId={toolCall.toolCallId}
-					subAgentActivities={subAgentActivities}
-					metadata={metadata}
-					rawResultContent={rawResultContent}
-					projectId={projectId}
-					isExpanded={isExpanded}
-				/>
-			)}
+
 			{todos && todos.length > 0 && <InlineTodoList todos={todos} />}
 			{assetSettingsEntries && <InlineKeyValueState title="Asset settings" entries={assetSettingsEntries} />}
 			{bindingsEntries && <InlineKeyValueState title="Bindings" entries={bindingsEntries} />}

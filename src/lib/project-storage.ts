@@ -43,8 +43,6 @@ export interface ProjectUIState {
 
 export interface ProjectStorageData {
 	editorSession?: EditorSessionParsed;
-	activeSessionId?: string;
-	agentDraft?: Record<string, unknown>;
 	ui?: Record<string, unknown>;
 }
 
@@ -86,16 +84,6 @@ function loadProjectStorage(projectId: string): ProjectStorageData {
 		}
 	}
 
-	// Active AI session ID
-	if (typeof raw.activeSessionId === 'string' && raw.activeSessionId.length > 0) {
-		data.activeSessionId = raw.activeSessionId;
-	}
-
-	// Agent draft — defer validation to the caller's own normalizer
-	if (isRecord(raw.agentDraft)) {
-		data.agentDraft = raw.agentDraft;
-	}
-
 	// UI overrides (partial — only non-default values are stored)
 	if (isRecord(raw.ui)) {
 		data.ui = raw.ui;
@@ -111,8 +99,6 @@ function writeProjectStorage(projectId: string, data: ProjectStorageData): void 
 		// Strip empty/default fields to keep the payload small
 		const cleaned: Record<string, unknown> = {};
 		if (data.editorSession) cleaned.editorSession = data.editorSession;
-		if (data.activeSessionId) cleaned.activeSessionId = data.activeSessionId;
-		if (data.agentDraft) cleaned.agentDraft = data.agentDraft;
 		if (data.ui && Object.keys(data.ui).length > 0) cleaned.ui = data.ui;
 
 		if (Object.keys(cleaned).length === 0) {
@@ -150,45 +136,48 @@ export function saveEditorSession(projectId: string, session: EditorSessionParse
 // Active AI session ID
 
 export function getActiveSessionId(projectId: string): string | undefined {
-	return loadProjectStorage(projectId).activeSessionId;
+	try {
+		return sessionStorage.getItem(`think-session:${projectId}`) || undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 export function setActiveSessionId(projectId: string, sessionId: string | undefined): void {
-	updateProjectStorage(projectId, (current) => {
-		const next = { ...current };
-		if (sessionId) {
-			next.activeSessionId = sessionId;
-		} else {
-			delete next.activeSessionId;
-		}
-		return next;
-	});
+	try {
+		if (sessionId) sessionStorage.setItem(`think-session:${projectId}`, sessionId);
+		else sessionStorage.removeItem(`think-session:${projectId}`);
+	} catch {
+		/* Storage may be unavailable. */
+	}
 }
 
-// Agent draft
-
 export function loadAgentDraft(projectId: string): Record<string, unknown> | undefined {
-	return loadProjectStorage(projectId).agentDraft;
+	try {
+		const raw = sessionStorage.getItem(`think-draft:${projectId}`);
+		if (!raw) return;
+		const value: unknown = JSON.parse(raw);
+		return isRecord(value) ? value : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 export function saveAgentDraft(projectId: string, draft: { segments: unknown[]; cursorPosition: number }): void {
-	updateProjectStorage(projectId, (current) => {
-		const next = { ...current };
-		if (draft.segments.length === 0 && draft.cursorPosition === 0) {
-			delete next.agentDraft;
-		} else {
-			next.agentDraft = { ...draft };
-		}
-		return next;
-	});
+	try {
+		if (draft.segments.length === 0 && draft.cursorPosition === 0) sessionStorage.removeItem(`think-draft:${projectId}`);
+		else sessionStorage.setItem(`think-draft:${projectId}`, JSON.stringify(draft));
+	} catch {
+		/* Storage may be unavailable. */
+	}
 }
 
 export function clearAgentDraft(projectId: string): void {
-	updateProjectStorage(projectId, (current) => {
-		const next = { ...current };
-		delete next.agentDraft;
-		return next;
-	});
+	try {
+		sessionStorage.removeItem(`think-draft:${projectId}`);
+	} catch {
+		/* Storage may be unavailable. */
+	}
 }
 
 // UI state (only stores overrides that differ from defaults)

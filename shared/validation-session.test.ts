@@ -4,7 +4,7 @@ import { sessionIdSchema } from './validation';
 
 describe('sessionIdSchema', () => {
 	it('accepts valid lowercase alphanumeric IDs', () => {
-		expect(sessionIdSchema.safeParse('abc123').success).toBe(true);
+		expect(sessionIdSchema.safeParse('11111111-1111-4111-8111-111111111111').success).toBe(true);
 	});
 
 	it('rejects paths with "../"', () => {

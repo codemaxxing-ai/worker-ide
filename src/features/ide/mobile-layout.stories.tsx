@@ -3,7 +3,6 @@ import { Suspense } from 'react';
 import { expect, fn, userEvent, within } from 'storybook/test';
 
 import { AgentRuntimeContext } from '@/features/agent/components/agent-runtime-context';
-import { createUnavailableAgentRunnerStub } from '@/features/agent/lib/agent-stub';
 
 import { MobileLayout } from './mobile-layout';
 
@@ -70,16 +69,15 @@ const mockAgentRuntimeValue = {
 	agent: {
 		identified: true,
 		state: {
-			currentSession: undefined,
+			ready: true,
 			sessions: [],
-			sessionParticipants: {},
 			reviewEntries: {},
 			reviewSummary: { unresolvedCount: 0, reviewVersion: 0, sessionCounts: {} },
 		},
 		addEventListener: fn(),
 		removeEventListener: fn(),
-		stub: createUnavailableAgentRunnerStub(),
 	},
+	selectSession: fn(),
 	agentConnectionState: 'connected',
 	isConnected: true,
 	segments: [],

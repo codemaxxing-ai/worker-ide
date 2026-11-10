@@ -117,6 +117,11 @@
 			"new_sqlite_classes": ["OrganizationContainerCapacity"],
 			"tag": "v10",
 		},
+		{
+			"new_sqlite_classes": ["ProjectAgent"],
+			"deleted_classes": ["AgentRunner"],
+			"tag": "v11-think-sessions",
+		},
 	],
 	"r2_buckets": [
 		{
